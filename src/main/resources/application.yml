@@ -1,0 +1,139 @@
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+management:
+  server:
+    port: ${ADMIN_PORT:8081}
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,info
+      base-path: /admin
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+
+spring:
+  application:
+    name: drools-rule-engine
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  
+  # Redis Configuration (Optional)
+  data:
+    redis:
+      url: ${REDIS_URL:redis://localhost:6379}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 10
+          max-idle: 5
+          min-idle: 1
+
+# Drools Configuration
+drools:
+  rule-source: ${RULE_SOURCE:local}
+  s3:
+    bucket-name: ${RULE_BUCKET_NAME:local-rules}
+    region: ${AWS_REGION:us-east-1}
+    endpoint: ${AWS_ENDPOINT:}  # For LocalStack
+  cache:
+    lru-max-size: ${LRU_CACHE_MAX_SIZE:100}
+    execution-timeout-seconds: ${RULE_EXECUTION_TIMEOUT_SECONDS:30}
+  refresh:
+    auto-enabled: ${AUTO_REFRESH_ENABLED:false}
+    interval-minutes: ${AUTO_REFRESH_INTERVAL_MINUTES:5}
+
+# Redis Configuration
+redis:
+  enabled: ${REDIS_ENABLED:false}
+  ttl-minutes: ${REDIS_TTL_MINUTES:60}
+
+# AWS Configuration
+aws:
+  region: ${AWS_REGION:us-east-1}
+  endpoint: ${AWS_ENDPOINT:}  # For LocalStack
+  access-key-id: ${AWS_ACCESS_KEY_ID:}
+  secret-access-key: ${AWS_SECRET_ACCESS_KEY:}
+
+# Logging Configuration
+logging:
+  level:
+    root: INFO
+    com.company.drools: ${LOG_LEVEL:INFO}
+    org.drools: WARN
+    org.kie: WARN
+  pattern:
+    console: '%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n'
+    file: '{"timestamp":"%d{ISO8601}","level":"%level","logger":"%logger","message":"%message","thread":"%thread"}%n'
+
+# Metrics Configuration
+management.metrics:
+  export:
+    cloudwatch:
+      namespace: DroolsEngine
+      enabled: ${CLOUDWATCH_METRICS_ENABLED:false}
+  tags:
+    application: ${spring.application.name}
+    environment: ${SPRING_PROFILES_ACTIVE:local}
+
+---
+# Local Development Profile
+spring:
+  config:
+    activate:
+      on-profile: local
+      
+drools:
+  rule-source: local
+  
+redis:
+  enabled: false
+  
+logging:
+  level:
+    com.company.drools: DEBUG
+
+---
+# Development Profile (with LocalStack)
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+drools:
+  rule-source: s3
+  s3:
+    endpoint: http://localhost:4566
+
+aws:
+  endpoint: http://localhost:4566
+  access-key-id: test
+  secret-access-key: test
+
+redis:
+  enabled: true
+
+---
+# Production Profile
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+drools:
+  rule-source: s3
+  refresh:
+    auto-enabled: true
+
+redis:
+  enabled: true
+
+management.metrics.export.cloudwatch.enabled: true
+
+logging:
+  level:
+    com.company.drools: INFO
+    root: WARN
