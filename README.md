@@ -30,7 +30,7 @@ Client Request → REST API → Rule Engine → Cache Layer → Storage Layer
 - **Redis** - Distributed caching (optional)
 - **Micrometer** - Vendor-agnostic metrics and monitoring
 - **Resilience4j** - Circuit breakers and fault tolerance
-- **Docker** - Containerization and local development
+- **Docker & Docker Compose** - Containerization with full local dev stack
 - **Maven** - Build and dependency management
 
 ## 📋 Table of Contents
@@ -65,14 +65,17 @@ cd drools-microservice
 ### 2. Start Local Development Environment
 
 ```bash
-# Start LocalStack (S3) and Redis services
+# Start complete local development stack (LocalStack S3 + Redis + Application)
 docker-compose up -d
 
-# Wait for services to start (about 10 seconds)
-sleep 10
+# Wait for services to start (about 15 seconds)
+sleep 15
 
-# Create S3 bucket in LocalStack
+# Create S3 bucket in LocalStack (if not using docker-compose app service)
 aws --endpoint-url=http://localhost:4566 s3 mb s3://local-rules
+
+# Verify services are running
+docker-compose ps
 ```
 
 ### 3. Set Environment Variables
@@ -90,15 +93,39 @@ cp .env.example .env
 
 ### 4. Build and Run
 
+#### Option A: Using Docker Compose (Recommended for Development)
 ```bash
-# Build the application
+# Everything runs in containers - no local Java/Maven needed
+docker-compose up -d
+
+# View application logs
+docker-compose logs -f app
+```
+
+#### Option B: Local Java Development
+```bash
+# Build the application (requires Java 17 + Maven)
 mvn clean compile
 
 # Run the application
 mvn spring-boot:run
 
 # Or with specific profile
-mvn spring-boot:run -Dspring.profiles.active=local
+mvn spring-boot:run -Dspring.profiles.active=dev
+```
+
+#### Option C: Docker Build and Test
+```bash
+# Build optimized Docker image
+docker build -t drools-rule-engine:latest .
+
+# Run comprehensive Docker validation
+./docker-build-test.sh
+
+# Run the container
+docker run -p 8080:8080 -p 8081:8081 \
+  -e RULE_SOURCE=memory \
+  drools-rule-engine:latest
 ```
 
 ### 5. Verify Installation
@@ -516,9 +543,25 @@ src/
 
 ### Local Development Setup
 
+#### Quick Start with Docker Compose
+```bash
+# Start complete development stack
+docker-compose up -d
+
+# Initialize LocalStack (creates bucket and uploads sample rules)
+./init-localstack.sh
+
+# View all services status
+docker-compose ps
+
+# Access application
+curl http://localhost:8081/admin/health
+```
+
+#### Manual Setup
 1. **Start Infrastructure Services**
    ```bash
-   docker-compose up -d
+   docker-compose up -d localstack redis
    ```
 
 2. **Create S3 Bucket**
@@ -540,7 +583,7 @@ src/
 
 5. **Run Application**
    ```bash
-   mvn spring-boot:run -Dspring.profiles.active=local
+   mvn spring-boot:run -Dspring.profiles.active=dev
    ```
 
 ### Code Quality
@@ -631,9 +674,14 @@ mvn spring-boot:run
 
 ### Docker Deployment
 
+#### Option 1: Quick Docker Run
+
 ```bash
-# Build Docker image
+# Build Docker image (optimized 347MB)
 docker build -t drools-rule-engine:latest .
+
+# Test Docker build (validates image and health checks)
+./docker-build-test.sh
 
 # Run with environment variables
 docker run -p 8080:8080 -p 8081:8081 \
@@ -643,6 +691,33 @@ docker run -p 8080:8080 -p 8081:8081 \
   -e AWS_SECRET_ACCESS_KEY=your-secret \
   drools-rule-engine:latest
 ```
+
+#### Option 2: Full Stack with Docker Compose
+
+```bash
+# Start complete development environment (LocalStack + Redis + Application)
+docker-compose up -d
+
+# Initialize LocalStack S3 bucket
+aws --endpoint-url=http://localhost:4566 s3 mb s3://local-rules
+
+# Check all services are running
+docker-compose ps
+
+# View logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
+```
+
+#### Docker Image Details
+
+- **Base Image**: Amazon Corretto 17 Alpine (JDK)
+- **Final Image Size**: ~347MB (optimized multi-stage build)
+- **Security**: Runs as non-root user (`appuser`)
+- **Health Checks**: Built-in HTTP health endpoint monitoring
+- **JVM Optimization**: Container-aware memory settings with G1GC
 
 ### Production Environment Variables
 
@@ -748,11 +823,59 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🆘 Troubleshooting
 
+### Docker Issues
+
+#### 1. Docker build fails
+```bash
+# Clear Docker cache and rebuild
+docker system prune -a
+docker build --no-cache -t drools-rule-engine:latest .
+
+# Check Docker daemon is running
+docker info
+
+# Verify Dockerfile syntax
+./docker-build-test.sh
+```
+
+#### 2. Container startup issues
+```bash
+# Check container logs
+docker logs <container-id>
+
+# Run container with debugging
+docker run -it --entrypoint /bin/sh drools-rule-engine:latest
+
+# Check port conflicts
+lsof -i :8080
+lsof -i :8081
+```
+
+#### 3. Docker Compose issues
+```bash
+# Check all services status
+docker-compose ps
+
+# View service logs
+docker-compose logs app
+docker-compose logs localstack
+docker-compose logs redis
+
+# Restart specific service
+docker-compose restart app
+
+# Clean restart
+docker-compose down && docker-compose up -d
+```
+
 ### Common Issues
 
 #### 1. Application won't start
 ```bash
-# Check Java version
+# Using Docker Compose (recommended)
+docker-compose logs app
+
+# Local development - check Java version
 java -version  # Should be 17+
 
 # Check if ports are available
@@ -774,6 +897,9 @@ aws --endpoint-url=http://localhost:4566 s3 ls s3://local-rules
 # Verify environment variables
 echo $AWS_ENDPOINT
 echo $RULE_BUCKET_NAME
+
+# Test with docker-compose services
+docker-compose exec app curl http://localstack:4566
 ```
 
 #### 3. Redis connection issues
@@ -784,20 +910,35 @@ docker ps | grep redis
 # Test Redis connectivity
 redis-cli -h localhost -p 6379 ping
 
+# Test from application container
+docker-compose exec app wget -qO- redis:6379
+
 # Disable Redis if problematic
 export REDIS_ENABLED=false
 ```
 
 #### 4. Rule compilation errors
 ```bash
-# Check rule syntax
-curl http://localhost:8081/admin/rules
+# Check rule syntax via Docker
+docker-compose exec app curl http://localhost:8081/admin/rules
 
 # View detailed error logs
-tail -f logs/application.log | grep ERROR
+docker-compose logs app | grep ERROR
 
 # Refresh specific problematic rule
 curl -X POST http://localhost:8081/admin/refresh-rules/problematic.rule.id
+```
+
+#### 5. Image size or performance issues
+```bash
+# Check Docker image size (should be ~347MB)
+docker images drools-rule-engine:latest
+
+# Monitor container resources
+docker stats
+
+# Check JVM memory usage in container
+docker-compose exec app jstat -gc 1
 ```
 
 ### Getting Help

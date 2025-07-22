@@ -244,19 +244,6 @@ drools:
       wait-duration-in-open-state: 60000
       sliding-window-size: 100
       minimum-number-of-calls: 10
-
-redis:
-  enabled: true
-
-aws:
-  s3:
-    connection-pool:
-      max-connections: 100
-      max-idle-time: 120
-      connection-timeout: 5
-      socket-timeout: 30
-
-drools:
   thread-pool:
     rule-execution:
       core-size: 20
@@ -268,6 +255,17 @@ drools:
       max-size: 50
       queue-capacity: 100
       keep-alive: 300
+
+redis:
+  enabled: true
+
+aws:
+  s3:
+    connection-pool:
+      max-connections: 100
+      max-idle-time: 120
+      connection-timeout: 5
+      socket-timeout: 30
 
 management.metrics.export.cloudwatch.enabled: true
 
