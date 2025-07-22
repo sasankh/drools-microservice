@@ -8,7 +8,9 @@ A high-performance business rule execution microservice built with Spring Boot a
 - **Scalable Storage**: AWS S3 backend with hierarchical rule organization
 - **Multi-tier Caching**: Local LRU + Redis distributed caching for optimal performance
 - **Rule Management**: REST APIs for hot-reloading and monitoring rules
-- **Production Ready**: Health checks, metrics, and monitoring capabilities
+- **Production Ready**: Health checks, metrics, monitoring, and comprehensive security
+- **Security Hardened**: Input validation, rate limiting, CORS, and sensitive data protection
+- **Performance Optimized**: Connection pooling, thread pools, circuit breakers, and JVM tuning
 - **Development Friendly**: LocalStack integration for offline S3 testing
 
 ## 🏗️ Architecture
@@ -22,10 +24,12 @@ Client Request → REST API → Rule Engine → Cache Layer → Storage Layer
 ### Tech Stack
 
 - **Java 17** - Runtime platform
-- **Spring Boot 3.2.5** - Application framework
+- **Spring Boot 3.2.5** - Application framework with security and validation
 - **Drools 8.44.0.Final** - Business rules engine
 - **AWS S3** - Rule storage (with LocalStack for development)
 - **Redis** - Distributed caching (optional)
+- **Micrometer** - Vendor-agnostic metrics and monitoring
+- **Resilience4j** - Circuit breakers and fault tolerance
 - **Docker** - Containerization and local development
 - **Maven** - Build and dependency management
 
@@ -207,6 +211,27 @@ The application supports multiple configuration methods (in priority order):
 | `LRU_CACHE_MAX_SIZE` | Local LRU cache size | `100` |
 | `RULE_EXECUTION_TIMEOUT_SECONDS` | Rule execution timeout | `30` |
 | `LOG_LEVEL` | Application log level | `INFO` |
+
+### Security Configuration Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DROOLS_VALIDATION_RULE_ID_MAX_LENGTH` | Maximum rule ID length | `255` |
+| `DROOLS_VALIDATION_DATA_MAX_FIELDS` | Maximum data fields per request | `100` |
+| `DROOLS_VALIDATION_DATA_MAX_STRING_LENGTH` | Maximum string field length | `10000` |
+| `DROOLS_CORS_ALLOWED_ORIGINS` | CORS allowed origins | `*` |
+| `DROOLS_RATE_LIMITING_ENABLED` | Enable rate limiting | `true` |
+| `DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE` | Rate limit per minute | `1000` |
+| `MAX_HTTP_REQUEST_SIZE` | Maximum HTTP request size | `10MB` |
+
+### Performance Configuration Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DROOLS_THREAD_POOL_MAX_SIZE` | Rule execution thread pool size | `50` |
+| `AWS_S3_MAX_CONNECTIONS` | S3 connection pool size | `50` |
+| `DROOLS_CB_S3_FAILURE_RATE` | S3 circuit breaker failure threshold | `50` |
+| `DROOLS_HTTP_CONNECTION_TIMEOUT` | HTTP connection timeout (seconds) | `10` |
 
 ### Storage Backend Configuration
 
@@ -416,11 +441,22 @@ end
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/execute-rule` | Execute a business rule |
-| `GET` | `/admin/health` | Application health check |
+| `GET` | `/admin/health` | Application health check with component status |
 | `GET` | `/admin/info` | System information |
-| `GET` | `/admin/rules` | List all loaded rules |
+| `GET` | `/admin/rules` | List all loaded rules with metadata |
+| `GET` | `/admin/thread-pools` | Thread pool statistics |
 | `POST` | `/admin/refresh-rules` | Refresh all rules from storage |
 | `POST` | `/admin/refresh-rules/{ruleId}` | Refresh specific rule |
+
+### Security Features
+
+The API includes comprehensive security features:
+
+- **Input Validation**: All requests are validated for proper format, size limits, and security patterns
+- **Rate Limiting**: Configurable per-client rate limits with standard HTTP headers
+- **CORS Protection**: Configurable cross-origin request policies
+- **Request Size Limits**: Multi-layer protection against large payloads
+- **Log Sanitization**: Automatic removal of sensitive data from logs
 
 ### Error Responses
 
@@ -440,6 +476,11 @@ Common error codes:
 - `RULE_COMPILATION_ERROR`: Rule compilation failed
 - `STORAGE_ERROR`: Storage backend unavailable
 - `CACHE_ERROR`: Cache operation failed
+- `INVALID_INPUT`: Request validation failed
+- `REQUEST_TOO_LARGE`: Request size exceeds limits
+- `RATE_LIMIT_EXCEEDED`: Too many requests from client
+- `TIMEOUT_ERROR`: Operation exceeded timeout
+- `SERVICE_UNAVAILABLE`: External service temporarily unavailable
 
 ## 🔬 Development
 
@@ -451,7 +492,9 @@ src/
 │   ├── api/                    # REST controllers and DTOs
 │   │   ├── controller/         # REST endpoints
 │   │   ├── dto/               # Data transfer objects
-│   │   └── exception/         # Exception handlers
+│   │   ├── exception/         # Exception handlers
+│   │   ├── validation/        # Custom validation annotations
+│   │   └── filter/            # Security and request filters
 │   ├── core/                  # Business logic
 │   │   ├── engine/           # Drools engine integration
 │   │   └── model/            # Domain models
@@ -463,6 +506,8 @@ src/
 │   │   ├── RuleCache.java    # Cache interface
 │   │   ├── LocalLRUCache.java # LRU cache
 │   │   └── RedisRuleCache.java # Redis cache
+│   ├── common/               # Shared utilities
+│   │   └── LogSanitizer.java # Log sanitization
 │   └── config/               # Spring configuration
 └── main/resources/
     ├── application.yml       # Configuration
@@ -614,7 +659,14 @@ export LRU_CACHE_MAX_SIZE=500
 
 # Performance
 export RULE_EXECUTION_TIMEOUT_SECONDS=10
-export JAVA_OPTS="-Xmx2g -Xms1g"
+export DROOLS_THREAD_POOL_MAX_SIZE=100
+export AWS_S3_MAX_CONNECTIONS=100
+export JAVA_OPTS="-Xmx2g -Xms1g -XX:+UseG1GC"
+
+# Security
+export DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE=5000
+export DROOLS_VALIDATION_DATA_MAX_FIELDS=500
+export MAX_HTTP_REQUEST_SIZE=50MB
 
 # Monitoring
 export LOG_LEVEL=WARN
@@ -639,13 +691,19 @@ Configure your load balancer to use:
 ### Metrics Endpoints
 
 ```bash
-# Application health
+# Application health with component status
 curl http://localhost:8081/admin/health
 
-# Cache statistics
-curl http://localhost:8081/admin/health | jq '.cache.statistics'
+# Thread pool statistics
+curl http://localhost:8081/admin/thread-pools
 
-# Rule performance
+# Cache statistics
+curl http://localhost:8081/admin/health | jq '.components.cache.details'
+
+# Circuit breaker status
+curl http://localhost:8081/admin/health | jq '.components."circuit-breakers"'
+
+# Rule performance metrics
 curl http://localhost:8081/admin/rules | jq '.rules[].avg_execution_time_ms'
 ```
 
@@ -662,6 +720,9 @@ Monitor these metrics:
 - High error rate (> 1%)
 - High latency (P99 > 200ms)
 - Low cache hit ratio (< 80%)
+- Circuit breakers open/half-open
+- Thread pool exhaustion
+- Rate limiting violations
 - Storage connectivity issues
 - Memory usage (> 80%)
 

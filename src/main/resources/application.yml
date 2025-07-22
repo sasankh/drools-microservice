@@ -1,6 +1,12 @@
 server:
   port: ${SERVER_PORT:8080}
   shutdown: graceful
+  # Request size limits for security
+  max-http-request-size: ${MAX_HTTP_REQUEST_SIZE:10MB}
+  max-http-post-size: ${MAX_HTTP_POST_SIZE:10MB}
+  tomcat:
+    max-http-post-size: ${MAX_HTTP_POST_SIZE:10MB}
+    max-swallow-size: ${MAX_SWALLOW_SIZE:2MB}
 
 management:
   server:
@@ -20,6 +26,11 @@ spring:
     name: drools-rule-engine
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:local}
+  # Additional request size limits
+  servlet:
+    multipart:
+      max-file-size: ${MAX_FILE_SIZE:5MB}
+      max-request-size: ${MAX_REQUEST_SIZE:10MB}
   
   # Redis Configuration (Optional)
   data:
@@ -78,6 +89,27 @@ drools:
       max-size: ${DROOLS_STORAGE_THREAD_POOL_MAX_SIZE:20}
       queue-capacity: ${DROOLS_STORAGE_THREAD_POOL_QUEUE_CAPACITY:50}
       keep-alive: ${DROOLS_STORAGE_THREAD_POOL_KEEP_ALIVE:60}
+  validation:
+    rule-id:
+      max-length: ${DROOLS_VALIDATION_RULE_ID_MAX_LENGTH:255}
+    data:
+      max-fields: ${DROOLS_VALIDATION_DATA_MAX_FIELDS:100}
+      max-string-length: ${DROOLS_VALIDATION_DATA_MAX_STRING_LENGTH:10000}
+      max-number-value: ${DROOLS_VALIDATION_DATA_MAX_NUMBER_VALUE:1000000000}
+    request:
+      max-size-bytes: ${DROOLS_VALIDATION_REQUEST_MAX_SIZE_BYTES:1048576}
+  cors:
+    allowed-origins: ${DROOLS_CORS_ALLOWED_ORIGINS:*}
+    allowed-methods: ${DROOLS_CORS_ALLOWED_METHODS:GET,POST,PUT,DELETE,OPTIONS}
+    allowed-headers: ${DROOLS_CORS_ALLOWED_HEADERS:*}
+    allow-credentials: ${DROOLS_CORS_ALLOW_CREDENTIALS:false}
+    max-age: ${DROOLS_CORS_MAX_AGE:3600}
+  rate-limiting:
+    enabled: ${DROOLS_RATE_LIMITING_ENABLED:true}
+    requests-per-minute: ${DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE:1000}
+    requests-per-hour: ${DROOLS_RATE_LIMITING_REQUESTS_PER_HOUR:10000}
+    burst-size: ${DROOLS_RATE_LIMITING_BURST_SIZE:100}
+    cleanup-interval-minutes: ${DROOLS_RATE_LIMITING_CLEANUP_INTERVAL:5}
 
 # Redis Configuration
 redis:

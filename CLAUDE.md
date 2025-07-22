@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Drools Rule Engine Microservice designed for high-performance business rule execution (100-1000 RPS). Rules are stored in AWS S3 and executed via REST API.
 
-**Tech Stack**: Java 17, Spring Boot 3.x, Drools 8.44.0.Final, AWS S3, Redis (optional), Docker, AWS ECS
+**Tech Stack**: Java 17, Spring Boot 3.x, Drools 8.44.0.Final, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker, AWS ECS
 
 ## Common Commands
 
@@ -63,10 +63,16 @@ mvn compile spotbugs:check
 ### Package Structure
 ```
 com.company.drools/
-├── api/               # REST endpoints and DTOs
+├── api/               # REST endpoints, DTOs, validation, filters
+│   ├── controller/    # REST endpoints
+│   ├── dto/          # Data transfer objects
+│   ├── exception/    # Exception handlers
+│   ├── validation/   # Custom validation annotations
+│   └── filter/       # Security and request filters
 ├── core/              # Business logic and rule engine
 ├── storage/           # S3 and file storage implementations  
 ├── cache/             # LRU and Redis caching
+├── common/            # Shared utilities (log sanitization)
 └── config/            # Spring configuration classes
 ```
 
@@ -86,6 +92,24 @@ com.company.drools/
 
 5. **Rule ID Transformation**: `pricing.discount.black-friday` → `pricing/discount/black-friday.drl`
 
+6. **Security Architecture**: 
+   - Multi-layer input validation with custom annotations
+   - Rate limiting with configurable per-client limits
+   - Request size protection and CORS configuration
+   - Log sanitization to prevent sensitive data exposure
+
+7. **Performance Architecture**:
+   - Connection pooling for S3 and HTTP clients
+   - Custom thread pools for rule execution and storage operations
+   - Circuit breakers for external service fault tolerance
+   - Request timeout handling and monitoring
+
+8. **Monitoring Architecture**:
+   - Vendor-agnostic metrics with Micrometer
+   - Structured JSON logging with correlation IDs
+   - Component health checks (Drools, S3, Redis, Circuit Breakers)
+   - Thread pool and performance monitoring endpoints
+
 ## Environment Variables
 
 Critical environment variables for local development:
@@ -102,11 +126,23 @@ REDIS_URL=redis://localhost:6379
 # Performance
 LRU_CACHE_MAX_SIZE=100
 RULE_EXECUTION_TIMEOUT_SECONDS=30
+DROOLS_THREAD_POOL_MAX_SIZE=50
+AWS_S3_MAX_CONNECTIONS=50
+
+# Security
+DROOLS_VALIDATION_DATA_MAX_FIELDS=100
+DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE=1000
+DROOLS_CORS_ALLOWED_ORIGINS=*
+MAX_HTTP_REQUEST_SIZE=10MB
+
+# Monitoring
+DROOLS_CB_S3_FAILURE_RATE=50
+DROOLS_HTTP_CONNECTION_TIMEOUT=10
 ```
 
 ## Development Workflow
 
-1. **Current Status**: Phase 2 Complete! Ready for Phase 3 (Production Readiness). See `project.progress.md` for details.
+1. **Current Status**: Phase 3 Complete! Production-ready with comprehensive security, performance, and monitoring. Ready for Phase 4 (Testing & Documentation). See `project.progress.md` for details.
 
 2. **LocalStack Setup**: Required for S3 testing locally
    ```bash
@@ -132,11 +168,11 @@ RULE_EXECUTION_TIMEOUT_SECONDS=30
 Check `project.progress.md` for current status. Project follows these phases:
 1. ✅ Core Infrastructure (Spring Boot + Drools setup) - COMPLETED
 2. ✅ Storage & Caching (S3 + Redis) - COMPLETED  
-3. 🔄 Production Readiness (Monitoring, metrics) - IN PROGRESS
-4. ⬜ Testing & Documentation - PENDING
+3. ✅ Production Readiness (Security, Performance, Monitoring) - COMPLETED
+4. 🔄 Testing & Documentation - IN PROGRESS
 5. ⬜ Deployment & Infrastructure - PENDING
 
-**Current Focus**: Phase 3.1 - Health & Monitoring (5 tasks)
+**Current Focus**: Phase 4.1 - Unit Tests (7 tasks)
 
 ## Performance Targets
 
@@ -153,27 +189,34 @@ Check `project.progress.md` for current status. Project follows these phases:
 
 ## Important Project Files
 
-- `project.checklist.md`: Detailed task breakdown (114 tasks total, 52 completed)
-- `project.progress.md`: Track implementation progress (Phase 2 complete)
+- `project.checklist.md`: Detailed task breakdown (114 tasks total, 74 completed)
+- `project.progress.md`: Track implementation progress (Phase 3 complete)
 - `project.documentation.md`: Comprehensive project specifications
 - `project.prompt.md`: Original implementation requirements
 - `snap-memory/`: Session memory files documenting implementation progress
 
-## Recent Completions (Phase 2)
+## Recent Completions (Phase 3 - Production Readiness)
 
-### Storage & Caching Architecture
-- **RuleStorage Interface**: Abstract storage layer with S3, LocalFile, InMemory implementations
-- **S3Integration**: AWS SDK v2 with LocalStack for development, retry policies
-- **Multi-tier Caching**: Local LRU → Redis → S3 with statistics tracking
-- **Admin Endpoints**: Complete rule management API on port 8081
+### Security Hardening (Phase 3.4)
+- **Input Validation Framework**: Custom Spring Boot validation annotations with environment-configurable limits
+- **Rate Limiting System**: In-memory rate limiting with per-client tracking and HTTP headers
+- **Request Size Protection**: Multi-layer size limits (Spring Boot + custom filters)
+- **CORS Configuration**: Flexible cross-origin policy (allow-all default, production configurable)
+- **Log Sanitization**: Comprehensive sensitive data detection and masking (credit cards, SSNs, etc.)
 
-### Key Features Added
-- Storage factory pattern for backend selection via `RULE_SOURCE` env var
-- Thread-safe LRU cache with configurable size and eviction
-- Redis distributed caching with JSON serialization
-- Rule ID path transformation: `pricing.discount.vip` → `pricing/discount/vip.drl`
-- Docker compose setup with LocalStack S3 and Redis for local development
-- Admin APIs: `/admin/health`, `/admin/rules`, `/admin/refresh-rules`
+### Performance Optimization (Phase 3.3)
+- **Connection Pooling**: AWS S3 client with Apache HTTP client connection pooling
+- **Thread Pool Management**: Custom thread pools for rule execution and storage operations
+- **JVM Optimization**: G1GC configuration with environment-specific tuning
+- **Request Timeout Handling**: Comprehensive timeout management with monitoring
+- **Circuit Breakers**: Resilience4j integration for S3 and Redis fault tolerance
+
+### Monitoring & Observability (Phase 3.2)
+- **Vendor-agnostic Metrics**: Micrometer integration supporting CloudWatch, Grafana, Datadog
+- **Structured JSON Logging**: Correlation IDs, MDC context, and environment profiles
+- **Enhanced Health Checks**: Component-level monitoring (Drools, S3, Redis, Circuit Breakers)
+- **Thread Pool Monitoring**: Real-time statistics via `/admin/thread-pools` endpoint
+- **Performance Metrics**: Rule execution timing, cache statistics, error tracking
 
 ### Development Setup
 ```bash
@@ -187,6 +230,12 @@ aws --endpoint-url=http://localhost:4566 s3 mb s3://local-rules
 mvn compile && mvn spring-boot:run
 
 # Test admin endpoints
-curl http://localhost:8081/admin/health
-curl http://localhost:8081/admin/rules
+curl http://localhost:8081/admin/health           # Enhanced health with components
+curl http://localhost:8081/admin/rules            # Rule list with metadata  
+curl http://localhost:8081/admin/thread-pools     # Thread pool statistics
+
+# Test main API with validation
+curl -X POST http://localhost:8080/execute-rule \
+  -H "Content-Type: application/json" \
+  -d '{"rule_id": "simple.discount", "data": {"amount": 100}}'
 ```

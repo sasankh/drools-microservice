@@ -1,7 +1,8 @@
 package com.company.drools.api.dto;
 
+import com.company.drools.api.validation.ValidRuleData;
+import com.company.drools.api.validation.ValidRuleId;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
 import java.util.Map;
@@ -10,11 +11,13 @@ import java.util.Objects;
 public class RuleExecutionRequest {
 
   @JsonProperty("rule_id")
-  @NotBlank(message = "Rule ID cannot be blank")
+  @NotNull(message = "Rule ID cannot be null")
+  @ValidRuleId
   private String ruleId;
 
   @JsonProperty("data")
   @NotNull(message = "Data cannot be null")
+  @ValidRuleData
   private Map<String, Object> data;
 
   public RuleExecutionRequest() {

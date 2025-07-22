@@ -5,7 +5,9 @@ import com.company.drools.api.dto.RefreshRulesResponse;
 import com.company.drools.api.dto.RuleListResponse;
 import com.company.drools.api.dto.HealthCheckResponse;
 import com.company.drools.api.dto.HealthCheckResponse.ComponentHealth;
+import com.company.drools.api.validation.ValidRuleId;
 import com.company.drools.cache.RuleCache;
+import com.company.drools.common.LogSanitizer;
 import com.company.drools.cache.CacheStatistics;
 import com.company.drools.core.engine.DroolsEngineService;
 import com.company.drools.core.model.Rule;
@@ -407,8 +409,8 @@ public class AdminController {
    * Refresh a specific rule by ID.
    */
   @PostMapping("/refresh-rules/{ruleId}")
-  public ResponseEntity<RefreshRuleResponse> refreshRule(@PathVariable String ruleId) {
-    log.info("Refreshing rule: {}", ruleId);
+  public ResponseEntity<RefreshRuleResponse> refreshRule(@PathVariable @ValidRuleId String ruleId) {
+    log.info("Refreshing rule: {}", LogSanitizer.sanitizeMessage(ruleId));
     long startTime = System.currentTimeMillis();
     
     try {
@@ -448,7 +450,7 @@ public class AdminController {
         RefreshRuleResponse response = new RefreshRuleResponse(
             ruleId, "success", previousVersion, currentVersion, compilationTime);
         
-        log.info("Successfully refreshed rule: {}", ruleId);
+        log.info("Successfully refreshed rule: {}", LogSanitizer.sanitizeMessage(ruleId));
         return ResponseEntity.ok(response);
       } else {
         RefreshRuleResponse response = new RefreshRuleResponse(ruleId, "error");
@@ -457,9 +459,9 @@ public class AdminController {
       }
       
     } catch (Exception e) {
-      log.error("Error refreshing rule: {}", ruleId, e);
+      log.error("Error refreshing rule: {}", LogSanitizer.sanitizeMessage(ruleId), e);
       RefreshRuleResponse response = new RefreshRuleResponse(ruleId, "error");
-      response.setError(e.getMessage());
+      response.setError(LogSanitizer.sanitizeMessage(e.getMessage()));
       return ResponseEntity.internalServerError().body(response);
     }
   }

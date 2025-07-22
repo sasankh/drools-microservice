@@ -2,6 +2,7 @@ package com.company.drools.api.exception;
 
 import com.company.drools.api.dto.ErrorResponse;
 import com.company.drools.api.dto.RuleExecutionResponse;
+import com.company.drools.common.LogSanitizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -10,6 +11,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.util.stream.Collectors;
 
@@ -20,7 +22,7 @@ public class GlobalExceptionHandler {
 
   @ExceptionHandler(RuleNotFoundException.class)
   public ResponseEntity<RuleExecutionResponse> handleRuleNotFoundException(RuleNotFoundException ex) {
-    log.warn("Rule not found: {}", ex.getRuleId());
+    log.warn("Rule not found: {}", LogSanitizer.sanitizeMessage(ex.getRuleId()));
     
     RuleExecutionResponse response = RuleExecutionResponse.failure(
         ex.getRuleId(),
@@ -33,7 +35,7 @@ public class GlobalExceptionHandler {
 
   @ExceptionHandler(RuleExecutionException.class)
   public ResponseEntity<RuleExecutionResponse> handleRuleExecutionException(RuleExecutionException ex) {
-    log.error("Rule execution failed for rule: {}", ex.getRuleId(), ex);
+    log.error("Rule execution failed for rule: {}", LogSanitizer.sanitizeMessage(ex.getRuleId()), ex);
     
     RuleExecutionResponse response = RuleExecutionResponse.failure(
         ex.getRuleId(),
@@ -46,7 +48,7 @@ public class GlobalExceptionHandler {
 
   @ExceptionHandler(MethodArgumentNotValidException.class)
   public ResponseEntity<RuleExecutionResponse> handleValidationException(MethodArgumentNotValidException ex) {
-    log.warn("Validation failed: {}", ex.getMessage());
+    log.warn("Validation failed: {}", LogSanitizer.sanitizeMessage(ex.getMessage()));
     
     String errors = ex.getBindingResult().getFieldErrors().stream()
         .map(FieldError::getDefaultMessage)
@@ -100,6 +102,20 @@ public class GlobalExceptionHandler {
     );
     
     return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+  }
+
+  @ExceptionHandler(MaxUploadSizeExceededException.class)
+  public ResponseEntity<RuleExecutionResponse> handleMaxUploadSizeExceededException(MaxUploadSizeExceededException ex) {
+    log.warn("Request size exceeded maximum allowed size: {}", LogSanitizer.sanitizeMessage(ex.getMessage()));
+    
+    RuleExecutionResponse response = RuleExecutionResponse.failure(
+        null,
+        "REQUEST_TOO_LARGE",
+        "Request size exceeds maximum allowed limit",
+        "Please reduce the size of your request payload"
+    );
+    
+    return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(response);
   }
 
   @ExceptionHandler(Exception.class)

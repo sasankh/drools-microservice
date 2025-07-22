@@ -4,6 +4,7 @@ import com.company.drools.api.dto.RuleExecutionRequest;
 import com.company.drools.api.dto.RuleExecutionResponse;
 import com.company.drools.api.exception.RuleExecutionException;
 import com.company.drools.api.exception.RuleNotFoundException;
+import com.company.drools.common.LogSanitizer;
 import com.company.drools.core.engine.DroolsEngineService;
 import com.company.drools.core.engine.RuleExecutor;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -34,7 +35,9 @@ public class RuleExecutionController {
 
   @PostMapping("/execute-rule")
   public ResponseEntity<RuleExecutionResponse> executeRule(@Valid @RequestBody RuleExecutionRequest request) {
-    log.info("Executing rule: {} with data keys: {}", request.getRuleId(), request.getData().keySet());
+    log.info("Executing rule: {} with data keys: {}", 
+             LogSanitizer.sanitizeMessage(request.getRuleId()), 
+             LogSanitizer.safeDataRepresentation(request.getData()));
     
     // Start timing the API request
     Timer.Sample sample = Timer.start(meterRegistry);
@@ -54,7 +57,8 @@ public class RuleExecutionController {
       RuleExecutor.ExecutionResult result = droolsEngineService.executeRule(request.getRuleId(), inputData);
       
       if (result.isSuccess()) {
-        log.info("Rule {} executed successfully in {}ms", request.getRuleId(), result.getExecutionTimeMs());
+        log.info("Rule {} executed successfully in {}ms", 
+                 LogSanitizer.sanitizeMessage(request.getRuleId()), result.getExecutionTimeMs());
         
         // Record successful response
         sample.stop(Timer.builder("drools.api.response.time")
@@ -70,7 +74,9 @@ public class RuleExecutionController {
         
         return ResponseEntity.ok(response);
       } else {
-        log.warn("Rule {} execution failed: {}", request.getRuleId(), result.getErrorMessage());
+        log.warn("Rule {} execution failed: {}", 
+                 LogSanitizer.sanitizeMessage(request.getRuleId()), 
+                 LogSanitizer.sanitizeMessage(result.getErrorMessage()));
         throw new RuleExecutionException(request.getRuleId(), result.getErrorMessage());
       }
       
@@ -95,7 +101,7 @@ public class RuleExecutionController {
                  .register(meterRegistry));
       throw e;
     } catch (Exception e) {
-      log.error("Unexpected error executing rule: {}", request.getRuleId(), e);
+      log.error("Unexpected error executing rule: {}", LogSanitizer.sanitizeMessage(request.getRuleId()), e);
       // Record API error
       meterRegistry.counter("drools.api.errors", 
                           "endpoint", "/execute-rule",
