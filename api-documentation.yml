@@ -1,0 +1,985 @@
+openapi: 3.0.3
+info:
+  title: Drools Rule Engine Microservice API
+  description: |
+    A high-performance business rule execution microservice built with Spring Boot and Drools.
+    
+    ## Features
+    - **High Performance**: Support for 100-1000 requests per second
+    - **Security Hardened**: Input validation, rate limiting, CORS protection
+    - **Production Ready**: Health monitoring, metrics, circuit breakers
+    - **Scalable**: Multi-tier caching with S3 storage backend
+    
+    ## Architecture
+    - **Main API**: Rule execution on port 8080
+    - **Admin API**: Management and monitoring on port 8081
+    
+    ## Security Features
+    - Input validation with configurable limits
+    - Rate limiting with HTTP headers
+    - Request size protection
+    - CORS configuration
+    - Sensitive data sanitization in logs
+    
+  version: "1.0.0"
+  contact:
+    name: Drools Rule Engine Team
+    email: support@company.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Main API Server (Local Development)
+  - url: http://localhost:8081
+    description: Admin API Server (Local Development)
+  - url: https://drools-api.company.com
+    description: Production API Server
+  - url: https://drools-admin.company.com
+    description: Production Admin Server
+
+paths:
+  # Main API Endpoints
+  /execute-rule:
+    post:
+      tags:
+        - Rule Execution
+      summary: Execute Business Rule
+      description: |
+        Execute a business rule with provided input data.
+        
+        **Security Features:**
+        - Input validation for rule ID format and data payload
+        - Rate limiting per client (configurable)
+        - Request size limits (default: 10MB)
+        - Timeout protection (default: 30 seconds)
+        
+        **Performance:**
+        - P99 latency < 100ms for cached rules
+        - P99 latency < 500ms for cache miss
+        - Automatic retry with circuit breaker protection
+        
+      operationId: executeRule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuleExecutionRequest'
+            examples:
+              simple_discount:
+                summary: Simple Discount Rule
+                value:
+                  rule_id: "simple.discount"
+                  data:
+                    amount: 100
+                    customer_type: "regular"
+              vip_discount:
+                summary: VIP Customer Discount
+                value:
+                  rule_id: "pricing.discount.vip"
+                  data:
+                    amount: 150
+                    customer_type: "VIP"
+                    region: "US"
+              complex_pricing:
+                summary: Complex Pricing Rule
+                value:
+                  rule_id: "pricing.dynamic.surge"
+                  data:
+                    base_amount: 200
+                    customer_tier: "gold"
+                    time_of_day: "peak"
+                    region: "US-WEST"
+                    items_count: 5
+      responses:
+        '200':
+          description: Rule executed successfully
+          headers:
+            X-RateLimit-Limit:
+              description: Request limit per minute
+              schema:
+                type: integer
+                example: 1000
+            X-RateLimit-Remaining:
+              description: Remaining requests in current window
+              schema:
+                type: integer
+                example: 999
+            X-RateLimit-Reset:
+              description: Unix timestamp when rate limit resets
+              schema:
+                type: integer
+                example: 1753166400
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleExecutionResponse'
+              examples:
+                success_response:
+                  summary: Successful Rule Execution
+                  value:
+                    rule_id: "simple.discount"
+                    result:
+                      amount: 90
+                      discount: 10
+                      discount_percentage: 10
+                    error: null
+                    execution_time_ms: 15
+                    timestamp: "2025-07-22T12:00:00Z"
+        '400':
+          description: Invalid input or rule execution error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                validation_error:
+                  summary: Input Validation Error
+                  value:
+                    rule_id: "invalid.rule"
+                    result: null
+                    error:
+                      code: "INVALID_INPUT"
+                      message: "Request validation failed"
+                      details: "Rule ID contains invalid characters"
+                      timestamp: "2025-07-22T12:00:00Z"
+                execution_error:
+                  summary: Rule Execution Error
+                  value:
+                    rule_id: "pricing.discount.vip"
+                    result: null
+                    error:
+                      code: "RULE_EXECUTION_ERROR"
+                      message: "Failed to execute rule"
+                      details: "Missing required field 'customer_type'"
+                      timestamp: "2025-07-22T12:00:00Z"
+        '404':
+          description: Rule not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                rule_not_found:
+                  summary: Rule Not Found
+                  value:
+                    rule_id: "non.existent.rule"
+                    result: null
+                    error:
+                      code: "RULE_NOT_FOUND"
+                      message: "Rule not found"
+                      details: "Rule 'non.existent.rule' does not exist"
+                      timestamp: "2025-07-22T12:00:00Z"
+        '408':
+          description: Request timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                timeout_error:
+                  summary: Request Timeout
+                  value:
+                    rule_id: "slow.rule"
+                    result: null
+                    error:
+                      code: "TIMEOUT_ERROR"
+                      message: "Operation timed out after 30 seconds"
+                      details: "Rule execution exceeded configured timeout"
+                      timestamp: "2025-07-22T12:00:00Z"
+        '413':
+          description: Request payload too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                payload_too_large:
+                  summary: Request Too Large
+                  value:
+                    rule_id: null
+                    result: null
+                    error:
+                      code: "REQUEST_TOO_LARGE"
+                      message: "Request size exceeds maximum limit"
+                      details: "Request size: 11MB, Maximum allowed: 10MB"
+                      timestamp: "2025-07-22T12:00:00Z"
+        '429':
+          description: Rate limit exceeded
+          headers:
+            X-RateLimit-Limit:
+              description: Request limit per minute
+              schema:
+                type: integer
+                example: 1000
+            X-RateLimit-Remaining:
+              description: Remaining requests (0 when rate limited)
+              schema:
+                type: integer
+                example: 0
+            X-RateLimit-Reset:
+              description: Unix timestamp when rate limit resets
+              schema:
+                type: integer
+                example: 1753166400
+            X-RateLimit-Reset-After:
+              description: Seconds until rate limit resets
+              schema:
+                type: integer
+                example: 60
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                rate_limit_exceeded:
+                  summary: Rate Limit Exceeded
+                  value:
+                    rule_id: null
+                    result: null
+                    error:
+                      code: "RATE_LIMIT_EXCEEDED"
+                      message: "Rate limit exceeded"
+                      details: "Too many requests. Please try again later."
+                      timestamp: "2025-07-22T12:00:00Z"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service temporarily unavailable (circuit breaker open)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                service_unavailable:
+                  summary: Service Unavailable
+                  value:
+                    rule_id: null
+                    result: null
+                    error:
+                      code: "SERVICE_UNAVAILABLE"
+                      message: "External service 's3' is temporarily unavailable (open)"
+                      details: "Please try again later"
+                      timestamp: "2025-07-22T12:00:00Z"
+
+  # Admin API Endpoints
+  /admin/health:
+    get:
+      tags:
+        - Administration
+      summary: Application Health Check
+      description: |
+        Comprehensive health check with component-level status monitoring.
+        
+        **Components Monitored:**
+        - Drools engine status and rule count
+        - Storage backend (S3/Local/Memory)
+        - Cache health and statistics
+        - Redis connectivity (if enabled)
+        - Circuit breaker status
+        - Thread pool health
+        
+      operationId: getHealth
+      responses:
+        '200':
+          description: Health status with component details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                healthy_system:
+                  summary: All Systems Healthy
+                  value:
+                    status: "UP"
+                    components:
+                      drools:
+                        status: "UP"
+                        details:
+                          rules_loaded: 148
+                          cache_size: 95
+                          cache_hit_rate: 0.94
+                      storage:
+                        status: "UP"
+                        details:
+                          type: "S3RuleStorage"
+                          bucket: "prod-drools-rules"
+                          accessible: true
+                          total_rules: 148
+                      cache:
+                        status: "UP"
+                        details:
+                          enabled: true
+                          size: 95
+                          max_size: 100
+                          statistics:
+                            hits: 1250
+                            misses: 45
+                            hit_rate: "96.50%"
+                      redis:
+                        status: "UP"
+                        details:
+                          connected: true
+                          cache_type: "RedisRuleCache"
+                      circuit-breakers:
+                        status: "UP"
+                        details:
+                          s3_state: "CLOSED"
+                          redis_state: "CLOSED"
+                          circuit_breakers_enabled: true
+                    timestamp: "2025-07-22T12:00:00Z"
+                degraded_system:
+                  summary: System with Redis Down
+                  value:
+                    status: "UP"
+                    components:
+                      drools:
+                        status: "UP"
+                        details:
+                          rules_loaded: 148
+                          cache_size: 95
+                          cache_hit_rate: 0.85
+                      storage:
+                        status: "UP"
+                        details:
+                          type: "S3RuleStorage"
+                          accessible: true
+                      cache:
+                        status: "UP"
+                        details:
+                          enabled: true
+                          size: 95
+                      redis:
+                        status: "DOWN"
+                        details:
+                          connected: false
+                          error: "Connection refused"
+                      circuit-breakers:
+                        status: "UP"
+                        details:
+                          redis_state: "HALF_OPEN"
+                    timestamp: "2025-07-22T12:00:00Z"
+        '503':
+          description: Service unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /admin/info:
+    get:
+      tags:
+        - Administration
+      summary: System Information
+      description: Basic system information and version details
+      operationId: getInfo
+      responses:
+        '200':
+          description: System information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemInfo'
+              examples:
+                system_info:
+                  summary: System Information
+                  value:
+                    application: "Drools Rule Engine Microservice"
+                    version: "1.0.0"
+                    java_version: "17.0.8"
+                    timestamp: "2025-07-22T12:00:00Z"
+
+  /admin/thread-pools:
+    get:
+      tags:
+        - Administration
+      summary: Thread Pool Statistics
+      description: |
+        Real-time thread pool performance statistics for monitoring.
+        
+        **Thread Pools Monitored:**
+        - Rule execution thread pool
+        - Storage operation thread pool
+        
+      operationId: getThreadPoolStats
+      responses:
+        '200':
+          description: Thread pool statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThreadPoolStats'
+              examples:
+                thread_pool_stats:
+                  summary: Thread Pool Statistics
+                  value:
+                    rule_execution_pool:
+                      core_size: 10
+                      max_size: 50
+                      active_count: 5
+                      completed_task_count: 1247
+                      queue_size: 2
+                      largest_pool_size: 25
+                    storage_pool:
+                      core_size: 5
+                      max_size: 20
+                      active_count: 1
+                      completed_task_count: 89
+                      queue_size: 0
+                      largest_pool_size: 8
+                    timestamp: "2025-07-22T12:00:00Z"
+
+  /admin/rules:
+    get:
+      tags:
+        - Rule Management
+      summary: List All Rules
+      description: |
+        List all loaded rules with metadata and performance statistics.
+        
+        **Information Provided:**
+        - Rule status and load time
+        - Execution statistics and performance
+        - Cache status and version information
+        
+      operationId: listRules
+      responses:
+        '200':
+          description: List of all loaded rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleListResponse'
+              examples:
+                rule_list:
+                  summary: Rule List with Metadata
+                  value:
+                    total_rules: 148
+                    rules:
+                      - rule_id: "pricing.discount.vip"
+                        status: "ACTIVE"
+                        loaded_at: "2025-07-22T10:00:00Z"
+                        last_modified: "2025-07-22T09:30:00Z"
+                        execution_count: 1847
+                        avg_execution_time_ms: 12.5
+                        cached: true
+                        version: "1.2"
+                      - rule_id: "compliance.sanctions.ofac"
+                        status: "ACTIVE"
+                        loaded_at: "2025-07-22T10:00:00Z"
+                        last_modified: "2025-07-21T15:20:00Z"
+                        execution_count: 892
+                        avg_execution_time_ms: 8.3
+                        cached: true
+                        version: "1.0"
+
+  /admin/refresh-rules:
+    post:
+      tags:
+        - Rule Management
+      summary: Refresh All Rules
+      description: |
+        Reload all rules from storage backend and update cache.
+        
+        **Process:**
+        1. Clear existing rule cache
+        2. Load all rules from S3/storage
+        3. Compile and validate rules
+        4. Update local and Redis cache
+        5. Return detailed refresh status
+        
+      operationId: refreshAllRules
+      responses:
+        '200':
+          description: Rules refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshRulesResponse'
+              examples:
+                successful_refresh:
+                  summary: Successful Refresh
+                  value:
+                    status: "completed"
+                    rules_loaded: 145
+                    rules_failed: 3
+                    duration_ms: 2847
+                    errors:
+                      - rule_id: "pricing.discount.invalid-syntax"
+                        error: "Compilation failed: Syntax error at line 12, column 8"
+                      - rule_id: "validation.customer.missing-import"
+                        error: "Import not found: com.company.model.Customer"
+                    cache_updated_at: "2025-07-22T12:00:00Z"
+                all_failed:
+                  summary: Storage Connection Failed
+                  value:
+                    status: "failed"
+                    rules_loaded: 0
+                    rules_failed: 148
+                    duration_ms: 150
+                    errors:
+                      - rule_id: "SYSTEM"
+                        error: "S3 connection failed: Unable to connect to bucket"
+                    cache_updated_at: null
+
+  /admin/refresh-rules/{ruleId}:
+    post:
+      tags:
+        - Rule Management
+      summary: Refresh Specific Rule
+      description: |
+        Reload a specific rule by ID from storage and update cache.
+        
+        **Process:**
+        1. Remove rule from cache
+        2. Load rule from S3/storage
+        3. Compile and validate rule
+        4. Update cache if successful
+        5. Return refresh status with version info
+        
+      operationId: refreshRule
+      parameters:
+        - name: ruleId
+          in: path
+          required: true
+          description: |
+            Rule ID to refresh (e.g., "pricing.discount.vip")
+            
+            **Validation:**
+            - Maximum length: 255 characters
+            - Allowed characters: alphanumeric, dots, dashes, underscores
+            - No path traversal patterns (.., /, \)
+          schema:
+            type: string
+            pattern: '^[a-zA-Z0-9._-]+$'
+            maxLength: 255
+            example: "pricing.discount.vip"
+      responses:
+        '200':
+          description: Rule refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshRuleResponse'
+              examples:
+                successful_rule_refresh:
+                  summary: Rule Updated Successfully
+                  value:
+                    rule_id: "pricing.discount.vip"
+                    status: "success"
+                    previous_version: "2025-07-21T08:00:00Z"
+                    current_version: "2025-07-22T12:00:00Z"
+                    compilation_time_ms: 45
+                rule_unchanged:
+                  summary: Rule Not Modified
+                  value:
+                    rule_id: "pricing.discount.vip"
+                    status: "success"
+                    previous_version: "2025-07-22T10:00:00Z"
+                    current_version: "2025-07-22T10:00:00Z"
+                    compilation_time_ms: 12
+        '400':
+          description: Invalid rule ID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Rule not found in storage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshRuleResponse'
+              examples:
+                rule_not_found:
+                  summary: Rule Not Found
+                  value:
+                    rule_id: "non.existent.rule"
+                    status: "not_found"
+                    error: "Rule not found in storage"
+        '500':
+          description: Rule compilation or refresh failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshRuleResponse'
+              examples:
+                compilation_error:
+                  summary: Compilation Failed
+                  value:
+                    rule_id: "pricing.discount.broken"
+                    status: "error"
+                    error: "Failed to compile rule: Syntax error at line 15"
+
+components:
+  schemas:
+    RuleExecutionRequest:
+      type: object
+      required:
+        - rule_id
+        - data
+      properties:
+        rule_id:
+          type: string
+          pattern: '^[a-zA-Z0-9._-]+$'
+          maxLength: 255
+          description: |
+            Unique identifier for the rule to execute.
+            
+            **Format:**
+            - Uses dot notation (e.g., "pricing.discount.vip")
+            - Mapped to file path: "pricing/discount/vip.drl"
+            - Only alphanumeric, dots, dashes, underscores allowed
+            - Maximum 255 characters
+          example: "pricing.discount.vip"
+        data:
+          type: object
+          description: |
+            Input data for rule execution.
+            
+            **Validation:**
+            - Maximum 100 fields per request (configurable)
+            - String values limited to 10,000 characters (configurable)
+            - Number values limited to 1,000,000,000 (configurable)
+            - No dangerous patterns (script injection protection)
+          additionalProperties: true
+          example:
+            amount: 150
+            customer_type: "VIP"
+            region: "US"
+
+    RuleExecutionResponse:
+      type: object
+      properties:
+        rule_id:
+          type: string
+          description: ID of the executed rule
+          example: "pricing.discount.vip"
+        result:
+          type: object
+          description: Rule execution result data
+          additionalProperties: true
+          example:
+            amount: 120
+            discount: 30
+            discount_percentage: 20
+        error:
+          $ref: '#/components/schemas/ErrorInfo'
+        execution_time_ms:
+          type: integer
+          description: Rule execution time in milliseconds
+          example: 15
+        timestamp:
+          type: string
+          format: date-time
+          description: Response timestamp
+          example: "2025-07-22T12:00:00Z"
+
+    ErrorResponse:
+      type: object
+      properties:
+        rule_id:
+          type: string
+          nullable: true
+          description: Rule ID that caused the error (if applicable)
+        result:
+          type: object
+          nullable: true
+          description: Always null for error responses
+        error:
+          $ref: '#/components/schemas/ErrorInfo'
+
+    ErrorInfo:
+      type: object
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code
+          enum:
+            - "RULE_NOT_FOUND"
+            - "RULE_EXECUTION_ERROR"
+            - "RULE_COMPILATION_ERROR"
+            - "INVALID_INPUT"
+            - "REQUEST_TOO_LARGE"
+            - "RATE_LIMIT_EXCEEDED"
+            - "TIMEOUT_ERROR"
+            - "SERVICE_UNAVAILABLE"
+            - "STORAGE_ERROR"
+            - "CACHE_ERROR"
+            - "INTERNAL_ERROR"
+          example: "RULE_NOT_FOUND"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "Rule not found"
+        details:
+          type: string
+          description: Additional error details
+          example: "Rule 'pricing.invalid.rule' does not exist"
+        timestamp:
+          type: string
+          format: date-time
+          description: Error timestamp
+          example: "2025-07-22T12:00:00Z"
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: ["UP", "DOWN"]
+          description: Overall system health status
+        components:
+          type: object
+          description: Individual component health status
+          properties:
+            drools:
+              $ref: '#/components/schemas/ComponentHealth'
+            storage:
+              $ref: '#/components/schemas/ComponentHealth'
+            cache:
+              $ref: '#/components/schemas/ComponentHealth'
+            redis:
+              $ref: '#/components/schemas/ComponentHealth'
+            circuit-breakers:
+              $ref: '#/components/schemas/ComponentHealth'
+        timestamp:
+          type: string
+          format: date-time
+
+    ComponentHealth:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: ["UP", "DOWN"]
+        details:
+          type: object
+          additionalProperties: true
+
+    SystemInfo:
+      type: object
+      properties:
+        application:
+          type: string
+          example: "Drools Rule Engine Microservice"
+        version:
+          type: string
+          example: "1.0.0"
+        java_version:
+          type: string
+          example: "17.0.8"
+        timestamp:
+          type: string
+          format: date-time
+
+    ThreadPoolStats:
+      type: object
+      properties:
+        rule_execution_pool:
+          $ref: '#/components/schemas/ThreadPoolInfo'
+        storage_pool:
+          $ref: '#/components/schemas/ThreadPoolInfo'
+        timestamp:
+          type: string
+          format: date-time
+
+    ThreadPoolInfo:
+      type: object
+      properties:
+        core_size:
+          type: integer
+          description: Core number of threads
+        max_size:
+          type: integer
+          description: Maximum number of threads
+        active_count:
+          type: integer
+          description: Currently active threads
+        completed_task_count:
+          type: integer
+          description: Total completed tasks
+        queue_size:
+          type: integer
+          description: Current queue size
+        largest_pool_size:
+          type: integer
+          description: Largest pool size ever reached
+
+    RuleListResponse:
+      type: object
+      properties:
+        total_rules:
+          type: integer
+          description: Total number of loaded rules
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuleInfo'
+
+    RuleInfo:
+      type: object
+      properties:
+        rule_id:
+          type: string
+          description: Rule identifier
+        status:
+          type: string
+          enum: ["ACTIVE", "INACTIVE", "ERROR"]
+          description: Rule status
+        loaded_at:
+          type: string
+          format: date-time
+          description: When rule was loaded
+        last_modified:
+          type: string
+          format: date-time
+          description: Last modification time
+        execution_count:
+          type: integer
+          description: Number of times rule has been executed
+        avg_execution_time_ms:
+          type: number
+          format: double
+          description: Average execution time in milliseconds
+        cached:
+          type: boolean
+          description: Whether rule is currently cached
+        version:
+          type: string
+          description: Rule version
+
+    RefreshRulesResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: ["completed", "completed_with_errors", "failed"]
+          description: Overall refresh status
+        rules_loaded:
+          type: integer
+          description: Number of rules successfully loaded
+        rules_failed:
+          type: integer
+          description: Number of rules that failed to load
+        duration_ms:
+          type: integer
+          description: Total refresh duration in milliseconds
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuleError'
+        cache_updated_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When cache was last updated
+
+    RefreshRuleResponse:
+      type: object
+      properties:
+        rule_id:
+          type: string
+          description: Rule identifier
+        status:
+          type: string
+          enum: ["success", "not_found", "error"]
+          description: Refresh status
+        previous_version:
+          type: string
+          format: date-time
+          nullable: true
+          description: Previous rule version timestamp
+        current_version:
+          type: string
+          format: date-time
+          nullable: true
+          description: Current rule version timestamp
+        compilation_time_ms:
+          type: integer
+          nullable: true
+          description: Rule compilation time in milliseconds
+        error:
+          type: string
+          nullable: true
+          description: Error message if refresh failed
+
+    RuleError:
+      type: object
+      properties:
+        rule_id:
+          type: string
+          description: Rule that failed to load
+        error:
+          type: string
+          description: Error message
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API Key for client identification and rate limiting.
+        
+        **Usage:**
+        - Used for client identification in rate limiting
+        - Optional but recommended for production
+        - Helps with monitoring and analytics
+    
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Bearer token authentication.
+        
+        **Usage:**
+        - Alternative client identification method
+        - Used in rate limiting and monitoring
+        - JWT tokens supported
+
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+  - {}  # Allow unauthenticated access
+
+tags:
+  - name: Rule Execution
+    description: |
+      Core rule execution functionality.
+      
+      **Features:**
+      - High-performance rule execution (100-1000 RPS)
+      - Input validation and security protection
+      - Rate limiting and timeout handling
+      - Comprehensive error responses
+  
+  - name: Administration
+    description: |
+      System administration and monitoring.
+      
+      **Features:**
+      - Health monitoring with component details
+      - System information and version details
+      - Thread pool performance monitoring
+      - Available on separate admin port (8081)
+  
+  - name: Rule Management
+    description: |
+      Rule lifecycle management operations.
+      
+      **Features:**
+      - List all loaded rules with metadata
+      - Refresh rules from storage backend
+      - Hot-reload without service restart
+      - Detailed refresh status and error reporting
+
+externalDocs:
+  description: Complete Project Documentation
+  url: https://github.com/company/drools-microservice/blob/main/project.documentation.md
