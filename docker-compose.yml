@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"  # Main API
+      - "8081:8081"  # Admin API
+    environment:
+      # Rule source configuration
+      - RULE_SOURCE=s3
+      - RULE_BUCKET_NAME=local-rules
+      
+      # AWS/LocalStack configuration
+      - AWS_REGION=us-east-1
+      - AWS_ENDPOINT=http://localstack:4566
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      
+      # Redis configuration
+      - REDIS_ENABLED=true
+      - REDIS_URL=redis://redis:6379
+      
+      # Cache configuration
+      - LRU_CACHE_MAX_SIZE=100
+      - RULE_EXECUTION_TIMEOUT_SECONDS=30
+      
+      # Auto refresh configuration
+      - AUTO_REFRESH_ENABLED=false
+      - AUTO_REFRESH_INTERVAL_MINUTES=5
+      
+      # Logging
+      - LOG_LEVEL=INFO
+      
+    depends_on:
+      - localstack
+      - redis
+    networks:
+      - drools-network
+    restart: unless-stopped
+
+  localstack:
+    image: localstack/localstack:2.3
+    ports:
+      - "4566:4566"  # LocalStack edge port
+    environment:
+      - SERVICES=s3
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+      - PERSISTENCE=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - "./init-localstack.sh:/etc/localstack/init/ready.d/init-aws.sh"
+      - "localstack-data:/tmp/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - drools-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ""
+    volumes:
+      - redis-data:/data
+    networks:
+      - drools-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+networks:
+  drools-network:
+    driver: bridge
+
+volumes:
+  localstack-data:
+    driver: local
+  redis-data:
+    driver: local
