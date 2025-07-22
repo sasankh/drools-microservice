@@ -56,6 +56,17 @@ drools:
       operation: ${DROOLS_STORAGE_OPERATION_TIMEOUT:60}
     cache:
       operation: ${DROOLS_CACHE_OPERATION_TIMEOUT:5}
+  circuit-breaker:
+    s3:
+      failure-rate-threshold: ${DROOLS_CB_S3_FAILURE_RATE:50}
+      wait-duration-in-open-state: ${DROOLS_CB_S3_WAIT_DURATION:60000}
+      sliding-window-size: ${DROOLS_CB_S3_SLIDING_WINDOW:100}
+      minimum-number-of-calls: ${DROOLS_CB_S3_MIN_CALLS:10}
+    redis:
+      failure-rate-threshold: ${DROOLS_CB_REDIS_FAILURE_RATE:60}
+      wait-duration-in-open-state: ${DROOLS_CB_REDIS_WAIT_DURATION:30000}
+      sliding-window-size: ${DROOLS_CB_REDIS_SLIDING_WINDOW:50}
+      minimum-number-of-calls: ${DROOLS_CB_REDIS_MIN_CALLS:5}
   thread-pool:
     rule-execution:
       core-size: ${DROOLS_THREAD_POOL_CORE_SIZE:10}
@@ -144,6 +155,17 @@ drools:
       operation: 30
     cache:
       operation: 3
+  circuit-breaker:
+    s3:
+      failure-rate-threshold: 60
+      wait-duration-in-open-state: 30000
+      sliding-window-size: 50
+      minimum-number-of-calls: 5
+    redis:
+      failure-rate-threshold: 70
+      wait-duration-in-open-state: 15000
+      sliding-window-size: 25
+      minimum-number-of-calls: 3
 
 aws:
   endpoint: http://localhost:4566
@@ -179,6 +201,17 @@ drools:
       operation: 60
     cache:
       operation: 5
+  circuit-breaker:
+    s3:
+      failure-rate-threshold: 40
+      wait-duration-in-open-state: 120000
+      sliding-window-size: 200
+      minimum-number-of-calls: 20
+    redis:
+      failure-rate-threshold: 50
+      wait-duration-in-open-state: 60000
+      sliding-window-size: 100
+      minimum-number-of-calls: 10
 
 redis:
   enabled: true
@@ -229,6 +262,17 @@ drools:
       operation: 45
     cache:
       operation: 3
+  circuit-breaker:
+    s3:
+      failure-rate-threshold: 50
+      wait-duration-in-open-state: 45000
+      sliding-window-size: 75
+      minimum-number-of-calls: 8
+    redis:
+      failure-rate-threshold: 65
+      wait-duration-in-open-state: 30000
+      sliding-window-size: 40
+      minimum-number-of-calls: 5
   thread-pool:
     rule-execution:
       core-size: 8

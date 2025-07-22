@@ -15,11 +15,13 @@ import com.company.drools.storage.StorageFactory;
 import com.company.drools.storage.S3RuleStorage;
 import com.company.drools.cache.RedisRuleCache;
 import com.company.drools.config.ThreadPoolConfig;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -60,6 +62,14 @@ public class AdminController {
   
   @Value("${drools.s3.bucket-name:}")
   private String s3BucketName;
+  
+  @Autowired(required = false)
+  @Qualifier("s3CircuitBreaker")
+  private CircuitBreaker s3CircuitBreaker;
+  
+  @Autowired(required = false)
+  @Qualifier("redisCircuitBreaker") 
+  private CircuitBreaker redisCircuitBreaker;
 
   public AdminController(DroolsEngineService droolsEngineService, 
                         StorageFactory storageFactory,
@@ -113,6 +123,11 @@ public class AdminController {
       components.put("redis", redisHealth);
       // Redis being down is not critical if local cache works
     }
+    
+    // Check circuit breaker health
+    ComponentHealth circuitBreakerHealth = checkCircuitBreakerHealth();
+    components.put("circuit-breakers", circuitBreakerHealth);
+    // Circuit breakers being open don't affect overall health (they are protection mechanism)
     
     HealthCheckResponse response = new HealthCheckResponse(overallStatus, components);
     
@@ -238,6 +253,41 @@ public class AdminController {
       details.put("connected", false);
       details.put("error", e.getMessage());
       return new ComponentHealth("DOWN", details);
+    }
+  }
+  
+  private ComponentHealth checkCircuitBreakerHealth() {
+    Map<String, Object> details = new HashMap<>();
+    
+    try {
+      // Check S3 circuit breaker if available
+      if (s3CircuitBreaker != null) {
+        details.put("s3_state", s3CircuitBreaker.getState().toString());
+        details.put("s3_metrics", Map.of(
+            "failure_rate", s3CircuitBreaker.getMetrics().getFailureRate(),
+            "successful_calls", s3CircuitBreaker.getMetrics().getNumberOfSuccessfulCalls(),
+            "failed_calls", s3CircuitBreaker.getMetrics().getNumberOfFailedCalls(),
+            "not_permitted_calls", s3CircuitBreaker.getMetrics().getNumberOfNotPermittedCalls()
+        ));
+      }
+      
+      // Check Redis circuit breaker if available
+      if (redisCircuitBreaker != null) {
+        details.put("redis_state", redisCircuitBreaker.getState().toString());
+        details.put("redis_metrics", Map.of(
+            "failure_rate", redisCircuitBreaker.getMetrics().getFailureRate(),
+            "successful_calls", redisCircuitBreaker.getMetrics().getNumberOfSuccessfulCalls(),
+            "failed_calls", redisCircuitBreaker.getMetrics().getNumberOfFailedCalls(),
+            "not_permitted_calls", redisCircuitBreaker.getMetrics().getNumberOfNotPermittedCalls()
+        ));
+      }
+      
+      details.put("circuit_breakers_enabled", s3CircuitBreaker != null || redisCircuitBreaker != null);
+      return new ComponentHealth("UP", details);
+      
+    } catch (Exception e) {
+      details.put("error", e.getMessage());
+      return new ComponentHealth("UP", details); // Circuit breaker errors don't affect health
     }
   }
   

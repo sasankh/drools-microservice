@@ -1,14 +1,18 @@
 package com.company.drools.storage;
 
+import com.company.drools.api.exception.CircuitBreakerException;
 import com.company.drools.api.exception.RuleNotFoundException;
 import com.company.drools.api.exception.TimeoutException;
 import com.company.drools.config.TimeoutConfig;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.core.exception.SdkException;
@@ -23,6 +27,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 @Component("s3RuleStorage")
@@ -33,14 +38,19 @@ public class S3RuleStorage implements RuleStorage {
   private final S3Client s3Client;
   private final MeterRegistry meterRegistry;
   private final TimeoutConfig timeoutConfig;
+  private final CircuitBreaker s3CircuitBreaker;
 
   @Value("${drools.s3.bucket-name}")
   private String bucketName;
 
-  public S3RuleStorage(S3Client s3Client, MeterRegistry meterRegistry, TimeoutConfig timeoutConfig) {
+  public S3RuleStorage(S3Client s3Client, 
+                       MeterRegistry meterRegistry, 
+                       TimeoutConfig timeoutConfig,
+                       @Qualifier("s3CircuitBreaker") CircuitBreaker s3CircuitBreaker) {
     this.s3Client = s3Client;
     this.meterRegistry = meterRegistry;
     this.timeoutConfig = timeoutConfig;
+    this.s3CircuitBreaker = s3CircuitBreaker;
   }
 
   @Override
@@ -53,45 +63,59 @@ public class S3RuleStorage implements RuleStorage {
     Timer.Sample sample = Timer.start(meterRegistry);
     
     try {
-      GetObjectRequest request = GetObjectRequest.builder()
-          .bucket(bucketName)
-          .key(s3Key)
-          .build();
+      // Wrap S3 operations with circuit breaker
+      Supplier<Optional<Rule>> s3Operation = CircuitBreaker.decorateSupplier(s3CircuitBreaker, () -> {
+        try {
+          GetObjectRequest request = GetObjectRequest.builder()
+              .bucket(bucketName)
+              .key(s3Key)
+              .build();
 
-      String content = s3Client.getObjectAsBytes(request).asUtf8String();
+          String content = s3Client.getObjectAsBytes(request).asUtf8String();
+          
+          // Get object metadata for rule metadata
+          HeadObjectRequest headRequest = HeadObjectRequest.builder()
+              .bucket(bucketName)
+              .key(s3Key)
+              .build();
+          
+          HeadObjectResponse headResponse = s3Client.headObject(headRequest);
+          RuleMetadata metadata = createMetadataFromS3Object(headResponse);
+          
+          Rule rule = new Rule(ruleId, content, metadata);
+          log.debug("Successfully loaded rule: {} from S3 key: {}", ruleId, s3Key);
+          
+          return Optional.of(rule);
+          
+        } catch (NoSuchKeyException e) {
+          log.warn("Rule not found in S3: {} (key: {})", ruleId, s3Key);
+          return Optional.empty();
+        }
+      });
       
-      // Get object metadata for rule metadata
-      HeadObjectRequest headRequest = HeadObjectRequest.builder()
-          .bucket(bucketName)
-          .key(s3Key)
-          .build();
-      
-      HeadObjectResponse headResponse = s3Client.headObject(headRequest);
-      RuleMetadata metadata = createMetadataFromS3Object(headResponse);
-      
-      Rule rule = new Rule(ruleId, content, metadata);
-      log.debug("Successfully loaded rule: {} from S3 key: {}", ruleId, s3Key);
+      Optional<Rule> result = s3Operation.get();
       
       // Record successful storage operation
       sample.stop(Timer.builder("drools.storage.operation.time")
                  .tag("operation", "getRule")
                  .tag("storage_type", "s3")
-                 .tag("status", "success")
+                 .tag("status", result.isPresent() ? "success" : "not_found")
                  .register(meterRegistry));
       
-      return Optional.of(rule);
+      return result;
 
-    } catch (NoSuchKeyException e) {
-      log.warn("Rule not found in S3: {} (key: {})", ruleId, s3Key);
+    } catch (CallNotPermittedException e) {
+      // Circuit breaker is open
+      log.error("S3 circuit breaker is open - cannot load rule: {}", ruleId, e);
       
-      // Record not found (considered success for optional operation)
+      // Record circuit breaker open
       sample.stop(Timer.builder("drools.storage.operation.time")
                  .tag("operation", "getRule")
                  .tag("storage_type", "s3")
-                 .tag("status", "not_found")
+                 .tag("status", "circuit_breaker_open")
                  .register(meterRegistry));
       
-      return Optional.empty();
+      throw new CircuitBreakerException("s3", s3CircuitBreaker.getState().toString(), e);
     } catch (SdkException e) {
       log.error("Failed to load rule from S3: {} (key: {})", ruleId, s3Key, e);
       

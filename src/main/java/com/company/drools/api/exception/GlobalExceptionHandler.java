@@ -75,6 +75,20 @@ public class GlobalExceptionHandler {
     return ResponseEntity.status(HttpStatus.REQUEST_TIMEOUT).body(response);
   }
 
+  @ExceptionHandler(CircuitBreakerException.class)
+  public ResponseEntity<RuleExecutionResponse> handleCircuitBreakerException(CircuitBreakerException ex) {
+    log.error("Circuit breaker {} is {}: {}", ex.getCircuitBreakerName(), ex.getState(), ex.getMessage(), ex);
+    
+    RuleExecutionResponse response = RuleExecutionResponse.failure(
+        null,
+        "SERVICE_UNAVAILABLE",
+        String.format("External service '%s' is temporarily unavailable (%s). Please try again later.", 
+                     ex.getCircuitBreakerName(), ex.getState().toLowerCase())
+    );
+    
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
+  }
+
   @ExceptionHandler(IllegalArgumentException.class)
   public ResponseEntity<RuleExecutionResponse> handleIllegalArgumentException(IllegalArgumentException ex) {
     log.warn("Invalid argument: {}", ex.getMessage());

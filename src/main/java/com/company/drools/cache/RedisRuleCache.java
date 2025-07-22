@@ -1,10 +1,14 @@
 package com.company.drools.cache;
 
+import com.company.drools.api.exception.CircuitBreakerException;
 import com.company.drools.core.model.Rule;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.RedisCallback;
@@ -18,6 +22,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 /**
  * Redis-based distributed cache implementation for rules.
@@ -34,6 +39,7 @@ public class RedisRuleCache implements RuleCache {
   private final RedisTemplate<String, Rule> redisTemplate;
   private final Duration ttlDuration;
   private final MeterRegistry meterRegistry;
+  private final CircuitBreaker redisCircuitBreaker;
 
   // Local statistics (per instance)
   private final AtomicLong localHits = new AtomicLong(0);
@@ -44,10 +50,12 @@ public class RedisRuleCache implements RuleCache {
   @Autowired
   public RedisRuleCache(RedisTemplate<String, Rule> redisTemplate, 
                         Duration redisTtlDuration,
-                        MeterRegistry meterRegistry) {
+                        MeterRegistry meterRegistry,
+                        @Qualifier("redisCircuitBreaker") CircuitBreaker redisCircuitBreaker) {
     this.redisTemplate = redisTemplate;
     this.ttlDuration = redisTtlDuration;
     this.meterRegistry = meterRegistry;
+    this.redisCircuitBreaker = redisCircuitBreaker;
     log.info("RedisRuleCache initialized with TTL: {}", ttlDuration);
   }
 
@@ -56,22 +64,42 @@ public class RedisRuleCache implements RuleCache {
     String key = buildCacheKey(ruleId);
     
     try {
-      Rule rule = redisTemplate.opsForValue().get(key);
-      lastAccess = Instant.now();
+      // Wrap Redis operations with circuit breaker
+      Supplier<Optional<Rule>> redisOperation = CircuitBreaker.decorateSupplier(redisCircuitBreaker, () -> {
+        Rule rule = redisTemplate.opsForValue().get(key);
+        lastAccess = Instant.now();
+        
+        if (rule != null) {
+          log.debug("Redis cache hit for rule: {}", ruleId);
+          return Optional.of(rule);
+        } else {
+          log.debug("Redis cache miss for rule: {}", ruleId);
+          return Optional.empty();
+        }
+      });
       
-      if (rule != null) {
+      Optional<Rule> result = redisOperation.get();
+      
+      if (result.isPresent()) {
         localHits.incrementAndGet();
         meterRegistry.counter("drools.cache.hits", "cache_type", "redis").increment();
-        log.debug("Redis cache hit for rule: {}", ruleId);
-        return Optional.of(rule);
       } else {
         localMisses.incrementAndGet();
         meterRegistry.counter("drools.cache.misses", "cache_type", "redis").increment();
-        log.debug("Redis cache miss for rule: {}", ruleId);
-        return Optional.empty();
       }
       
-    } catch (DataAccessException e) {
+      return result;
+      
+    } catch (CallNotPermittedException e) {
+      // Circuit breaker is open - treat as cache miss
+      log.warn("Redis circuit breaker is open - treating as cache miss for rule: {}", ruleId);
+      localMisses.incrementAndGet();
+      meterRegistry.counter("drools.cache.misses", 
+                          "cache_type", "redis", 
+                          "reason", "circuit_breaker_open").increment();
+      return Optional.empty();
+      
+    } catch (Exception e) {
       log.warn("Redis error during get operation for rule: {}", ruleId, e);
       localMisses.incrementAndGet();
       meterRegistry.counter("drools.cache.misses", "cache_type", "redis").increment();
@@ -88,11 +116,20 @@ public class RedisRuleCache implements RuleCache {
     String key = buildCacheKey(rule.getRuleId());
     
     try {
-      redisTemplate.opsForValue().set(key, rule, ttlDuration);
-      lastAccess = Instant.now();
-      log.debug("Cached rule in Redis: {} (TTL: {})", rule.getRuleId(), ttlDuration);
+      // Wrap Redis put operation with circuit breaker
+      Runnable redisOperation = CircuitBreaker.decorateRunnable(redisCircuitBreaker, () -> {
+        redisTemplate.opsForValue().set(key, rule, ttlDuration);
+        lastAccess = Instant.now();
+        log.debug("Cached rule in Redis: {} (TTL: {})", rule.getRuleId(), ttlDuration);
+      });
       
-    } catch (DataAccessException e) {
+      redisOperation.run();
+      
+    } catch (CallNotPermittedException e) {
+      // Circuit breaker is open - silently fail the cache write
+      log.warn("Redis circuit breaker is open - cannot cache rule: {}", rule.getRuleId());
+      
+    } catch (Exception e) {
       log.warn("Redis error during put operation for rule: {}", rule.getRuleId(), e);
     }
   }
