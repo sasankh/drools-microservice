@@ -23,8 +23,25 @@ RUN addgroup -g 1000 appgroup && \
 # Copy the built JAR from build stage
 COPY --from=build /app/target/drools-rule-engine-*.jar app.jar
 
-# Configure JVM for containerized environment
-ENV JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError"
+# Configure JVM for containerized environment with performance optimizations
+ENV JAVA_OPTS="-XX:+UseContainerSupport \
+  -XX:InitialRAMPercentage=50.0 \
+  -XX:MaxRAMPercentage=75.0 \
+  -XX:MinRAMPercentage=50.0 \
+  -XX:+UseG1GC \
+  -XX:MaxGCPauseMillis=100 \
+  -XX:G1HeapRegionSize=16m \
+  -XX:InitiatingHeapOccupancyPercent=30 \
+  -XX:+UseStringDeduplication \
+  -XX:+OptimizeStringConcat \
+  -XX:+UseCompressedOops \
+  -XX:+UseCompressedClassPointers \
+  -XX:ThreadStackSize=1024 \
+  -XX:TieredStopAtLevel=4 \
+  -XX:+ExitOnOutOfMemoryError \
+  -Ddrools.dateformat=yyyy-MM-dd \
+  -Ddrools.timezone=UTC \
+  -Ddrools.multithreadEvaluation=true"
 
 # Health check configuration
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

@@ -1,5 +1,7 @@
 package com.company.drools.core.engine;
 
+import com.company.drools.api.exception.TimeoutException;
+import com.company.drools.config.TimeoutConfig;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
 import com.company.drools.storage.RuleStorage;
@@ -24,6 +26,7 @@ public class DroolsEngineService {
   private final RuleCompiler ruleCompiler;
   private final RuleExecutor ruleExecutor;
   private final RuleStorage ruleStorage;
+  private final TimeoutConfig timeoutConfig;
   
   // Metrics
   private final MeterRegistry meterRegistry;
@@ -42,11 +45,13 @@ public class DroolsEngineService {
                             RuleExecutor ruleExecutor, 
                             KieContainer kieContainer, 
                             RuleStorage ruleStorage,
+                            TimeoutConfig timeoutConfig,
                             MeterRegistry meterRegistry) {
     this.ruleCompiler = ruleCompiler;
     this.ruleExecutor = ruleExecutor;
     this.currentKieContainer = kieContainer;
     this.ruleStorage = ruleStorage;
+    this.timeoutConfig = timeoutConfig;
     this.meterRegistry = meterRegistry;
     log.info("DroolsEngineService initialized with rule storage: {}", ruleStorage.getClass().getSimpleName());
   }
@@ -90,8 +95,9 @@ public class DroolsEngineService {
         return RuleExecutor.ExecutionResult.failure("Rule is not active: " + ruleId);
       }
       
-      // Execute the rule
-      RuleExecutor.ExecutionResult result = ruleExecutor.executeRule(currentKieContainer, ruleId, inputData);
+      // Execute the rule with configured timeout
+      RuleExecutor.ExecutionResult result = ruleExecutor.executeRule(
+          currentKieContainer, ruleId, inputData, timeoutConfig.getRuleExecutionTimeoutSeconds());
       
       // Update execution statistics and metrics
       if (result.isSuccess()) {

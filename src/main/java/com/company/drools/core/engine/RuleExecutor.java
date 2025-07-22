@@ -1,15 +1,17 @@
 package com.company.drools.core.engine;
 
+import com.company.drools.api.exception.TimeoutException;
 import org.kie.api.runtime.KieContainer;
 import org.kie.api.runtime.KieSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 @Component
 public class RuleExecutor {
@@ -17,6 +19,13 @@ public class RuleExecutor {
   private static final Logger log = LoggerFactory.getLogger(RuleExecutor.class);
   
   private static final long DEFAULT_TIMEOUT_SECONDS = 30;
+  
+  private final Executor ruleExecutionExecutor;
+
+  public RuleExecutor(@Qualifier("ruleExecutionExecutor") Executor ruleExecutionExecutor) {
+    this.ruleExecutionExecutor = ruleExecutionExecutor;
+    log.info("RuleExecutor initialized with custom thread pool");
+  }
 
   public ExecutionResult executeRule(KieContainer kieContainer, String ruleId, Map<String, Object> inputData) {
     return executeRule(kieContainer, ruleId, inputData, DEFAULT_TIMEOUT_SECONDS);
@@ -29,10 +38,10 @@ public class RuleExecutor {
     long startTime = System.currentTimeMillis();
     
     try {
-      // Execute rule in a separate thread to handle timeout
+      // Execute rule in custom thread pool to handle timeout and provide better concurrency control
       CompletableFuture<Map<String, Object>> future = CompletableFuture.supplyAsync(() -> {
         return executeRuleInternal(kieContainer, ruleId, inputData);
-      });
+      }, ruleExecutionExecutor);
       
       Map<String, Object> result = future.get(timeoutSeconds, TimeUnit.SECONDS);
       long executionTime = System.currentTimeMillis() - startTime;
@@ -40,9 +49,9 @@ public class RuleExecutor {
       log.debug("Rule {} executed successfully in {}ms", ruleId, executionTime);
       return ExecutionResult.success(result, executionTime);
       
-    } catch (TimeoutException e) {
+    } catch (java.util.concurrent.TimeoutException e) {
       log.error("Rule {} execution timed out after {}s", ruleId, timeoutSeconds);
-      return ExecutionResult.failure("Rule execution timed out after " + timeoutSeconds + " seconds");
+      throw new TimeoutException("Rule execution: " + ruleId, timeoutSeconds, e);
       
     } catch (Exception e) {
       long executionTime = System.currentTimeMillis() - startTime;

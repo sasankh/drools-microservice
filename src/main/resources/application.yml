@@ -47,6 +47,26 @@ drools:
   refresh:
     auto-enabled: ${AUTO_REFRESH_ENABLED:false}
     interval-minutes: ${AUTO_REFRESH_INTERVAL_MINUTES:5}
+  timeout:
+    http:
+      connection: ${DROOLS_HTTP_CONNECTION_TIMEOUT:10}
+      read: ${DROOLS_HTTP_READ_TIMEOUT:30}
+    rule-execution: ${DROOLS_RULE_EXECUTION_TIMEOUT:30}
+    storage:
+      operation: ${DROOLS_STORAGE_OPERATION_TIMEOUT:60}
+    cache:
+      operation: ${DROOLS_CACHE_OPERATION_TIMEOUT:5}
+  thread-pool:
+    rule-execution:
+      core-size: ${DROOLS_THREAD_POOL_CORE_SIZE:10}
+      max-size: ${DROOLS_THREAD_POOL_MAX_SIZE:50}
+      queue-capacity: ${DROOLS_THREAD_POOL_QUEUE_CAPACITY:100}
+      keep-alive: ${DROOLS_THREAD_POOL_KEEP_ALIVE:60}
+    storage:
+      core-size: ${DROOLS_STORAGE_THREAD_POOL_CORE_SIZE:5}
+      max-size: ${DROOLS_STORAGE_THREAD_POOL_MAX_SIZE:20}
+      queue-capacity: ${DROOLS_STORAGE_THREAD_POOL_QUEUE_CAPACITY:50}
+      keep-alive: ${DROOLS_STORAGE_THREAD_POOL_KEEP_ALIVE:60}
 
 # Redis Configuration
 redis:
@@ -59,6 +79,12 @@ aws:
   endpoint: ${AWS_ENDPOINT:}  # For LocalStack
   access-key-id: ${AWS_ACCESS_KEY_ID:}
   secret-access-key: ${AWS_SECRET_ACCESS_KEY:}
+  s3:
+    connection-pool:
+      max-connections: ${AWS_S3_MAX_CONNECTIONS:50}
+      max-idle-time: ${AWS_S3_MAX_IDLE_TIME:60}
+      connection-timeout: ${AWS_S3_CONNECTION_TIMEOUT:10}
+      socket-timeout: ${AWS_S3_SOCKET_TIMEOUT:60}
 
 # Logging Configuration
 logging:
@@ -109,11 +135,26 @@ drools:
   rule-source: s3
   s3:
     endpoint: http://localhost:4566
+  timeout:
+    http:
+      connection: 5
+      read: 15
+    rule-execution: 15
+    storage:
+      operation: 30
+    cache:
+      operation: 3
 
 aws:
   endpoint: http://localhost:4566
   access-key-id: test
   secret-access-key: test
+  s3:
+    connection-pool:
+      max-connections: 25
+      max-idle-time: 30
+      connection-timeout: 5
+      socket-timeout: 30
 
 redis:
   enabled: true
@@ -129,9 +170,39 @@ drools:
   rule-source: s3
   refresh:
     auto-enabled: true
+  timeout:
+    http:
+      connection: 10
+      read: 30
+    rule-execution: 30
+    storage:
+      operation: 60
+    cache:
+      operation: 5
 
 redis:
   enabled: true
+
+aws:
+  s3:
+    connection-pool:
+      max-connections: 100
+      max-idle-time: 120
+      connection-timeout: 5
+      socket-timeout: 30
+
+drools:
+  thread-pool:
+    rule-execution:
+      core-size: 20
+      max-size: 100
+      queue-capacity: 200
+      keep-alive: 300
+    storage:
+      core-size: 10
+      max-size: 50
+      queue-capacity: 100
+      keep-alive: 300
 
 management.metrics.export.cloudwatch.enabled: true
 
@@ -139,3 +210,49 @@ logging:
   level:
     com.company.drools: INFO
     root: WARN
+
+---
+# Docker Profile (containerized environment)
+spring:
+  config:
+    activate:
+      on-profile: docker
+
+drools:
+  rule-source: s3
+  timeout:
+    http:
+      connection: 8
+      read: 25
+    rule-execution: 25
+    storage:
+      operation: 45
+    cache:
+      operation: 3
+  thread-pool:
+    rule-execution:
+      core-size: 8
+      max-size: 20
+      queue-capacity: 50
+      keep-alive: 120
+    storage:
+      core-size: 4
+      max-size: 10
+      queue-capacity: 25
+      keep-alive: 120
+
+redis:
+  enabled: true
+
+aws:
+  s3:
+    connection-pool:
+      max-connections: 25
+      max-idle-time: 60
+      connection-timeout: 5
+      socket-timeout: 30
+
+logging:
+  level:
+    com.company.drools: INFO
+    root: INFO

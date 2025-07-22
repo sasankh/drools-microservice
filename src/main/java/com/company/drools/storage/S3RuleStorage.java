@@ -1,6 +1,8 @@
 package com.company.drools.storage;
 
 import com.company.drools.api.exception.RuleNotFoundException;
+import com.company.drools.api.exception.TimeoutException;
+import com.company.drools.config.TimeoutConfig;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -14,10 +16,13 @@ import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Component("s3RuleStorage")
@@ -27,13 +32,15 @@ public class S3RuleStorage implements RuleStorage {
 
   private final S3Client s3Client;
   private final MeterRegistry meterRegistry;
+  private final TimeoutConfig timeoutConfig;
 
   @Value("${drools.s3.bucket-name}")
   private String bucketName;
 
-  public S3RuleStorage(S3Client s3Client, MeterRegistry meterRegistry) {
+  public S3RuleStorage(S3Client s3Client, MeterRegistry meterRegistry, TimeoutConfig timeoutConfig) {
     this.s3Client = s3Client;
     this.meterRegistry = meterRegistry;
+    this.timeoutConfig = timeoutConfig;
   }
 
   @Override

@@ -14,6 +14,7 @@ import com.company.drools.storage.RuleStorage;
 import com.company.drools.storage.StorageFactory;
 import com.company.drools.storage.S3RuleStorage;
 import com.company.drools.cache.RedisRuleCache;
+import com.company.drools.config.ThreadPoolConfig;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
@@ -43,6 +44,7 @@ public class AdminController {
   private final StorageFactory storageFactory;
   private final RuleCache ruleCache;
   private final MeterRegistry meterRegistry;
+  private final ThreadPoolConfig threadPoolConfig;
   
   @Value("${drools.rule-source:memory}")
   private String ruleSource;
@@ -62,11 +64,13 @@ public class AdminController {
   public AdminController(DroolsEngineService droolsEngineService, 
                         StorageFactory storageFactory,
                         RuleCache ruleCache,
-                        MeterRegistry meterRegistry) {
+                        MeterRegistry meterRegistry,
+                        ThreadPoolConfig threadPoolConfig) {
     this.droolsEngineService = droolsEngineService;
     this.storageFactory = storageFactory;
     this.ruleCache = ruleCache;
     this.meterRegistry = meterRegistry;
+    this.threadPoolConfig = threadPoolConfig;
   }
 
   /**
@@ -258,6 +262,45 @@ public class AdminController {
     info.put("timestamp", Instant.now());
     
     return ResponseEntity.ok(info);
+  }
+
+  /**
+   * Get thread pool statistics for monitoring performance.
+   */
+  @GetMapping("/thread-pools")
+  public ResponseEntity<Map<String, Object>> threadPoolStats() {
+    // Start timing the request
+    Timer.Sample sample = Timer.start(meterRegistry);
+    
+    try {
+      // Record API request
+      meterRegistry.counter("drools.api.requests", "endpoint", "/admin/thread-pools").increment();
+      
+      Map<String, Object> stats = new HashMap<>();
+      stats.put("rule_execution_pool", threadPoolConfig.getRuleExecutionPoolStats());
+      stats.put("storage_pool", threadPoolConfig.getStoragePoolStats());
+      stats.put("timestamp", Instant.now());
+      
+      // Record successful response
+      sample.stop(Timer.builder("drools.api.response.time")
+                 .tag("endpoint", "/admin/thread-pools")
+                 .tag("status", "success")
+                 .register(meterRegistry));
+      
+      return ResponseEntity.ok(stats);
+      
+    } catch (Exception e) {
+      log.error("Error retrieving thread pool statistics", e);
+      // Record error response
+      meterRegistry.counter("drools.api.errors", 
+                          "endpoint", "/admin/thread-pools",
+                          "error_type", "unexpected").increment();
+      sample.stop(Timer.builder("drools.api.response.time")
+                 .tag("endpoint", "/admin/thread-pools")
+                 .tag("status", "error")
+                 .register(meterRegistry));
+      throw e;
+    }
   }
 
   /**

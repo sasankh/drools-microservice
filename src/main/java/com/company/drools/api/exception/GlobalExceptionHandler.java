@@ -62,6 +62,19 @@ public class GlobalExceptionHandler {
     return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
   }
 
+  @ExceptionHandler(TimeoutException.class)
+  public ResponseEntity<RuleExecutionResponse> handleTimeoutException(TimeoutException ex) {
+    log.error("Operation timed out: {} after {}s", ex.getOperation(), ex.getTimeoutSeconds(), ex);
+    
+    RuleExecutionResponse response = RuleExecutionResponse.failure(
+        null,
+        "TIMEOUT_ERROR",
+        String.format("Operation '%s' timed out after %d seconds", ex.getOperation(), ex.getTimeoutSeconds())
+    );
+    
+    return ResponseEntity.status(HttpStatus.REQUEST_TIMEOUT).body(response);
+  }
+
   @ExceptionHandler(IllegalArgumentException.class)
   public ResponseEntity<RuleExecutionResponse> handleIllegalArgumentException(IllegalArgumentException ex) {
     log.warn("Invalid argument: {}", ex.getMessage());
