@@ -24,19 +24,19 @@ public class DroolsConfig {
   @Bean
   public KieContainer kieContainer(KieServices kieServices) {
     log.info("Initializing Drools KieContainer...");
-    
+
     KieRepository kieRepository = kieServices.getRepository();
-    
+
     // For now, create an empty KieContainer
     // This will be enhanced when we add rule loading functionality
     KieFileSystem kieFileSystem = kieServices.newKieFileSystem();
-    
+
     KieBuilder kieBuilder = kieServices.newKieBuilder(kieFileSystem);
     kieBuilder.buildAll();
-    
+
     KieModule kieModule = kieBuilder.getKieModule();
     KieContainer kieContainer = kieServices.newKieContainer(kieModule.getReleaseId());
-    
+
     log.info("Drools KieContainer initialized successfully");
     return kieContainer;
   }

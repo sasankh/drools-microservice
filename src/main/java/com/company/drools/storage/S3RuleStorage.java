@@ -2,7 +2,6 @@ package com.company.drools.storage;
 
 import com.company.drools.api.exception.CircuitBreakerException;
 import com.company.drools.api.exception.RuleNotFoundException;
-import com.company.drools.api.exception.TimeoutException;
 import com.company.drools.config.TimeoutConfig;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
@@ -10,6 +9,11 @@ import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -19,16 +23,6 @@ import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
-
-import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 @Component("s3RuleStorage")
 public class S3RuleStorage implements RuleStorage {
@@ -43,10 +37,11 @@ public class S3RuleStorage implements RuleStorage {
   @Value("${drools.s3.bucket-name}")
   private String bucketName;
 
-  public S3RuleStorage(S3Client s3Client, 
-                       MeterRegistry meterRegistry, 
-                       TimeoutConfig timeoutConfig,
-                       @Qualifier("s3CircuitBreaker") CircuitBreaker s3CircuitBreaker) {
+  public S3RuleStorage(
+      S3Client s3Client,
+      MeterRegistry meterRegistry,
+      TimeoutConfig timeoutConfig,
+      @Qualifier("s3CircuitBreaker") CircuitBreaker s3CircuitBreaker) {
     this.s3Client = s3Client;
     this.meterRegistry = meterRegistry;
     this.timeoutConfig = timeoutConfig;
@@ -58,74 +53,76 @@ public class S3RuleStorage implements RuleStorage {
     log.debug("Loading rule from S3: {}", ruleId);
 
     String s3Key = ruleIdToS3Key(ruleId);
-    
+
     // Start timing the storage operation
     Timer.Sample sample = Timer.start(meterRegistry);
-    
+
     try {
       // Wrap S3 operations with circuit breaker
-      Supplier<Optional<Rule>> s3Operation = CircuitBreaker.decorateSupplier(s3CircuitBreaker, () -> {
-        try {
-          GetObjectRequest request = GetObjectRequest.builder()
-              .bucket(bucketName)
-              .key(s3Key)
-              .build();
+      Supplier<Optional<Rule>> s3Operation =
+          CircuitBreaker.decorateSupplier(
+              s3CircuitBreaker,
+              () -> {
+                try {
+                  GetObjectRequest request =
+                      GetObjectRequest.builder().bucket(bucketName).key(s3Key).build();
 
-          String content = s3Client.getObjectAsBytes(request).asUtf8String();
-          
-          // Get object metadata for rule metadata
-          HeadObjectRequest headRequest = HeadObjectRequest.builder()
-              .bucket(bucketName)
-              .key(s3Key)
-              .build();
-          
-          HeadObjectResponse headResponse = s3Client.headObject(headRequest);
-          RuleMetadata metadata = createMetadataFromS3Object(headResponse);
-          
-          Rule rule = new Rule(ruleId, content, metadata);
-          log.debug("Successfully loaded rule: {} from S3 key: {}", ruleId, s3Key);
-          
-          return Optional.of(rule);
-          
-        } catch (NoSuchKeyException e) {
-          log.warn("Rule not found in S3: {} (key: {})", ruleId, s3Key);
-          return Optional.empty();
-        }
-      });
-      
+                  String content = s3Client.getObjectAsBytes(request).asUtf8String();
+
+                  // Get object metadata for rule metadata
+                  HeadObjectRequest headRequest =
+                      HeadObjectRequest.builder().bucket(bucketName).key(s3Key).build();
+
+                  HeadObjectResponse headResponse = s3Client.headObject(headRequest);
+                  RuleMetadata metadata = createMetadataFromS3Object(headResponse);
+
+                  Rule rule = new Rule(ruleId, content, metadata);
+                  log.debug("Successfully loaded rule: {} from S3 key: {}", ruleId, s3Key);
+
+                  return Optional.of(rule);
+
+                } catch (NoSuchKeyException e) {
+                  log.warn("Rule not found in S3: {} (key: {})", ruleId, s3Key);
+                  return Optional.empty();
+                }
+              });
+
       Optional<Rule> result = s3Operation.get();
-      
+
       // Record successful storage operation
-      sample.stop(Timer.builder("drools.storage.operation.time")
-                 .tag("operation", "getRule")
-                 .tag("storage_type", "s3")
-                 .tag("status", result.isPresent() ? "success" : "not_found")
-                 .register(meterRegistry));
-      
+      sample.stop(
+          Timer.builder("drools.storage.operation.time")
+              .tag("operation", "getRule")
+              .tag("storage_type", "s3")
+              .tag("status", result.isPresent() ? "success" : "not_found")
+              .register(meterRegistry));
+
       return result;
 
     } catch (CallNotPermittedException e) {
       // Circuit breaker is open
       log.error("S3 circuit breaker is open - cannot load rule: {}", ruleId, e);
-      
+
       // Record circuit breaker open
-      sample.stop(Timer.builder("drools.storage.operation.time")
-                 .tag("operation", "getRule")
-                 .tag("storage_type", "s3")
-                 .tag("status", "circuit_breaker_open")
-                 .register(meterRegistry));
-      
+      sample.stop(
+          Timer.builder("drools.storage.operation.time")
+              .tag("operation", "getRule")
+              .tag("storage_type", "s3")
+              .tag("status", "circuit_breaker_open")
+              .register(meterRegistry));
+
       throw new CircuitBreakerException("s3", s3CircuitBreaker.getState().toString(), e);
     } catch (SdkException e) {
       log.error("Failed to load rule from S3: {} (key: {})", ruleId, s3Key, e);
-      
+
       // Record failed storage operation
-      sample.stop(Timer.builder("drools.storage.operation.time")
-                 .tag("operation", "getRule")
-                 .tag("storage_type", "s3")
-                 .tag("status", "error")
-                 .register(meterRegistry));
-      
+      sample.stop(
+          Timer.builder("drools.storage.operation.time")
+              .tag("operation", "getRule")
+              .tag("storage_type", "s3")
+              .tag("status", "error")
+              .register(meterRegistry));
+
       throw new RuntimeException("Failed to load rule from S3: " + ruleId, e);
     }
   }
@@ -135,41 +132,41 @@ public class S3RuleStorage implements RuleStorage {
     log.debug("Loading all rules from S3 bucket: {}", bucketName);
 
     List<Rule> rules = new ArrayList<>();
-    
+
     try {
-      ListObjectsV2Request request = ListObjectsV2Request.builder()
-          .bucket(bucketName)
-          .build();
+      ListObjectsV2Request request = ListObjectsV2Request.builder().bucket(bucketName).build();
 
       ListObjectsV2Response response;
       do {
         response = s3Client.listObjectsV2(request);
-        
+
         for (S3Object s3Object : response.contents()) {
           if (s3Object.key().endsWith(".drl")) {
             String ruleId = s3KeyToRuleId(s3Object.key());
-            
+
             try {
-              String content = s3Client.getObjectAsBytes(GetObjectRequest.builder()
-                  .bucket(bucketName)
-                  .key(s3Object.key())
-                  .build()).asUtf8String();
-              
+              String content =
+                  s3Client
+                      .getObjectAsBytes(
+                          GetObjectRequest.builder().bucket(bucketName).key(s3Object.key()).build())
+                      .asUtf8String();
+
               RuleMetadata metadata = createMetadataFromS3Object(s3Object);
               rules.add(new Rule(ruleId, content, metadata));
-              
+
             } catch (Exception e) {
               log.warn("Failed to load rule: {} from S3 key: {}", ruleId, s3Object.key(), e);
               // Continue loading other rules
             }
           }
         }
-        
-        request = ListObjectsV2Request.builder()
-            .bucket(bucketName)
-            .continuationToken(response.nextContinuationToken())
-            .build();
-            
+
+        request =
+            ListObjectsV2Request.builder()
+                .bucket(bucketName)
+                .continuationToken(response.nextContinuationToken())
+                .build();
+
       } while (response.isTruncated());
 
       log.info("Loaded {} rules from S3 bucket: {}", rules.size(), bucketName);
@@ -186,13 +183,14 @@ public class S3RuleStorage implements RuleStorage {
     log.debug("Saving rule to S3: {}", rule.getRuleId());
 
     String s3Key = ruleIdToS3Key(rule.getRuleId());
-    
+
     try {
-      PutObjectRequest request = PutObjectRequest.builder()
-          .bucket(bucketName)
-          .key(s3Key)
-          .contentType("text/plain")
-          .build();
+      PutObjectRequest request =
+          PutObjectRequest.builder()
+              .bucket(bucketName)
+              .key(s3Key)
+              .contentType("text/plain")
+              .build();
 
       s3Client.putObject(request, RequestBody.fromString(rule.getContent()));
       log.info("Successfully saved rule: {} to S3 key: {}", rule.getRuleId(), s3Key);
@@ -208,17 +206,15 @@ public class S3RuleStorage implements RuleStorage {
     log.debug("Deleting rule from S3: {}", ruleId);
 
     String s3Key = ruleIdToS3Key(ruleId);
-    
+
     try {
       // Check if rule exists first
       if (!ruleExists(ruleId)) {
         throw new RuleNotFoundException("Rule not found: " + ruleId);
       }
 
-      DeleteObjectRequest request = DeleteObjectRequest.builder()
-          .bucket(bucketName)
-          .key(s3Key)
-          .build();
+      DeleteObjectRequest request =
+          DeleteObjectRequest.builder().bucket(bucketName).key(s3Key).build();
 
       s3Client.deleteObject(request);
       log.info("Successfully deleted rule: {} from S3 key: {}", ruleId, s3Key);
@@ -232,12 +228,9 @@ public class S3RuleStorage implements RuleStorage {
   @Override
   public boolean ruleExists(String ruleId) {
     String s3Key = ruleIdToS3Key(ruleId);
-    
+
     try {
-      HeadObjectRequest request = HeadObjectRequest.builder()
-          .bucket(bucketName)
-          .key(s3Key)
-          .build();
+      HeadObjectRequest request = HeadObjectRequest.builder().bucket(bucketName).key(s3Key).build();
 
       s3Client.headObject(request);
       return true;
@@ -267,24 +260,21 @@ public class S3RuleStorage implements RuleStorage {
   @Override
   public long getTotalRuleCount() {
     try {
-      ListObjectsV2Request request = ListObjectsV2Request.builder()
-          .bucket(bucketName)
-          .build();
+      ListObjectsV2Request request = ListObjectsV2Request.builder().bucket(bucketName).build();
 
       long count = 0;
       ListObjectsV2Response response;
-      
+
       do {
         response = s3Client.listObjectsV2(request);
-        count += response.contents().stream()
-            .filter(obj -> obj.key().endsWith(".drl"))
-            .count();
-            
-        request = ListObjectsV2Request.builder()
-            .bucket(bucketName)
-            .continuationToken(response.nextContinuationToken())
-            .build();
-            
+        count += response.contents().stream().filter(obj -> obj.key().endsWith(".drl")).count();
+
+        request =
+            ListObjectsV2Request.builder()
+                .bucket(bucketName)
+                .continuationToken(response.nextContinuationToken())
+                .build();
+
       } while (response.isTruncated());
 
       return count;
@@ -298,26 +288,26 @@ public class S3RuleStorage implements RuleStorage {
   @Override
   public List<String> getRuleIds() {
     try {
-      ListObjectsV2Request request = ListObjectsV2Request.builder()
-          .bucket(bucketName)
-          .build();
+      ListObjectsV2Request request = ListObjectsV2Request.builder().bucket(bucketName).build();
 
       List<String> ruleIds = new ArrayList<>();
       ListObjectsV2Response response;
-      
+
       do {
         response = s3Client.listObjectsV2(request);
-        List<String> pageRuleIds = response.contents().stream()
-            .filter(obj -> obj.key().endsWith(".drl"))
-            .map(obj -> s3KeyToRuleId(obj.key()))
-            .collect(Collectors.toList());
+        List<String> pageRuleIds =
+            response.contents().stream()
+                .filter(obj -> obj.key().endsWith(".drl"))
+                .map(obj -> s3KeyToRuleId(obj.key()))
+                .collect(Collectors.toList());
         ruleIds.addAll(pageRuleIds);
-        
-        request = ListObjectsV2Request.builder()
-            .bucket(bucketName)
-            .continuationToken(response.nextContinuationToken())
-            .build();
-            
+
+        request =
+            ListObjectsV2Request.builder()
+                .bucket(bucketName)
+                .continuationToken(response.nextContinuationToken())
+                .build();
+
       } while (response.isTruncated());
 
       return ruleIds;
@@ -329,16 +319,16 @@ public class S3RuleStorage implements RuleStorage {
   }
 
   /**
-   * Transforms rule ID to S3 key path.
-   * Example: "pricing.discount.simple" -> "pricing/discount/simple.drl"
+   * Transforms rule ID to S3 key path. Example: "pricing.discount.simple" ->
+   * "pricing/discount/simple.drl"
    */
   private String ruleIdToS3Key(String ruleId) {
     return ruleId.replace(".", "/") + ".drl";
   }
 
   /**
-   * Transforms S3 key path to rule ID.
-   * Example: "pricing/discount/simple.drl" -> "pricing.discount.simple"
+   * Transforms S3 key path to rule ID. Example: "pricing/discount/simple.drl" ->
+   * "pricing.discount.simple"
    */
   private String s3KeyToRuleId(String s3Key) {
     String ruleId = s3Key;

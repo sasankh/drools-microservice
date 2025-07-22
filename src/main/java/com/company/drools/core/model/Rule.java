@@ -1,6 +1,5 @@
 package com.company.drools.core.model;
 
-import java.time.LocalDateTime;
 import java.util.Objects;
 
 public class Rule {
@@ -42,9 +41,6 @@ public class Rule {
 
   @Override
   public String toString() {
-    return "Rule{" +
-        "ruleId='" + ruleId + '\'' +
-        ", metadata=" + metadata +
-        '}';
+    return "Rule{" + "ruleId='" + ruleId + '\'' + ", metadata=" + metadata + '}';
   }
 }

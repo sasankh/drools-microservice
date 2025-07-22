@@ -3,9 +3,7 @@ package com.company.drools.api.dto;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 
-/**
- * Response DTO for single rule refresh operations.
- */
+/** Response DTO for single rule refresh operations. */
 public class RefreshRuleResponse {
 
   @JsonProperty("rule_id")
@@ -39,8 +37,12 @@ public class RefreshRuleResponse {
     this.timestamp = Instant.now();
   }
 
-  public RefreshRuleResponse(String ruleId, String status, Instant previousVersion, 
-                            Instant currentVersion, long compilationTimeMs) {
+  public RefreshRuleResponse(
+      String ruleId,
+      String status,
+      Instant previousVersion,
+      Instant currentVersion,
+      long compilationTimeMs) {
     this.ruleId = ruleId;
     this.status = status;
     this.previousVersion = previousVersion;
@@ -50,24 +52,59 @@ public class RefreshRuleResponse {
   }
 
   // Getters and setters
-  public String getRuleId() { return ruleId; }
-  public void setRuleId(String ruleId) { this.ruleId = ruleId; }
+  public String getRuleId() {
+    return ruleId;
+  }
 
-  public String getStatus() { return status; }
-  public void setStatus(String status) { this.status = status; }
+  public void setRuleId(String ruleId) {
+    this.ruleId = ruleId;
+  }
 
-  public Instant getPreviousVersion() { return previousVersion; }
-  public void setPreviousVersion(Instant previousVersion) { this.previousVersion = previousVersion; }
+  public String getStatus() {
+    return status;
+  }
 
-  public Instant getCurrentVersion() { return currentVersion; }
-  public void setCurrentVersion(Instant currentVersion) { this.currentVersion = currentVersion; }
+  public void setStatus(String status) {
+    this.status = status;
+  }
 
-  public long getCompilationTimeMs() { return compilationTimeMs; }
-  public void setCompilationTimeMs(long compilationTimeMs) { this.compilationTimeMs = compilationTimeMs; }
+  public Instant getPreviousVersion() {
+    return previousVersion;
+  }
 
-  public String getError() { return error; }
-  public void setError(String error) { this.error = error; }
+  public void setPreviousVersion(Instant previousVersion) {
+    this.previousVersion = previousVersion;
+  }
 
-  public Instant getTimestamp() { return timestamp; }
-  public void setTimestamp(Instant timestamp) { this.timestamp = timestamp; }
+  public Instant getCurrentVersion() {
+    return currentVersion;
+  }
+
+  public void setCurrentVersion(Instant currentVersion) {
+    this.currentVersion = currentVersion;
+  }
+
+  public long getCompilationTimeMs() {
+    return compilationTimeMs;
+  }
+
+  public void setCompilationTimeMs(long compilationTimeMs) {
+    this.compilationTimeMs = compilationTimeMs;
+  }
+
+  public String getError() {
+    return error;
+  }
+
+  public void setError(String error) {
+    this.error = error;
+  }
+
+  public Instant getTimestamp() {
+    return timestamp;
+  }
+
+  public void setTimestamp(Instant timestamp) {
+    this.timestamp = timestamp;
+  }
 }

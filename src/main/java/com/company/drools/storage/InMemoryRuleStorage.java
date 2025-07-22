@@ -2,20 +2,19 @@ package com.company.drools.storage;
 
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 @Component
 public class InMemoryRuleStorage {
 
   private static final Logger log = LoggerFactory.getLogger(InMemoryRuleStorage.class);
-  
+
   private final Map<String, String> ruleContents = new ConcurrentHashMap<>();
 
   public InMemoryRuleStorage() {
@@ -25,14 +24,15 @@ public class InMemoryRuleStorage {
 
   private void initializeSampleRules() {
     log.info("Initializing sample rules for testing");
-    
+
     // Sample rule 1: Simple discount rule
-    String discountRule = """
+    String discountRule =
+        """
         package com.company.rules.pricing.discount
-        
+
         import java.util.Map
         import java.util.HashMap
-        
+
         rule "Simple Discount Rule"
         when
             $data : Map(this["amount"] != null, (Double)this["amount"] > 50.0)
@@ -40,23 +40,24 @@ public class InMemoryRuleStorage {
             Map result = new HashMap();
             Double amount = (Double) $data.get("amount");
             Double discount = amount * 0.10; // 10% discount
-            
+
             result.put("amount", amount);
             result.put("discount", discount);
             result.put("final_amount", amount - discount);
             result.put("applied_rule", "simple-discount");
-            
+
             $data.put("result", result);
         end
         """;
-    
+
     // Sample rule 2: VIP customer rule
-    String vipRule = """
+    String vipRule =
+        """
         package com.company.rules.pricing.discount
-        
+
         import java.util.Map
         import java.util.HashMap
-        
+
         rule "VIP Customer Rule"
         when
             $data : Map(
@@ -68,37 +69,37 @@ public class InMemoryRuleStorage {
             Map result = new HashMap();
             Double amount = (Double) $data.get("amount");
             Double discount = amount * 0.20; // 20% discount for VIP
-            
+
             result.put("amount", amount);
             result.put("discount", discount);
             result.put("final_amount", amount - discount);
             result.put("applied_rule", "vip-discount");
             result.put("customer_tier", "vip");
-            
+
             $data.put("result", result);
         end
         """;
 
     ruleContents.put("pricing.discount.simple", discountRule);
     ruleContents.put("pricing.discount.vip", vipRule);
-    
+
     log.info("Initialized {} sample rules", ruleContents.size());
   }
 
   public List<Rule> loadAllRules() {
     log.debug("Loading all rules from in-memory storage");
-    
+
     List<Rule> rules = new ArrayList<>();
-    
+
     for (Map.Entry<String, String> entry : ruleContents.entrySet()) {
       String ruleId = entry.getKey();
       String content = entry.getValue();
       RuleMetadata metadata = RuleMetadata.createNew();
-      
+
       Rule rule = new Rule(ruleId, content, metadata);
       rules.add(rule);
     }
-    
+
     log.debug("Loaded {} rules from storage", rules.size());
     return rules;
   }
@@ -108,7 +109,7 @@ public class InMemoryRuleStorage {
     if (content == null) {
       return null;
     }
-    
+
     RuleMetadata metadata = RuleMetadata.createNew();
     return new Rule(ruleId, content, metadata);
   }

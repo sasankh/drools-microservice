@@ -4,7 +4,6 @@ import com.company.drools.api.validation.ValidRuleData;
 import com.company.drools.api.validation.ValidRuleId;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotNull;
-
 import java.util.Map;
 import java.util.Objects;
 
@@ -20,8 +19,7 @@ public class RuleExecutionRequest {
   @ValidRuleData
   private Map<String, Object> data;
 
-  public RuleExecutionRequest() {
-  }
+  public RuleExecutionRequest() {}
 
   public RuleExecutionRequest(String ruleId, Map<String, Object> data) {
     this.ruleId = ruleId;
@@ -59,9 +57,6 @@ public class RuleExecutionRequest {
 
   @Override
   public String toString() {
-    return "RuleExecutionRequest{" +
-        "ruleId='" + ruleId + '\'' +
-        ", data=" + data +
-        '}';
+    return "RuleExecutionRequest{" + "ruleId='" + ruleId + '\'' + ", data=" + data + '}';
   }
 }

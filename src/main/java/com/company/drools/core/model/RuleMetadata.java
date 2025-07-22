@@ -14,9 +14,14 @@ public class RuleMetadata {
   private final long executionCount;
   private final double averageExecutionTimeMs;
 
-  public RuleMetadata(String version, LocalDateTime loadedAt, LocalDateTime lastModified, 
-                     RuleStatus status, String errorMessage, long executionCount, 
-                     double averageExecutionTimeMs) {
+  public RuleMetadata(
+      String version,
+      LocalDateTime loadedAt,
+      LocalDateTime lastModified,
+      RuleStatus status,
+      String errorMessage,
+      long executionCount,
+      double averageExecutionTimeMs) {
     this.version = version;
     this.loadedAt = Objects.requireNonNull(loadedAt, "Loaded at cannot be null");
     this.lastModified = lastModified;
@@ -27,35 +32,51 @@ public class RuleMetadata {
   }
 
   public static RuleMetadata createNew() {
-    return new RuleMetadata(
-        "1.0", 
-        LocalDateTime.now(), 
-        null, 
-        RuleStatus.LOADING,
-        null,
-        0,
-        0.0
-    );
+    return new RuleMetadata("1.0", LocalDateTime.now(), null, RuleStatus.LOADING, null, 0, 0.0);
   }
 
   public RuleMetadata withStatus(RuleStatus status) {
-    return new RuleMetadata(version, loadedAt, lastModified, status, errorMessage, executionCount, averageExecutionTimeMs);
+    return new RuleMetadata(
+        version,
+        loadedAt,
+        lastModified,
+        status,
+        errorMessage,
+        executionCount,
+        averageExecutionTimeMs);
   }
 
   public RuleMetadata withError(String errorMessage) {
-    return new RuleMetadata(version, loadedAt, lastModified, RuleStatus.ERROR, errorMessage, executionCount, averageExecutionTimeMs);
+    return new RuleMetadata(
+        version,
+        loadedAt,
+        lastModified,
+        RuleStatus.ERROR,
+        errorMessage,
+        executionCount,
+        averageExecutionTimeMs);
   }
 
   public RuleMetadata withExecution(double executionTimeMs) {
     long newCount = executionCount + 1;
     double newAverage = (averageExecutionTimeMs * executionCount + executionTimeMs) / newCount;
-    return new RuleMetadata(version, loadedAt, lastModified, status, errorMessage, newCount, newAverage);
+    return new RuleMetadata(
+        version, loadedAt, lastModified, status, errorMessage, newCount, newAverage);
   }
 
   public RuleMetadata withLastModified(Instant lastModified) {
-    LocalDateTime lastModifiedLdt = lastModified != null ? 
-        LocalDateTime.ofInstant(lastModified, java.time.ZoneOffset.UTC) : null;
-    return new RuleMetadata(version, loadedAt, lastModifiedLdt, status, errorMessage, executionCount, averageExecutionTimeMs);
+    LocalDateTime lastModifiedLdt =
+        lastModified != null
+            ? LocalDateTime.ofInstant(lastModified, java.time.ZoneOffset.UTC)
+            : null;
+    return new RuleMetadata(
+        version,
+        loadedAt,
+        lastModifiedLdt,
+        status,
+        errorMessage,
+        executionCount,
+        averageExecutionTimeMs);
   }
 
   public String getVersion() {
@@ -88,13 +109,19 @@ public class RuleMetadata {
 
   @Override
   public String toString() {
-    return "RuleMetadata{" +
-        "version='" + version + '\'' +
-        ", loadedAt=" + loadedAt +
-        ", status=" + status +
-        ", executionCount=" + executionCount +
-        ", averageExecutionTimeMs=" + averageExecutionTimeMs +
-        '}';
+    return "RuleMetadata{"
+        + "version='"
+        + version
+        + '\''
+        + ", loadedAt="
+        + loadedAt
+        + ", status="
+        + status
+        + ", executionCount="
+        + executionCount
+        + ", averageExecutionTimeMs="
+        + averageExecutionTimeMs
+        + '}';
   }
 
   public enum RuleStatus {

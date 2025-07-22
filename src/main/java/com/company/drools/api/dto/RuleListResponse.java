@@ -4,9 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 import java.util.List;
 
-/**
- * Response DTO for listing loaded rules.
- */
+/** Response DTO for listing loaded rules. */
 public class RuleListResponse {
 
   @JsonProperty("total_rules")
@@ -53,9 +51,7 @@ public class RuleListResponse {
     this.timestamp = timestamp;
   }
 
-  /**
-   * Information about a loaded rule.
-   */
+  /** Information about a loaded rule. */
   public static class RuleInfo {
 
     @JsonProperty("rule_id")
@@ -84,8 +80,15 @@ public class RuleListResponse {
 
     public RuleInfo() {}
 
-    public RuleInfo(String ruleId, String status, Instant loadedAt, Instant lastModified, 
-                   long executionCount, double avgExecutionTimeMs, boolean cached, String version) {
+    public RuleInfo(
+        String ruleId,
+        String status,
+        Instant loadedAt,
+        Instant lastModified,
+        long executionCount,
+        double avgExecutionTimeMs,
+        boolean cached,
+        String version) {
       this.ruleId = ruleId;
       this.status = status;
       this.loadedAt = loadedAt;
@@ -97,28 +100,68 @@ public class RuleListResponse {
     }
 
     // Getters and setters
-    public String getRuleId() { return ruleId; }
-    public void setRuleId(String ruleId) { this.ruleId = ruleId; }
+    public String getRuleId() {
+      return ruleId;
+    }
 
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
+    public void setRuleId(String ruleId) {
+      this.ruleId = ruleId;
+    }
 
-    public Instant getLoadedAt() { return loadedAt; }
-    public void setLoadedAt(Instant loadedAt) { this.loadedAt = loadedAt; }
+    public String getStatus() {
+      return status;
+    }
 
-    public Instant getLastModified() { return lastModified; }
-    public void setLastModified(Instant lastModified) { this.lastModified = lastModified; }
+    public void setStatus(String status) {
+      this.status = status;
+    }
 
-    public long getExecutionCount() { return executionCount; }
-    public void setExecutionCount(long executionCount) { this.executionCount = executionCount; }
+    public Instant getLoadedAt() {
+      return loadedAt;
+    }
 
-    public double getAvgExecutionTimeMs() { return avgExecutionTimeMs; }
-    public void setAvgExecutionTimeMs(double avgExecutionTimeMs) { this.avgExecutionTimeMs = avgExecutionTimeMs; }
+    public void setLoadedAt(Instant loadedAt) {
+      this.loadedAt = loadedAt;
+    }
 
-    public boolean isCached() { return cached; }
-    public void setCached(boolean cached) { this.cached = cached; }
+    public Instant getLastModified() {
+      return lastModified;
+    }
 
-    public String getVersion() { return version; }
-    public void setVersion(String version) { this.version = version; }
+    public void setLastModified(Instant lastModified) {
+      this.lastModified = lastModified;
+    }
+
+    public long getExecutionCount() {
+      return executionCount;
+    }
+
+    public void setExecutionCount(long executionCount) {
+      this.executionCount = executionCount;
+    }
+
+    public double getAvgExecutionTimeMs() {
+      return avgExecutionTimeMs;
+    }
+
+    public void setAvgExecutionTimeMs(double avgExecutionTimeMs) {
+      this.avgExecutionTimeMs = avgExecutionTimeMs;
+    }
+
+    public boolean isCached() {
+      return cached;
+    }
+
+    public void setCached(boolean cached) {
+      this.cached = cached;
+    }
+
+    public String getVersion() {
+      return version;
+    }
+
+    public void setVersion(String version) {
+      this.version = version;
+    }
   }
 }

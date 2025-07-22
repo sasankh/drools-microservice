@@ -1,7 +1,6 @@
 package com.company.drools.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-
 import java.time.Instant;
 import java.util.Objects;
 
@@ -67,7 +66,9 @@ public class ErrorResponse {
     if (this == o) return true;
     if (o == null || getClass() != o.getClass()) return false;
     ErrorResponse that = (ErrorResponse) o;
-    return Objects.equals(code, that.code) && Objects.equals(message, that.message) && Objects.equals(details, that.details);
+    return Objects.equals(code, that.code)
+        && Objects.equals(message, that.message)
+        && Objects.equals(details, that.details);
   }
 
   @Override
@@ -77,11 +78,19 @@ public class ErrorResponse {
 
   @Override
   public String toString() {
-    return "ErrorResponse{" +
-        "code='" + code + '\'' +
-        ", message='" + message + '\'' +
-        ", details='" + details + '\'' +
-        ", timestamp='" + timestamp + '\'' +
-        '}';
+    return "ErrorResponse{"
+        + "code='"
+        + code
+        + '\''
+        + ", message='"
+        + message
+        + '\''
+        + ", details='"
+        + details
+        + '\''
+        + ", timestamp='"
+        + timestamp
+        + '\''
+        + '}';
   }
 }

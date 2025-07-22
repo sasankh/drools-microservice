@@ -1,5 +1,10 @@
 package com.company.drools.config;
 
+import java.net.URI;
+import java.time.Duration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -10,16 +15,10 @@ import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.retry.RetryPolicy;
 import software.amazon.awssdk.core.retry.backoff.BackoffStrategy;
-import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import software.amazon.awssdk.http.SdkHttpClient;
+import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-
-import java.net.URI;
-import java.time.Duration;
 
 @Configuration
 @ConfigurationProperties(prefix = "aws")
@@ -42,36 +41,41 @@ public class S3Config {
   // Connection pool configuration
   @Value("${aws.s3.connection-pool.max-connections:50}")
   private int maxConnections;
-  
+
   @Value("${aws.s3.connection-pool.max-idle-time:60}")
   private int maxIdleTimeSeconds;
-  
+
   @Value("${aws.s3.connection-pool.connection-timeout:10}")
   private int connectionTimeoutSeconds;
-  
+
   @Value("${aws.s3.connection-pool.socket-timeout:60}")
   private int socketTimeoutSeconds;
-  
 
   @Bean
   public S3Client s3Client() {
     log.info("Configuring S3 client for region: {} with connection pooling", region);
-    log.info("Connection pool settings: max-connections={}, connection-timeout={}s, socket-timeout={}s, idle-time={}s", 
-             maxConnections, connectionTimeoutSeconds, socketTimeoutSeconds, maxIdleTimeSeconds);
+    log.info(
+        "Connection pool settings: max-connections={}, connection-timeout={}s, socket-timeout={}s, idle-time={}s",
+        maxConnections,
+        connectionTimeoutSeconds,
+        socketTimeoutSeconds,
+        maxIdleTimeSeconds);
 
     // Create HTTP client with connection pooling
     SdkHttpClient httpClient = createHttpClientWithPooling();
 
-    var clientBuilder = S3Client.builder()
-        .region(Region.of(region))
-        .credentialsProvider(createCredentialsProvider())
-        .httpClient(httpClient)
-        .overrideConfiguration(builder -> builder.retryPolicy(createRetryPolicy()));
+    var clientBuilder =
+        S3Client.builder()
+            .region(Region.of(region))
+            .credentialsProvider(createCredentialsProvider())
+            .httpClient(httpClient)
+            .overrideConfiguration(builder -> builder.retryPolicy(createRetryPolicy()));
 
     // Configure endpoint for LocalStack or custom S3-compatible services
     if (StringUtils.hasText(endpoint)) {
       log.info("Using custom S3 endpoint: {}", endpoint);
-      clientBuilder.endpointOverride(URI.create(endpoint))
+      clientBuilder
+          .endpointOverride(URI.create(endpoint))
           .forcePathStyle(true); // Required for LocalStack
     }
 
@@ -85,8 +89,7 @@ public class S3Config {
     if (StringUtils.hasText(accessKeyId) && StringUtils.hasText(secretAccessKey)) {
       log.debug("Using static credentials provider");
       return StaticCredentialsProvider.create(
-          AwsBasicCredentials.create(accessKeyId, secretAccessKey)
-      );
+          AwsBasicCredentials.create(accessKeyId, secretAccessKey));
     }
 
     // Use default credentials chain for production (IAM roles, etc.)
@@ -96,7 +99,7 @@ public class S3Config {
 
   private SdkHttpClient createHttpClientWithPooling() {
     log.debug("Creating HTTP client with connection pooling configuration");
-    
+
     return ApacheHttpClient.builder()
         // Connection pool settings
         .maxConnections(maxConnections)

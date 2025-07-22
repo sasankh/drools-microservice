@@ -3,11 +3,6 @@ package com.company.drools.storage;
 import com.company.drools.api.exception.RuleNotFoundException;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,6 +12,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 @Component("localFileStorage")
 @org.springframework.context.annotation.Profile("file")
@@ -63,7 +62,8 @@ public class LocalFileStorage implements RuleStorage {
     }
 
     try (Stream<Path> paths = Files.walk(rulesPath)) {
-      paths.filter(Files::isRegularFile)
+      paths
+          .filter(Files::isRegularFile)
           .filter(path -> path.toString().endsWith(".drl"))
           .forEach(
               path -> {
@@ -163,11 +163,11 @@ public class LocalFileStorage implements RuleStorage {
     Path rulesPath = Paths.get(rulesDirectory);
     Path relativePath = rulesPath.relativize(path);
     String pathStr = relativePath.toString();
-    
+
     if (pathStr.endsWith(".drl")) {
       pathStr = pathStr.substring(0, pathStr.length() - 4);
     }
-    
+
     return pathStr.replace("/", ".").replace("\\", ".");
   }
 

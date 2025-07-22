@@ -2,9 +2,7 @@ package com.company.drools.cache;
 
 import java.time.Instant;
 
-/**
- * Immutable cache statistics data.
- */
+/** Immutable cache statistics data. */
 public class CacheStatistics {
 
   private final long hits;
@@ -16,8 +14,8 @@ public class CacheStatistics {
   private final Instant lastAccess;
   private final Instant createdAt;
 
-  public CacheStatistics(long hits, long misses, long evictions, long size, long maxSize, 
-                        Instant lastAccess) {
+  public CacheStatistics(
+      long hits, long misses, long evictions, long size, long maxSize, Instant lastAccess) {
     this.hits = hits;
     this.misses = misses;
     this.evictions = evictions;
@@ -83,14 +81,21 @@ public class CacheStatistics {
 
   @Override
   public String toString() {
-    return "CacheStatistics{" +
-        "hits=" + hits +
-        ", misses=" + misses +
-        ", evictions=" + evictions +
-        ", size=" + size +
-        ", maxSize=" + maxSize +
-        ", hitRate=" + String.format("%.2f%%", hitRate * 100) +
-        ", lastAccess=" + lastAccess +
-        '}';
+    return "CacheStatistics{"
+        + "hits="
+        + hits
+        + ", misses="
+        + misses
+        + ", evictions="
+        + evictions
+        + ", size="
+        + size
+        + ", maxSize="
+        + maxSize
+        + ", hitRate="
+        + String.format("%.2f%%", hitRate * 100)
+        + ", lastAccess="
+        + lastAccess
+        + '}';
   }
 }

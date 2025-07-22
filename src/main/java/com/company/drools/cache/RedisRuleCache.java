@@ -1,20 +1,9 @@
 package com.company.drools.cache;
 
-import com.company.drools.api.exception.CircuitBreakerException;
 import com.company.drools.core.model.Rule;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.micrometer.core.instrument.MeterRegistry;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.dao.DataAccessException;
-import org.springframework.data.redis.core.RedisCallback;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.stereotype.Component;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -23,10 +12,18 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.stereotype.Component;
 
 /**
- * Redis-based distributed cache implementation for rules.
- * Provides distributed caching across multiple application instances.
+ * Redis-based distributed cache implementation for rules. Provides distributed caching across
+ * multiple application instances.
  */
 @Component
 @ConditionalOnProperty(name = "redis.enabled", havingValue = "true")
@@ -48,10 +45,11 @@ public class RedisRuleCache implements RuleCache {
   private volatile Instant lastAccess = Instant.now();
 
   @Autowired
-  public RedisRuleCache(RedisTemplate<String, Rule> redisTemplate, 
-                        Duration redisTtlDuration,
-                        MeterRegistry meterRegistry,
-                        @Qualifier("redisCircuitBreaker") CircuitBreaker redisCircuitBreaker) {
+  public RedisRuleCache(
+      RedisTemplate<String, Rule> redisTemplate,
+      Duration redisTtlDuration,
+      MeterRegistry meterRegistry,
+      @Qualifier("redisCircuitBreaker") CircuitBreaker redisCircuitBreaker) {
     this.redisTemplate = redisTemplate;
     this.ttlDuration = redisTtlDuration;
     this.meterRegistry = meterRegistry;
@@ -62,24 +60,27 @@ public class RedisRuleCache implements RuleCache {
   @Override
   public Optional<Rule> get(String ruleId) {
     String key = buildCacheKey(ruleId);
-    
+
     try {
       // Wrap Redis operations with circuit breaker
-      Supplier<Optional<Rule>> redisOperation = CircuitBreaker.decorateSupplier(redisCircuitBreaker, () -> {
-        Rule rule = redisTemplate.opsForValue().get(key);
-        lastAccess = Instant.now();
-        
-        if (rule != null) {
-          log.debug("Redis cache hit for rule: {}", ruleId);
-          return Optional.of(rule);
-        } else {
-          log.debug("Redis cache miss for rule: {}", ruleId);
-          return Optional.empty();
-        }
-      });
-      
+      Supplier<Optional<Rule>> redisOperation =
+          CircuitBreaker.decorateSupplier(
+              redisCircuitBreaker,
+              () -> {
+                Rule rule = redisTemplate.opsForValue().get(key);
+                lastAccess = Instant.now();
+
+                if (rule != null) {
+                  log.debug("Redis cache hit for rule: {}", ruleId);
+                  return Optional.of(rule);
+                } else {
+                  log.debug("Redis cache miss for rule: {}", ruleId);
+                  return Optional.empty();
+                }
+              });
+
       Optional<Rule> result = redisOperation.get();
-      
+
       if (result.isPresent()) {
         localHits.incrementAndGet();
         meterRegistry.counter("drools.cache.hits", "cache_type", "redis").increment();
@@ -87,18 +88,18 @@ public class RedisRuleCache implements RuleCache {
         localMisses.incrementAndGet();
         meterRegistry.counter("drools.cache.misses", "cache_type", "redis").increment();
       }
-      
+
       return result;
-      
+
     } catch (CallNotPermittedException e) {
       // Circuit breaker is open - treat as cache miss
       log.warn("Redis circuit breaker is open - treating as cache miss for rule: {}", ruleId);
       localMisses.incrementAndGet();
-      meterRegistry.counter("drools.cache.misses", 
-                          "cache_type", "redis", 
-                          "reason", "circuit_breaker_open").increment();
+      meterRegistry
+          .counter("drools.cache.misses", "cache_type", "redis", "reason", "circuit_breaker_open")
+          .increment();
       return Optional.empty();
-      
+
     } catch (Exception e) {
       log.warn("Redis error during get operation for rule: {}", ruleId, e);
       localMisses.incrementAndGet();
@@ -114,21 +115,24 @@ public class RedisRuleCache implements RuleCache {
     }
 
     String key = buildCacheKey(rule.getRuleId());
-    
+
     try {
       // Wrap Redis put operation with circuit breaker
-      Runnable redisOperation = CircuitBreaker.decorateRunnable(redisCircuitBreaker, () -> {
-        redisTemplate.opsForValue().set(key, rule, ttlDuration);
-        lastAccess = Instant.now();
-        log.debug("Cached rule in Redis: {} (TTL: {})", rule.getRuleId(), ttlDuration);
-      });
-      
+      Runnable redisOperation =
+          CircuitBreaker.decorateRunnable(
+              redisCircuitBreaker,
+              () -> {
+                redisTemplate.opsForValue().set(key, rule, ttlDuration);
+                lastAccess = Instant.now();
+                log.debug("Cached rule in Redis: {} (TTL: {})", rule.getRuleId(), ttlDuration);
+              });
+
       redisOperation.run();
-      
+
     } catch (CallNotPermittedException e) {
       // Circuit breaker is open - silently fail the cache write
       log.warn("Redis circuit breaker is open - cannot cache rule: {}", rule.getRuleId());
-      
+
     } catch (Exception e) {
       log.warn("Redis error during put operation for rule: {}", rule.getRuleId(), e);
     }
@@ -137,13 +141,13 @@ public class RedisRuleCache implements RuleCache {
   @Override
   public void remove(String ruleId) {
     String key = buildCacheKey(ruleId);
-    
+
     try {
       Boolean deleted = redisTemplate.delete(key);
       if (Boolean.TRUE.equals(deleted)) {
         log.debug("Removed rule from Redis cache: {}", ruleId);
       }
-      
+
     } catch (DataAccessException e) {
       log.warn("Redis error during remove operation for rule: {}", ruleId, e);
     }
@@ -152,10 +156,10 @@ public class RedisRuleCache implements RuleCache {
   @Override
   public boolean contains(String ruleId) {
     String key = buildCacheKey(ruleId);
-    
+
     try {
       return Boolean.TRUE.equals(redisTemplate.hasKey(key));
-      
+
     } catch (DataAccessException e) {
       log.warn("Redis error during contains operation for rule: {}", ruleId, e);
       return false;
@@ -170,7 +174,7 @@ public class RedisRuleCache implements RuleCache {
         Long deletedCount = redisTemplate.delete(keys);
         log.info("Cleared Redis cache: {} rules removed", deletedCount);
       }
-      
+
     } catch (DataAccessException e) {
       log.error("Redis error during clear operation", e);
     }
@@ -181,7 +185,7 @@ public class RedisRuleCache implements RuleCache {
     try {
       Set<String> keys = redisTemplate.keys(CACHE_KEY_PREFIX + "*");
       return keys != null ? keys.size() : 0;
-      
+
     } catch (DataAccessException e) {
       log.warn("Redis error during size operation", e);
       return 0;
@@ -202,12 +206,12 @@ public class RedisRuleCache implements RuleCache {
       if (keys == null || keys.isEmpty()) {
         return new ArrayList<>();
       }
-      
+
       // Extract rule IDs from cache keys
       return keys.stream()
           .map(this::extractRuleIdFromKey)
           .collect(ArrayList::new, ArrayList::add, ArrayList::addAll);
-          
+
     } catch (DataAccessException e) {
       log.warn("Redis error during getCachedRuleIds operation", e);
       return new ArrayList<>();
@@ -219,15 +223,14 @@ public class RedisRuleCache implements RuleCache {
     // Note: For Redis cache, size might be expensive to compute frequently
     // In production, consider caching this value
     long currentSize = size();
-    
+
     return new CacheStatistics(
         localHits.get(),
         localMisses.get(),
         localEvictions.get(), // Redis handles eviction internally
         currentSize,
         maxSize(),
-        lastAccess
-    );
+        lastAccess);
   }
 
   @Override
@@ -248,7 +251,7 @@ public class RedisRuleCache implements RuleCache {
 
       warmedUp = rules.size();
       log.info("Redis cache warm-up complete: {} rules cached", warmedUp);
-      
+
     } catch (DataAccessException e) {
       log.error("Redis error during cache warm-up", e);
     }
@@ -267,32 +270,24 @@ public class RedisRuleCache implements RuleCache {
       // Test Redis connectivity
       redisTemplate.opsForValue().get("connectivity-test");
       return true;
-      
+
     } catch (Exception e) {
       log.warn("Redis connectivity test failed", e);
       return false;
     }
   }
 
-  /**
-   * Builds the Redis cache key for a rule ID.
-   */
+  /** Builds the Redis cache key for a rule ID. */
   private String buildCacheKey(String ruleId) {
     return CACHE_KEY_PREFIX + ruleId;
   }
 
-  /**
-   * Extracts rule ID from Redis cache key.
-   */
+  /** Extracts rule ID from Redis cache key. */
   private String extractRuleIdFromKey(String key) {
-    return key.startsWith(CACHE_KEY_PREFIX) 
-        ? key.substring(CACHE_KEY_PREFIX.length()) 
-        : key;
+    return key.startsWith(CACHE_KEY_PREFIX) ? key.substring(CACHE_KEY_PREFIX.length()) : key;
   }
 
-  /**
-   * Returns cache efficiency for this instance.
-   */
+  /** Returns cache efficiency for this instance. */
   public double getLocalCacheEfficiency() {
     CacheStatistics stats = getStatistics();
     return stats.getHitRate();
