@@ -3,16 +3,25 @@ package com.company.drools.api.controller;
 import com.company.drools.api.dto.RefreshRuleResponse;
 import com.company.drools.api.dto.RefreshRulesResponse;
 import com.company.drools.api.dto.RuleListResponse;
+import com.company.drools.api.dto.HealthCheckResponse;
+import com.company.drools.api.dto.HealthCheckResponse.ComponentHealth;
 import com.company.drools.cache.RuleCache;
+import com.company.drools.cache.CacheStatistics;
 import com.company.drools.core.engine.DroolsEngineService;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
 import com.company.drools.storage.RuleStorage;
 import com.company.drools.storage.StorageFactory;
+import com.company.drools.storage.S3RuleStorage;
+import com.company.drools.cache.RedisRuleCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import software.amazon.awssdk.services.s3.S3Client;
 
 import java.time.Instant;
 import java.util.*;
@@ -31,6 +40,21 @@ public class AdminController {
   private final DroolsEngineService droolsEngineService;
   private final StorageFactory storageFactory;
   private final RuleCache ruleCache;
+  
+  @Value("${drools.rule-source:memory}")
+  private String ruleSource;
+  
+  @Value("${redis.enabled:false}")
+  private boolean redisEnabled;
+  
+  @Autowired(required = false)
+  private RedisConnectionFactory redisConnectionFactory;
+  
+  @Autowired(required = false)
+  private S3Client s3Client;
+  
+  @Value("${drools.s3.bucket-name:}")
+  private String s3BucketName;
 
   public AdminController(DroolsEngineService droolsEngineService, 
                         StorageFactory storageFactory,
@@ -41,42 +65,154 @@ public class AdminController {
   }
 
   /**
-   * Health check endpoint for admin interface.
+   * Enhanced health check endpoint with component status.
    */
   @GetMapping("/health")
-  public ResponseEntity<Map<String, Object>> health() {
-    Map<String, Object> health = new HashMap<>();
-    health.put("status", "UP");
-    health.put("timestamp", Instant.now());
+  public ResponseEntity<HealthCheckResponse> health() {
+    Map<String, ComponentHealth> components = new HashMap<>();
+    String overallStatus = "UP";
     
-    // Drools engine status
-    Map<String, Object> droolsStatus = new HashMap<>();
-    droolsStatus.put("loaded_rules", droolsEngineService.getLoadedRulesCount());
-    droolsStatus.put("active_rules", droolsEngineService.getActiveRulesCount());
-    health.put("drools", droolsStatus);
-    
-    // Cache status
-    Map<String, Object> cacheStatus = new HashMap<>();
-    cacheStatus.put("enabled", ruleCache.isEnabled());
-    cacheStatus.put("size", ruleCache.size());
-    cacheStatus.put("max_size", ruleCache.maxSize());
-    if (ruleCache.isEnabled()) {
-      cacheStatus.put("statistics", ruleCache.getStatistics());
+    // Check Drools engine health
+    ComponentHealth droolsHealth = checkDroolsHealth();
+    components.put("drools", droolsHealth);
+    if (!"UP".equals(droolsHealth.getStatus())) {
+      overallStatus = "DOWN";
     }
-    health.put("cache", cacheStatus);
     
-    // Storage status
-    Map<String, Object> storageStatus = new HashMap<>();
+    // Check storage health (S3/Local/Memory)
+    ComponentHealth storageHealth = checkStorageHealth();
+    components.put("storage", storageHealth);
+    if (!"UP".equals(storageHealth.getStatus())) {
+      overallStatus = "DOWN";
+    }
+    
+    // Check cache health
+    ComponentHealth cacheHealth = checkCacheHealth();
+    components.put("cache", cacheHealth);
+    // Cache being down is not critical, so don't affect overall status
+    
+    // Check Redis health if enabled
+    if (redisEnabled) {
+      ComponentHealth redisHealth = checkRedisHealth();
+      components.put("redis", redisHealth);
+      // Redis being down is not critical if local cache works
+    }
+    
+    HealthCheckResponse response = new HealthCheckResponse(overallStatus, components);
+    return ResponseEntity.ok(response);
+  }
+  
+  private ComponentHealth checkDroolsHealth() {
+    Map<String, Object> details = new HashMap<>();
+    try {
+      long loadedRules = droolsEngineService.getLoadedRulesCount();
+      long activeRules = droolsEngineService.getActiveRulesCount();
+      
+      details.put("loaded_rules", loadedRules);
+      details.put("active_rules", activeRules);
+      details.put("cache_hit_rate", calculateCacheHitRate());
+      
+      // Check if we have at least one rule loaded
+      String status = loadedRules > 0 ? "UP" : "DOWN";
+      if (loadedRules == 0) {
+        details.put("error", "No rules loaded");
+      }
+      
+      return new ComponentHealth(status, details);
+    } catch (Exception e) {
+      details.put("error", e.getMessage());
+      return new ComponentHealth("DOWN", details);
+    }
+  }
+  
+  private ComponentHealth checkStorageHealth() {
+    Map<String, Object> details = new HashMap<>();
     try {
       RuleStorage storage = storageFactory.createRuleStorage();
-      storageStatus.put("type", storage.getClass().getSimpleName());
-      storageStatus.put("total_rules", storage.getTotalRuleCount());
+      details.put("type", storage.getClass().getSimpleName());
+      details.put("rule_source", ruleSource);
+      
+      // For S3, check bucket accessibility
+      if (storage instanceof S3RuleStorage && s3Client != null && !s3BucketName.isEmpty()) {
+        try {
+          s3Client.headBucket(builder -> builder.bucket(s3BucketName));
+          details.put("s3_bucket", s3BucketName);
+          details.put("s3_accessible", true);
+        } catch (Exception e) {
+          details.put("s3_bucket", s3BucketName);
+          details.put("s3_accessible", false);
+          details.put("s3_error", e.getMessage());
+          return new ComponentHealth("DOWN", details);
+        }
+      }
+      
+      // Try to get rule count
+      long ruleCount = storage.getTotalRuleCount();
+      details.put("total_rules", ruleCount);
+      
+      return new ComponentHealth("UP", details);
     } catch (Exception e) {
-      storageStatus.put("error", e.getMessage());
+      details.put("error", e.getMessage());
+      return new ComponentHealth("DOWN", details);
     }
-    health.put("storage", storageStatus);
+  }
+  
+  private ComponentHealth checkCacheHealth() {
+    Map<String, Object> details = new HashMap<>();
+    try {
+      details.put("enabled", ruleCache.isEnabled());
+      details.put("size", ruleCache.size());
+      details.put("max_size", ruleCache.maxSize());
+      
+      if (ruleCache.isEnabled()) {
+        CacheStatistics stats = ruleCache.getStatistics();
+        Map<String, Object> statsMap = new HashMap<>();
+        statsMap.put("hits", stats.getHits());
+        statsMap.put("misses", stats.getMisses());
+        statsMap.put("evictions", stats.getEvictions());
+        statsMap.put("hit_rate", String.format("%.2f%%", stats.getHitRate() * 100));
+        details.put("statistics", statsMap);
+      }
+      
+      return new ComponentHealth("UP", details);
+    } catch (Exception e) {
+      details.put("error", e.getMessage());
+      return new ComponentHealth("DOWN", details);
+    }
+  }
+  
+  private ComponentHealth checkRedisHealth() {
+    Map<String, Object> details = new HashMap<>();
+    try {
+      if (redisConnectionFactory == null) {
+        details.put("enabled", false);
+        return new ComponentHealth("UP", details);
+      }
+      
+      // Try to ping Redis
+      redisConnectionFactory.getConnection().ping();
+      details.put("connected", true);
+      
+      // Get Redis info if it's RedisRuleCache
+      if (ruleCache instanceof RedisRuleCache) {
+        details.put("cache_type", "RedisRuleCache");
+      }
+      
+      return new ComponentHealth("UP", details);
+    } catch (Exception e) {
+      details.put("connected", false);
+      details.put("error", e.getMessage());
+      return new ComponentHealth("DOWN", details);
+    }
+  }
+  
+  private double calculateCacheHitRate() {
+    if (!ruleCache.isEnabled()) {
+      return 0.0;
+    }
     
-    return ResponseEntity.ok(health);
+    CacheStatistics stats = ruleCache.getStatistics();
+    return stats.getHitRate();
   }
 
   /**
