@@ -1,0 +1,30 @@
+package com.company.rules.pricing.shipping
+
+// Express shipping calculation with free shipping over $100
+rule "Express Shipping Cost"
+when
+    $data : Map(this["shippingType"] == "express", this["weight"] != null, this["amount"] != null)
+then
+    Double weight = (Double) $data.get("weight");
+    Double amount = (Double) $data.get("amount");
+    Double shippingCost;
+    
+    // Free express shipping over $100
+    if (amount >= 100.0) {
+        shippingCost = 0.0;
+        $data.put("freeShipping", true);
+        $data.put("freeShippingReason", "Express shipping free over $100");
+    } else {
+        if (weight <= 1.0) {
+            shippingCost = 12.99;
+        } else if (weight <= 5.0) {
+            shippingCost = 19.99;
+        } else {
+            shippingCost = 29.99;
+        }
+    }
+    
+    $data.put("shippingCost", shippingCost);
+    $data.put("shippingMethod", "Express");
+    $data.put("estimatedDays", 2);
+end

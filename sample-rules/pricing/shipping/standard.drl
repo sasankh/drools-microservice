@@ -1,0 +1,22 @@
+package com.company.rules.pricing.shipping
+
+// Standard shipping calculation
+rule "Standard Shipping Cost"
+when
+    $data : Map(this["shippingType"] == "standard", this["weight"] != null)
+then
+    Double weight = (Double) $data.get("weight");
+    Double shippingCost;
+    
+    if (weight <= 1.0) {
+        shippingCost = 5.99;
+    } else if (weight <= 5.0) {
+        shippingCost = 9.99;
+    } else {
+        shippingCost = 15.99;
+    }
+    
+    $data.put("shippingCost", shippingCost);
+    $data.put("shippingMethod", "Standard");
+    $data.put("estimatedDays", 5);
+end

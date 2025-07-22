@@ -1,0 +1,28 @@
+package com.company.rules.validation.customer
+
+// Customer age validation and categorization
+rule "Customer Age Validation"
+when
+    $data : Map(this["customerAge"] != null)
+then
+    Integer age = (Integer) $data.get("customerAge");
+    
+    if (age < 18) {
+        $data.put("validationResult", "REJECTED");
+        $data.put("validationReason", "Customer must be 18 or older");
+        $data.put("eligible", false);
+    } else {
+        $data.put("validationResult", "APPROVED");
+        $data.put("eligible", true);
+        
+        // Age categorization
+        if (age >= 65) {
+            $data.put("ageGroup", "Senior");
+            $data.put("seniorDiscount", true);
+        } else if (age >= 25) {
+            $data.put("ageGroup", "Adult");
+        } else {
+            $data.put("ageGroup", "Young Adult");
+        }
+    }
+end

@@ -1,0 +1,29 @@
+package com.company.rules.validation.customer
+
+// Customer credit validation
+rule "Customer Credit Validation"
+when
+    $data : Map(this["creditScore"] != null, this["requestedAmount"] != null)
+then
+    Integer creditScore = (Integer) $data.get("creditScore");
+    Double requestedAmount = (Double) $data.get("requestedAmount");
+    
+    if (creditScore >= 750) {
+        $data.put("creditTier", "Excellent");
+        $data.put("approvedAmount", requestedAmount);
+        $data.put("validationResult", "APPROVED");
+    } else if (creditScore >= 700) {
+        $data.put("creditTier", "Good");
+        $data.put("approvedAmount", Math.min(requestedAmount, 5000.0));
+        $data.put("validationResult", "APPROVED");
+    } else if (creditScore >= 650) {
+        $data.put("creditTier", "Fair");
+        $data.put("approvedAmount", Math.min(requestedAmount, 2000.0));
+        $data.put("validationResult", "APPROVED");
+    } else {
+        $data.put("creditTier", "Poor");
+        $data.put("approvedAmount", 0.0);
+        $data.put("validationResult", "REJECTED");
+        $data.put("validationReason", "Insufficient credit score");
+    }
+end

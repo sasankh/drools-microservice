@@ -1,0 +1,21 @@
+package com.company.rules.seasonal.holiday
+
+// Black Friday special promotion (25% off)
+rule "Black Friday 2024 - 25% Off"
+when
+    $data : Map(this["promotionCode"] == "BLACK2024", this["amount"] != null)
+then
+    Double amount = (Double) $data.get("amount");
+    
+    // Minimum $100 for Black Friday promotion
+    if (amount >= 100.0) {
+        $data.put("discount", amount * 0.25);
+        $data.put("amount", amount * 0.75);
+        $data.put("discountPercent", 25);
+        $data.put("discountReason", "Black Friday 2024 Special");
+        $data.put("promotionValid", true);
+    } else {
+        $data.put("promotionValid", false);
+        $data.put("promotionMessage", "Minimum $100 required for Black Friday discount");
+    }
+end

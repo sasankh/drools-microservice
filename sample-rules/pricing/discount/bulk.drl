@@ -1,0 +1,17 @@
+package com.company.rules.pricing.discount
+
+// Bulk order discount for quantities >= 10
+rule "Bulk Order Discount - 15% Off"
+when
+    $data : Map(this["quantity"] != null, this["amount"] != null)
+then
+    Integer quantity = (Integer) $data.get("quantity");
+    Double amount = (Double) $data.get("amount");
+    if (quantity >= 10) {
+        $data.put("discount", amount * 0.15);
+        $data.put("amount", amount * 0.85);
+        $data.put("discountPercent", 15);
+        $data.put("discountReason", "Bulk order discount (10+ items)");
+        $data.put("qualifyingQuantity", quantity);
+    }
+end

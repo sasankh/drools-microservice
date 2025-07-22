@@ -62,20 +62,21 @@ git clone <repository-url>
 cd drools-microservice
 ```
 
-### 2. Start Local Development Environment
+### 2. One-Command Development Environment Setup
 
 ```bash
-# Start complete local development stack (LocalStack S3 + Redis + Application)
+# Complete automated setup (builds, starts services, validates everything)
+./setup-dev-environment.sh
+
+# Or start services manually
 docker-compose up -d
 
-# Wait for services to start (about 15 seconds)
-sleep 15
+# Wait for services to start (about 30 seconds)
+sleep 30
 
-# Create S3 bucket in LocalStack (if not using docker-compose app service)
-aws --endpoint-url=http://localhost:4566 s3 mb s3://local-rules
-
-# Verify services are running
+# Verify all services are running and healthy
 docker-compose ps
+curl http://localhost:8081/admin/health
 ```
 
 ### 3. Set Environment Variables
@@ -131,22 +132,35 @@ docker run -p 8080:8080 -p 8081:8081 \
 ### 5. Verify Installation
 
 ```bash
-# Check application health
+# Check application health (with comprehensive component status)
 curl http://localhost:8081/admin/health
 
-# Test rule execution (using built-in sample rules)
+# List available sample rules
+curl http://localhost:8081/admin/rules
+
+# Test rule execution with sample rules
 curl -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
-  -d '{"ruleId": "simple.discount", "data": {"amount": 100}}'
+  -d '{"ruleId": "pricing.discount.simple", "data": {"amount": 100}}'
+
+# Test VIP customer rule
+curl -X POST http://localhost:8080/execute-rule \
+  -H "Content-Type: application/json" \
+  -d '{"ruleId": "pricing.discount.vip", "data": {"customerType": "VIP", "amount": 100}}'
 ```
 
 Expected response:
 ```json
 {
   "success": true,
-  "result": {"amount": 90},
+  "result": {
+    "amount": 90.0,
+    "discount": 10.0,
+    "discountPercent": 10
+  },
   "executionTimeMs": 15,
-  "ruleId": "simple.discount"
+  "ruleId": "pricing.discount.simple",
+  "timestamp": "2025-07-22T18:45:00Z"
 }
 ```
 
@@ -543,19 +557,31 @@ src/
 
 ### Local Development Setup
 
-#### Quick Start with Docker Compose
+#### Quick Start with One-Command Setup (Recommended)
 ```bash
-# Start complete development stack
-docker-compose up -d
-
-# Initialize LocalStack (creates bucket and uploads sample rules)
-./init-localstack.sh
+# Complete automated setup (Maven build + Docker + LocalStack + validation)
+./setup-dev-environment.sh
 
 # View all services status
 docker-compose ps
 
 # Access application
 curl http://localhost:8081/admin/health
+```
+
+#### Manual Docker Compose Setup
+```bash
+# Start complete development stack
+docker-compose up -d
+
+# Initialize LocalStack (creates bucket and uploads 10 sample rules)
+./init-localstack.sh
+
+# Test LocalStack integration
+./test-localstack.sh
+
+# View all services status
+docker-compose ps
 ```
 
 #### Manual Setup
@@ -569,9 +595,14 @@ curl http://localhost:8081/admin/health
    aws --endpoint-url=http://localhost:4566 s3 mb s3://local-rules
    ```
 
-3. **Upload Sample Rules** (optional)
+3. **Upload Sample Rules** (automatic with docker-compose)
    ```bash
-   aws --endpoint-url=http://localhost:4566 s3 cp rules/ s3://local-rules/ --recursive
+   # Sample rules automatically uploaded via init-localstack.sh
+   # Or upload manually:
+   aws --endpoint-url=http://localhost:4566 s3 sync sample-rules/ s3://local-rules/
+   
+   # Verify rules uploaded
+   aws --endpoint-url=http://localhost:4566 s3 ls s3://local-rules/ --recursive
    ```
 
 4. **Set Development Environment**

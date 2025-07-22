@@ -1,0 +1,15 @@
+package com.company.rules.pricing.discount
+
+// Simple discount rule for orders over $50
+rule "Simple Discount Rule - 10% Off"
+when
+    $data : Map(this["amount"] != null)
+then
+    Double amount = (Double) $data.get("amount");
+    if (amount >= 50.0) {
+        $data.put("discount", amount * 0.10);
+        $data.put("amount", amount * 0.90);
+        $data.put("discountPercent", 10);
+        $data.put("discountReason", "Order over $50 discount");
+    }
+end

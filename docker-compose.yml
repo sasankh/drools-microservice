@@ -83,6 +83,7 @@ services:
       - DOCKER_HOST=unix:///var/run/docker.sock
     volumes:
       - "./init-localstack.sh:/etc/localstack/init/ready.d/init-aws.sh"
+      - "./sample-rules:/tmp/sample-rules"
       - "localstack-data:/tmp/localstack"
       - "/var/run/docker.sock:/var/run/docker.sock"
     networks:

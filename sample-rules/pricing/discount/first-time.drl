@@ -1,0 +1,14 @@
+package com.company.rules.pricing.discount
+
+// First-time customer discount
+rule "First Time Customer Discount - 5% Off"
+when
+    $data : Map(this["isFirstTimeCustomer"] == true, this["amount"] != null)
+then
+    Double amount = (Double) $data.get("amount");
+    $data.put("discount", amount * 0.05);
+    $data.put("amount", amount * 0.95);
+    $data.put("discountPercent", 5);
+    $data.put("discountReason", "Welcome discount for first-time customers");
+    $data.put("customerStatus", "First Time");
+end
