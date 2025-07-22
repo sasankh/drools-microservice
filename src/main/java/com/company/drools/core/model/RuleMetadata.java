@@ -1,5 +1,6 @@
 package com.company.drools.core.model;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Objects;
 
@@ -49,6 +50,12 @@ public class RuleMetadata {
     long newCount = executionCount + 1;
     double newAverage = (averageExecutionTimeMs * executionCount + executionTimeMs) / newCount;
     return new RuleMetadata(version, loadedAt, lastModified, status, errorMessage, newCount, newAverage);
+  }
+
+  public RuleMetadata withLastModified(Instant lastModified) {
+    LocalDateTime lastModifiedLdt = lastModified != null ? 
+        LocalDateTime.ofInstant(lastModified, java.time.ZoneOffset.UTC) : null;
+    return new RuleMetadata(version, loadedAt, lastModifiedLdt, status, errorMessage, executionCount, averageExecutionTimeMs);
   }
 
   public String getVersion() {

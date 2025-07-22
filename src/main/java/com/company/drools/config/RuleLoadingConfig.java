@@ -2,7 +2,8 @@ package com.company.drools.config;
 
 import com.company.drools.core.engine.DroolsEngineService;
 import com.company.drools.core.model.Rule;
-import com.company.drools.storage.InMemoryRuleStorage;
+import com.company.drools.storage.RuleStorage;
+import com.company.drools.storage.StorageFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationRunner;
@@ -18,12 +19,13 @@ public class RuleLoadingConfig {
 
   @Bean
   public ApplicationRunner loadRulesOnStartup(DroolsEngineService droolsEngineService, 
-                                             InMemoryRuleStorage ruleStorage) {
+                                             StorageFactory storageFactory) {
     return args -> {
       log.info("Loading rules on application startup...");
       
       try {
-        List<Rule> rules = ruleStorage.loadAllRules();
+        RuleStorage ruleStorage = storageFactory.createRuleStorage();
+        List<Rule> rules = ruleStorage.getAllRules();
         log.info("Found {} rules to load", rules.size());
         
         boolean success = droolsEngineService.loadRules(rules);

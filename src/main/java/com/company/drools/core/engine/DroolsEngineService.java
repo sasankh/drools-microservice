@@ -2,6 +2,7 @@ package com.company.drools.core.engine;
 
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
+import com.company.drools.storage.RuleStorage;
 import org.kie.api.runtime.KieContainer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,6 +20,7 @@ public class DroolsEngineService {
 
   private final RuleCompiler ruleCompiler;
   private final RuleExecutor ruleExecutor;
+  private final RuleStorage ruleStorage;
   
   // Thread-safe storage for rules and their metadata
   private final Map<String, Rule> loadedRules = new ConcurrentHashMap<>();
@@ -30,11 +32,12 @@ public class DroolsEngineService {
   // Lock for managing rule updates
   private final ReentrantReadWriteLock rulesLock = new ReentrantReadWriteLock();
 
-  public DroolsEngineService(RuleCompiler ruleCompiler, RuleExecutor ruleExecutor, KieContainer kieContainer) {
+  public DroolsEngineService(RuleCompiler ruleCompiler, RuleExecutor ruleExecutor, KieContainer kieContainer, RuleStorage ruleStorage) {
     this.ruleCompiler = ruleCompiler;
     this.ruleExecutor = ruleExecutor;
     this.currentKieContainer = kieContainer;
-    log.info("DroolsEngineService initialized");
+    this.ruleStorage = ruleStorage;
+    log.info("DroolsEngineService initialized with rule storage: {}", ruleStorage.getClass().getSimpleName());
   }
 
   public RuleExecutor.ExecutionResult executeRule(String ruleId, Map<String, Object> inputData) {

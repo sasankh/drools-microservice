@@ -39,6 +39,8 @@ drools:
     bucket-name: ${RULE_BUCKET_NAME:local-rules}
     region: ${AWS_REGION:us-east-1}
     endpoint: ${AWS_ENDPOINT:}  # For LocalStack
+  local:
+    rules-directory: ${LOCAL_RULES_DIRECTORY:src/main/resources/rules}
   cache:
     lru-max-size: ${LRU_CACHE_MAX_SIZE:100}
     execution-timeout-seconds: ${RULE_EXECUTION_TIMEOUT_SECONDS:30}
