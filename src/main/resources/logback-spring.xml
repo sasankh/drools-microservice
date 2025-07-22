@@ -9,11 +9,31 @@
         </encoder>
     </appender>
     
-    <!-- JSON file appender for production -->
+    <!-- JSON file appender for production with structured logging -->
     <appender name="JSON_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/application.json</file>
-        <encoder>
-            <pattern>{"timestamp":"%d{ISO8601}","level":"%level","logger":"%logger","message":"%message","thread":"%thread"}%n</pattern>
+        <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
+            <providers>
+                <timestamp>
+                    <timeZone>UTC</timeZone>
+                </timestamp>
+                <version/>
+                <logLevel/>
+                <message/>
+                <mdc/>
+                <loggerName/>
+                <threadName/>
+                <stackTrace/>
+                <pattern>
+                    <pattern>
+                        {
+                        "service": "drools-rule-engine",
+                        "environment": "${SPRING_PROFILES_ACTIVE:-local}",
+                        "version": "1.0.0"
+                        }
+                    </pattern>
+                </pattern>
+            </providers>
         </encoder>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
             <fileNamePattern>logs/application-%d{yyyy-MM-dd}.%i.json.gz</fileNamePattern>
@@ -21,6 +41,33 @@
             <maxHistory>30</maxHistory>
             <totalSizeCap>3GB</totalSizeCap>
         </rollingPolicy>
+    </appender>
+    
+    <!-- JSON console appender for containerized environments -->
+    <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
+            <providers>
+                <timestamp>
+                    <timeZone>UTC</timeZone>
+                </timestamp>
+                <version/>
+                <logLevel/>
+                <message/>
+                <mdc/>
+                <loggerName/>
+                <threadName/>
+                <stackTrace/>
+                <pattern>
+                    <pattern>
+                        {
+                        "service": "drools-rule-engine",
+                        "environment": "${SPRING_PROFILES_ACTIVE:-local}",
+                        "version": "1.0.0"
+                        }
+                    </pattern>
+                </pattern>
+            </providers>
+        </encoder>
     </appender>
     
     <!-- Root logger configuration -->
@@ -48,12 +95,22 @@
     
     <springProfile name="prod">
         <root level="WARN">
-            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="JSON_CONSOLE"/>
             <appender-ref ref="JSON_FILE"/>
         </root>
         <logger name="com.company.drools" level="INFO" additivity="false">
-            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="JSON_CONSOLE"/>
             <appender-ref ref="JSON_FILE"/>
+        </logger>
+    </springProfile>
+    
+    <!-- JSON logging for containerized environments -->
+    <springProfile name="docker,k8s">
+        <root level="INFO">
+            <appender-ref ref="JSON_CONSOLE"/>
+        </root>
+        <logger name="com.company.drools" level="INFO" additivity="false">
+            <appender-ref ref="JSON_CONSOLE"/>
         </logger>
     </springProfile>
 </configuration>

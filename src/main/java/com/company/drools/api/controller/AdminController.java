@@ -14,6 +14,8 @@ import com.company.drools.storage.RuleStorage;
 import com.company.drools.storage.StorageFactory;
 import com.company.drools.storage.S3RuleStorage;
 import com.company.drools.cache.RedisRuleCache;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,6 +42,7 @@ public class AdminController {
   private final DroolsEngineService droolsEngineService;
   private final StorageFactory storageFactory;
   private final RuleCache ruleCache;
+  private final MeterRegistry meterRegistry;
   
   @Value("${drools.rule-source:memory}")
   private String ruleSource;
@@ -58,10 +61,12 @@ public class AdminController {
 
   public AdminController(DroolsEngineService droolsEngineService, 
                         StorageFactory storageFactory,
-                        RuleCache ruleCache) {
+                        RuleCache ruleCache,
+                        MeterRegistry meterRegistry) {
     this.droolsEngineService = droolsEngineService;
     this.storageFactory = storageFactory;
     this.ruleCache = ruleCache;
+    this.meterRegistry = meterRegistry;
   }
 
   /**
@@ -69,8 +74,15 @@ public class AdminController {
    */
   @GetMapping("/health")
   public ResponseEntity<HealthCheckResponse> health() {
-    Map<String, ComponentHealth> components = new HashMap<>();
-    String overallStatus = "UP";
+    // Start timing the health check
+    Timer.Sample sample = Timer.start(meterRegistry);
+    
+    try {
+      // Record API request
+      meterRegistry.counter("drools.api.requests", "endpoint", "/admin/health").increment();
+      
+      Map<String, ComponentHealth> components = new HashMap<>();
+      String overallStatus = "UP";
     
     // Check Drools engine health
     ComponentHealth droolsHealth = checkDroolsHealth();
@@ -99,7 +111,26 @@ public class AdminController {
     }
     
     HealthCheckResponse response = new HealthCheckResponse(overallStatus, components);
+    
+    // Record successful response timing
+    sample.stop(Timer.builder("drools.api.response.time")
+               .tag("endpoint", "/admin/health")
+               .tag("status", "success")
+               .register(meterRegistry));
+    
     return ResponseEntity.ok(response);
+    
+    } catch (Exception e) {
+      // Record error response timing
+      meterRegistry.counter("drools.api.errors", 
+                          "endpoint", "/admin/health",
+                          "error_type", "unexpected").increment();
+      sample.stop(Timer.builder("drools.api.response.time")
+                 .tag("endpoint", "/admin/health")
+                 .tag("status", "error")
+                 .register(meterRegistry));
+      throw e;
+    }
   }
   
   private ComponentHealth checkDroolsHealth() {

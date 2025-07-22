@@ -1,6 +1,7 @@
 package com.company.drools.cache;
 
 import com.company.drools.core.model.Rule;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,6 +29,7 @@ public class LocalLRUCache implements RuleCache {
   private final boolean enabled;
   private final Map<String, Rule> cache;
   private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+  private final MeterRegistry meterRegistry;
   
   // Statistics tracking
   private final AtomicLong hits = new AtomicLong(0);
@@ -36,9 +38,11 @@ public class LocalLRUCache implements RuleCache {
   private volatile Instant lastAccess = Instant.now();
 
   public LocalLRUCache(@Value("${drools.cache.lru-max-size:100}") int maxSize,
-                       @Value("${drools.cache.enabled:true}") boolean enabled) {
+                       @Value("${drools.cache.enabled:true}") boolean enabled,
+                       MeterRegistry meterRegistry) {
     this.maxSize = maxSize;
     this.enabled = enabled;
+    this.meterRegistry = meterRegistry;
     this.cache = new LinkedHashMap<String, Rule>(16, 0.75f, true) {
       @Override
       protected boolean removeEldestEntry(Map.Entry<String, Rule> eldest) {
@@ -46,6 +50,8 @@ public class LocalLRUCache implements RuleCache {
         if (shouldRemove) {
           log.debug("Evicting rule from cache: {}", eldest.getKey());
           evictions.incrementAndGet();
+          // Record cache eviction metric
+          meterRegistry.counter("drools.cache.evictions", "cache_type", "local").increment();
         }
         return shouldRemove;
       }
@@ -67,10 +73,12 @@ public class LocalLRUCache implements RuleCache {
       
       if (rule != null) {
         hits.incrementAndGet();
+        meterRegistry.counter("drools.cache.hits", "cache_type", "local").increment();
         log.debug("Cache hit for rule: {}", ruleId);
         return Optional.of(rule);
       } else {
         misses.incrementAndGet();
+        meterRegistry.counter("drools.cache.misses", "cache_type", "local").increment();
         log.debug("Cache miss for rule: {}", ruleId);
         return Optional.empty();
       }

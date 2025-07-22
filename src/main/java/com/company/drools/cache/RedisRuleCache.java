@@ -1,6 +1,7 @@
 package com.company.drools.cache;
 
 import com.company.drools.core.model.Rule;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +33,7 @@ public class RedisRuleCache implements RuleCache {
 
   private final RedisTemplate<String, Rule> redisTemplate;
   private final Duration ttlDuration;
+  private final MeterRegistry meterRegistry;
 
   // Local statistics (per instance)
   private final AtomicLong localHits = new AtomicLong(0);
@@ -40,9 +42,12 @@ public class RedisRuleCache implements RuleCache {
   private volatile Instant lastAccess = Instant.now();
 
   @Autowired
-  public RedisRuleCache(RedisTemplate<String, Rule> redisTemplate, Duration redisTtlDuration) {
+  public RedisRuleCache(RedisTemplate<String, Rule> redisTemplate, 
+                        Duration redisTtlDuration,
+                        MeterRegistry meterRegistry) {
     this.redisTemplate = redisTemplate;
     this.ttlDuration = redisTtlDuration;
+    this.meterRegistry = meterRegistry;
     log.info("RedisRuleCache initialized with TTL: {}", ttlDuration);
   }
 
@@ -56,10 +61,12 @@ public class RedisRuleCache implements RuleCache {
       
       if (rule != null) {
         localHits.incrementAndGet();
+        meterRegistry.counter("drools.cache.hits", "cache_type", "redis").increment();
         log.debug("Redis cache hit for rule: {}", ruleId);
         return Optional.of(rule);
       } else {
         localMisses.incrementAndGet();
+        meterRegistry.counter("drools.cache.misses", "cache_type", "redis").increment();
         log.debug("Redis cache miss for rule: {}", ruleId);
         return Optional.empty();
       }
@@ -67,6 +74,7 @@ public class RedisRuleCache implements RuleCache {
     } catch (DataAccessException e) {
       log.warn("Redis error during get operation for rule: {}", ruleId, e);
       localMisses.incrementAndGet();
+      meterRegistry.counter("drools.cache.misses", "cache_type", "redis").increment();
       return Optional.empty();
     }
   }

@@ -3,6 +3,8 @@ package com.company.drools.storage;
 import com.company.drools.api.exception.RuleNotFoundException;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,12 +26,14 @@ public class S3RuleStorage implements RuleStorage {
   private static final Logger log = LoggerFactory.getLogger(S3RuleStorage.class);
 
   private final S3Client s3Client;
+  private final MeterRegistry meterRegistry;
 
   @Value("${drools.s3.bucket-name}")
   private String bucketName;
 
-  public S3RuleStorage(S3Client s3Client) {
+  public S3RuleStorage(S3Client s3Client, MeterRegistry meterRegistry) {
     this.s3Client = s3Client;
+    this.meterRegistry = meterRegistry;
   }
 
   @Override
@@ -37,6 +41,9 @@ public class S3RuleStorage implements RuleStorage {
     log.debug("Loading rule from S3: {}", ruleId);
 
     String s3Key = ruleIdToS3Key(ruleId);
+    
+    // Start timing the storage operation
+    Timer.Sample sample = Timer.start(meterRegistry);
     
     try {
       GetObjectRequest request = GetObjectRequest.builder()
@@ -57,13 +64,37 @@ public class S3RuleStorage implements RuleStorage {
       
       Rule rule = new Rule(ruleId, content, metadata);
       log.debug("Successfully loaded rule: {} from S3 key: {}", ruleId, s3Key);
+      
+      // Record successful storage operation
+      sample.stop(Timer.builder("drools.storage.operation.time")
+                 .tag("operation", "getRule")
+                 .tag("storage_type", "s3")
+                 .tag("status", "success")
+                 .register(meterRegistry));
+      
       return Optional.of(rule);
 
     } catch (NoSuchKeyException e) {
       log.warn("Rule not found in S3: {} (key: {})", ruleId, s3Key);
+      
+      // Record not found (considered success for optional operation)
+      sample.stop(Timer.builder("drools.storage.operation.time")
+                 .tag("operation", "getRule")
+                 .tag("storage_type", "s3")
+                 .tag("status", "not_found")
+                 .register(meterRegistry));
+      
       return Optional.empty();
     } catch (SdkException e) {
       log.error("Failed to load rule from S3: {} (key: {})", ruleId, s3Key, e);
+      
+      // Record failed storage operation
+      sample.stop(Timer.builder("drools.storage.operation.time")
+                 .tag("operation", "getRule")
+                 .tag("storage_type", "s3")
+                 .tag("status", "error")
+                 .register(meterRegistry));
+      
       throw new RuntimeException("Failed to load rule from S3: " + ruleId, e);
     }
   }

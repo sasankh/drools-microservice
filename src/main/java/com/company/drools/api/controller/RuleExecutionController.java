@@ -6,6 +6,8 @@ import com.company.drools.api.exception.RuleExecutionException;
 import com.company.drools.api.exception.RuleNotFoundException;
 import com.company.drools.core.engine.DroolsEngineService;
 import com.company.drools.core.engine.RuleExecutor;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,16 +25,23 @@ public class RuleExecutionController {
   private static final Logger log = LoggerFactory.getLogger(RuleExecutionController.class);
 
   private final DroolsEngineService droolsEngineService;
+  private final MeterRegistry meterRegistry;
 
-  public RuleExecutionController(DroolsEngineService droolsEngineService) {
+  public RuleExecutionController(DroolsEngineService droolsEngineService, MeterRegistry meterRegistry) {
     this.droolsEngineService = droolsEngineService;
+    this.meterRegistry = meterRegistry;
   }
 
   @PostMapping("/execute-rule")
   public ResponseEntity<RuleExecutionResponse> executeRule(@Valid @RequestBody RuleExecutionRequest request) {
     log.info("Executing rule: {} with data keys: {}", request.getRuleId(), request.getData().keySet());
     
+    // Start timing the API request
+    Timer.Sample sample = Timer.start(meterRegistry);
+    
     try {
+      // Record API request
+      meterRegistry.counter("drools.api.requests", "endpoint", "/execute-rule").increment();
       // Check if rule exists
       if (!droolsEngineService.hasRule(request.getRuleId())) {
         throw new RuleNotFoundException(request.getRuleId());
@@ -47,6 +56,12 @@ public class RuleExecutionController {
       if (result.isSuccess()) {
         log.info("Rule {} executed successfully in {}ms", request.getRuleId(), result.getExecutionTimeMs());
         
+        // Record successful response
+        sample.stop(Timer.builder("drools.api.response.time")
+                   .tag("endpoint", "/execute-rule")
+                   .tag("status", "success")
+                   .register(meterRegistry));
+        
         RuleExecutionResponse response = RuleExecutionResponse.success(
             request.getRuleId(),
             result.getResult(),
@@ -59,11 +74,36 @@ public class RuleExecutionController {
         throw new RuleExecutionException(request.getRuleId(), result.getErrorMessage());
       }
       
-    } catch (RuleNotFoundException | RuleExecutionException e) {
-      // These will be handled by GlobalExceptionHandler
+    } catch (RuleNotFoundException e) {
+      // Record API error
+      meterRegistry.counter("drools.api.errors", 
+                          "endpoint", "/execute-rule",
+                          "error_type", "rule_not_found").increment();
+      sample.stop(Timer.builder("drools.api.response.time")
+                 .tag("endpoint", "/execute-rule")
+                 .tag("status", "error")
+                 .register(meterRegistry));
+      throw e;
+    } catch (RuleExecutionException e) {
+      // Record API error
+      meterRegistry.counter("drools.api.errors", 
+                          "endpoint", "/execute-rule",
+                          "error_type", "execution_failed").increment();
+      sample.stop(Timer.builder("drools.api.response.time")
+                 .tag("endpoint", "/execute-rule")
+                 .tag("status", "error")
+                 .register(meterRegistry));
       throw e;
     } catch (Exception e) {
       log.error("Unexpected error executing rule: {}", request.getRuleId(), e);
+      // Record API error
+      meterRegistry.counter("drools.api.errors", 
+                          "endpoint", "/execute-rule",
+                          "error_type", "unexpected").increment();
+      sample.stop(Timer.builder("drools.api.response.time")
+                 .tag("endpoint", "/execute-rule")
+                 .tag("status", "error")
+                 .register(meterRegistry));
       throw new RuleExecutionException(request.getRuleId(), "Unexpected error during rule execution: " + e.getMessage(), e);
     }
   }

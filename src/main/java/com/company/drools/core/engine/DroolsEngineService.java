@@ -3,9 +3,12 @@ package com.company.drools.core.engine;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
 import com.company.drools.storage.RuleStorage;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.kie.api.runtime.KieContainer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -22,6 +25,9 @@ public class DroolsEngineService {
   private final RuleExecutor ruleExecutor;
   private final RuleStorage ruleStorage;
   
+  // Metrics
+  private final MeterRegistry meterRegistry;
+  
   // Thread-safe storage for rules and their metadata
   private final Map<String, Rule> loadedRules = new ConcurrentHashMap<>();
   private final Map<String, RuleMetadata> ruleMetadata = new ConcurrentHashMap<>();
@@ -32,22 +38,38 @@ public class DroolsEngineService {
   // Lock for managing rule updates
   private final ReentrantReadWriteLock rulesLock = new ReentrantReadWriteLock();
 
-  public DroolsEngineService(RuleCompiler ruleCompiler, RuleExecutor ruleExecutor, KieContainer kieContainer, RuleStorage ruleStorage) {
+  public DroolsEngineService(RuleCompiler ruleCompiler, 
+                            RuleExecutor ruleExecutor, 
+                            KieContainer kieContainer, 
+                            RuleStorage ruleStorage,
+                            MeterRegistry meterRegistry) {
     this.ruleCompiler = ruleCompiler;
     this.ruleExecutor = ruleExecutor;
     this.currentKieContainer = kieContainer;
     this.ruleStorage = ruleStorage;
+    this.meterRegistry = meterRegistry;
     log.info("DroolsEngineService initialized with rule storage: {}", ruleStorage.getClass().getSimpleName());
   }
 
   public RuleExecutor.ExecutionResult executeRule(String ruleId, Map<String, Object> inputData) {
     log.debug("Executing rule: {}", ruleId);
     
+    // Start timing the execution
+    Timer.Sample sample = Timer.start();
+    
     rulesLock.readLock().lock();
     try {
       // Check if rule exists
       if (!loadedRules.containsKey(ruleId)) {
         log.warn("Rule not found: {}", ruleId);
+        meterRegistry.counter("drools.rule.execution.error", 
+                            "rule_id", ruleId, 
+                            "error", "rule_not_found")
+                    .increment();
+        sample.stop(Timer.builder("drools.rule.execution.time")
+                   .tag("rule_id", ruleId)
+                   .tag("status", "error")
+                   .register(meterRegistry));
         return RuleExecutor.ExecutionResult.failure("Rule not found: " + ruleId);
       }
       
@@ -57,16 +79,42 @@ public class DroolsEngineService {
       // Check if rule is active
       if (metadata.getStatus() != RuleMetadata.RuleStatus.ACTIVE) {
         log.warn("Rule is not active: {} (status: {})", ruleId, metadata.getStatus());
+        meterRegistry.counter("drools.rule.execution.error", 
+                            "rule_id", ruleId, 
+                            "error", "rule_not_active")
+                    .increment();
+        sample.stop(Timer.builder("drools.rule.execution.time")
+                   .tag("rule_id", ruleId)
+                   .tag("status", "error")
+                   .register(meterRegistry));
         return RuleExecutor.ExecutionResult.failure("Rule is not active: " + ruleId);
       }
       
       // Execute the rule
       RuleExecutor.ExecutionResult result = ruleExecutor.executeRule(currentKieContainer, ruleId, inputData);
       
-      // Update execution statistics
+      // Update execution statistics and metrics
       if (result.isSuccess()) {
         RuleMetadata updatedMetadata = metadata.withExecution(result.getExecutionTimeMs());
         ruleMetadata.put(ruleId, updatedMetadata);
+        
+        // Record successful execution metrics
+        meterRegistry.counter("drools.rule.execution.success", "rule_id", ruleId)
+                    .increment();
+        sample.stop(Timer.builder("drools.rule.execution.time")
+                   .tag("rule_id", ruleId)
+                   .tag("status", "success")
+                   .register(meterRegistry));
+      } else {
+        // Record failed execution metrics
+        meterRegistry.counter("drools.rule.execution.error", 
+                            "rule_id", ruleId, 
+                            "error", "execution_failed")
+                    .increment();
+        sample.stop(Timer.builder("drools.rule.execution.time")
+                   .tag("rule_id", ruleId)
+                   .tag("status", "error")
+                   .register(meterRegistry));
       }
       
       return result;
