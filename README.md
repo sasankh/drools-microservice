@@ -25,7 +25,7 @@ Client Request → REST API → Rule Engine → Cache Layer → Storage Layer
 
 ### Tech Stack
 
-- **Java 17** - Runtime platform
+- **Java 17** - Runtime platform (enforced by Maven Enforcer Plugin)
 - **Spring Boot 3.2.5** - Application framework with security and validation
 - **Drools 8.44.0.Final** - Business rules engine
 - **AWS S3** - Rule storage (with LocalStack for development)
@@ -164,12 +164,12 @@ curl http://localhost:8081/admin/rules
 # Test rule execution with sample rules
 curl -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
-  -d '{"ruleId": "pricing.discount.simple", "data": {"amount": 100}}'
+  -d '{"rule_id": "pricing.discount.simple", "data": {"amount": 100}}'
 
 # Test VIP customer rule
 curl -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
-  -d '{"ruleId": "pricing.discount.vip", "data": {"customerType": "VIP", "amount": 100}}'
+  -d '{"rule_id": "pricing.discount.vip", "data": {"customerType": "VIP", "amount": 100}}'
 ```
 
 Expected response:
@@ -182,7 +182,7 @@ Expected response:
     "discountPercent": 10
   },
   "executionTimeMs": 15,
-  "ruleId": "pricing.discount.simple",
+  "rule_id": "pricing.discount.simple",
   "timestamp": "2025-07-22T18:45:00Z"
 }
 ```
@@ -354,7 +354,7 @@ POST /execute-rule
 Content-Type: application/json
 
 {
-  "ruleId": "pricing.discount.vip",
+  "rule_id": "pricing.discount.vip",
   "data": {
     "customerType": "VIP",
     "amount": 100,
@@ -373,7 +373,7 @@ Response:
     "discountPercent": 20
   },
   "executionTimeMs": 15,
-  "ruleId": "pricing.discount.vip",
+  "rule_id": "pricing.discount.vip",
   "timestamp": "2025-07-21T17:30:00Z"
 }
 ```
@@ -563,20 +563,26 @@ done
 
 Rules are written in Drools (.drl) format and stored with hierarchical organization:
 
-#### Example Rule Structure
+#### Rule Structure (10 Sample Rules Included)
 ```
-s3://my-rules-bucket/
+sample-rules/                          # Single source of truth for all .drl files
 ├── pricing/
 │   ├── discount/
-│   │   ├── vip.drl
-│   │   ├── regular.drl
-│   │   └── bulk.drl
+│   │   ├── simple.drl                 # Basic 10% discount
+│   │   ├── vip.drl                    # VIP customer discount
+│   │   ├── bulk.drl                   # Bulk order discount
+│   │   └── first-time.drl            # First-time customer discount
 │   └── shipping/
-│       ├── express.drl
-│       └── standard.drl
+│       ├── standard.drl               # Standard shipping calculation
+│       └── express.drl                # Express shipping calculation
+├── seasonal/
+│   └── holiday/
+│       ├── discount.drl               # Holiday season discount
+│       └── blackfriday.drl            # Black Friday promotion
 └── validation/
-    ├── customer.drl
-    └── product.drl
+    └── customer/
+        ├── age.drl                    # Customer age validation
+        └── credit.drl                 # Credit score validation
 ```
 
 #### Sample Rule (pricing/discount/vip.drl)
@@ -702,7 +708,7 @@ curl http://localhost:8081/admin/health
 # Start complete development stack
 docker-compose up -d
 
-# Initialize LocalStack (creates bucket and uploads 10 sample rules)
+# Initialize LocalStack (creates bucket and uploads sample rules from sample-rules/)
 ./init-localstack.sh
 
 # Test LocalStack integration
@@ -725,11 +731,11 @@ docker-compose ps
 
 3. **Upload Sample Rules** (automatic with docker-compose)
    ```bash
-   # Sample rules automatically uploaded via init-localstack.sh
+   # Rules are automatically uploaded from sample-rules/ via init-localstack.sh
    # Or upload manually:
    aws --endpoint-url=http://localhost:4566 s3 sync sample-rules/ s3://local-rules/
-   
-   # Verify rules uploaded
+
+   # Verify rules uploaded (should show 10 .drl files)
    aws --endpoint-url=http://localhost:4566 s3 ls s3://local-rules/ --recursive
    ```
 
@@ -808,7 +814,7 @@ mvn jmeter:jmeter
 for i in {1..100}; do
   curl -X POST http://localhost:8080/execute-rule \
     -H "Content-Type: application/json" \
-    -d '{"ruleId": "simple.discount", "data": {"amount": 100}}'
+    -d '{"rule_id": "simple.discount", "data": {"amount": 100}}'
 done
 ```
 

@@ -36,7 +36,7 @@ This is a Drools Rule Engine Microservice designed for high-performance business
 
 **Tech Stack**: Java 17 (enforced), Spring Boot 3.x, Drools 8.44.0.Final, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
 
-**Health Status**: 6.3/10 - Critical fixes complete, needs test coverage
+**Health Status**: 8.5/10 - 550 tests, 96%/90% coverage, all critical fixes complete
 
 ## Common Commands
 
@@ -299,12 +299,10 @@ Check `project.progress.md` and `FIXES-SUMMARY.md` for current status. Project f
 6. ✅ Critical Fixes (Java 17, Memory Leak, Monitoring) - COMPLETED 2026-02-19
 
 **Current Status**:
-- **Health Score**: 6.3/10 (improved from broken state)
+- **Health Score**: 8.5/10
 - **Critical Issues**: FIXED ✅ (Java version, memory leak)
-- **Test Coverage**: 0% ⚠️ (Phase 4.1-4.3 pending)
-- **Next Priority**: Testing and validation
-
-**Current Focus**: Testing memory leak fix, adding test coverage (see `project-improvement-plan.md`)
+- **Test Coverage**: 96.2% instruction / 89.7% branch (550 tests) ✅
+- **Scripts**: `init-localstack.sh` refactored — reads from `sample-rules/` (no hardcoded DRL)
 
 ## Performance Targets
 
@@ -360,7 +358,7 @@ Check `project.progress.md` and `FIXES-SUMMARY.md` for current status. Project f
 #### Phase 5.2 - Local Development Environment ✅
 - **LocalStack S3 Integration**: Complete S3 emulation with automatic bucket setup
 - **10 Sample Business Rules**: Comprehensive rule suite (pricing, validation, seasonal)
-- **Automation Scripts**: `init-localstack.sh`, `test-localstack.sh`, `setup-dev-environment.sh`
+- **Automation Scripts**: `init-localstack.sh` (reads from `sample-rules/`), `test-localstack.sh`, `setup-dev-environment.sh`
 - **One-Command Setup**: Complete development environment with single script execution
 - **Sample Rule Documentation**: Complete usage guide with API examples
 
@@ -413,12 +411,12 @@ curl http://localhost:8081/admin/thread-pools     # Thread pool statistics
 # Test main API with sample rules
 curl -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
-  -d '{"ruleId": "pricing.discount.simple", "data": {"amount": 100}}'
+  -d '{"rule_id": "pricing.discount.simple", "data": {"amount": 100}}'
 
 # Test VIP customer rule
 curl -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
-  -d '{"ruleId": "pricing.discount.vip", "data": {"customerType": "VIP", "amount": 100}}'
+  -d '{"rule_id": "pricing.discount.vip", "data": {"customerType": "VIP", "amount": 100}}'
 
 # Stop all services
 docker-compose down
@@ -458,7 +456,7 @@ mvn compile && mvn spring-boot:run -Dspring.profiles.active=dev
 # Test with sample rules
 curl -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
-  -d '{"ruleId": "pricing.discount.simple", "data": {"amount": 100}}'
+  -d '{"rule_id": "pricing.discount.simple", "data": {"amount": 100}}'
 ```
 
 #### Option 4: Docker Build Validation
