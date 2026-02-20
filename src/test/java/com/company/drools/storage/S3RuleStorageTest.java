@@ -95,8 +95,7 @@ class S3RuleStorageTest {
     return S3Object.builder().key(key).lastModified(Instant.now()).size(100L).build();
   }
 
-  private static final String SAMPLE_DRL =
-      "package com.company.rules\nrule \"test\" when then end";
+  private static final String SAMPLE_DRL = "package com.company.rules\nrule \"test\" when then end";
 
   // ========================================================================
   // Happy Path Tests
@@ -422,10 +421,7 @@ class S3RuleStorageTest {
               .build();
 
       ListObjectsV2Response page2Response =
-          ListObjectsV2Response.builder()
-              .contents(page2Objects)
-              .isTruncated(false)
-              .build();
+          ListObjectsV2Response.builder().contents(page2Objects).isTruncated(false).build();
 
       when(s3Client.listObjectsV2(any(ListObjectsV2Request.class)))
           .thenReturn(page1Response)
@@ -465,8 +461,7 @@ class S3RuleStorageTest {
       // Verify that the timer "drools.storage.operation.time" was recorded
       // SimpleMeterRegistry tracks all registered meters
       assertThat(meterRegistry.find("drools.storage.operation.time").timer()).isNotNull();
-      assertThat(meterRegistry.find("drools.storage.operation.time").timer().count())
-          .isEqualTo(1);
+      assertThat(meterRegistry.find("drools.storage.operation.time").timer().count()).isEqualTo(1);
     }
   }
 }

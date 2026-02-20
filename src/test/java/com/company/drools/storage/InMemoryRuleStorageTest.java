@@ -40,7 +40,8 @@ class InMemoryRuleStorageTest {
     void testLoadAllRules() {
       List<Rule> rules = storage.loadAllRules();
       assertThat(rules).hasSize(2);
-      assertThat(rules).extracting(Rule::getRuleId)
+      assertThat(rules)
+          .extracting(Rule::getRuleId)
           .containsExactlyInAnyOrder("pricing.discount.simple", "pricing.discount.vip");
     }
 
@@ -153,8 +154,7 @@ class InMemoryRuleStorageTest {
     @DisplayName("getRuleIds returns all IDs")
     void testGetRuleIds() {
       List<String> ids = adapter.getRuleIds();
-      assertThat(ids).containsExactlyInAnyOrder(
-          "pricing.discount.simple", "pricing.discount.vip");
+      assertThat(ids).containsExactlyInAnyOrder("pricing.discount.simple", "pricing.discount.vip");
     }
   }
 }

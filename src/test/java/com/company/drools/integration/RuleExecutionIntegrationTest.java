@@ -25,9 +25,9 @@ import org.kie.api.runtime.KieContainer;
 import org.mockito.Mockito;
 
 /**
- * Integration tests for end-to-end rule execution using real sample .drl files.
- * These tests compile and execute actual Drools rules without mocking,
- * verifying the full pipeline: load -> compile -> execute -> verify results.
+ * Integration tests for end-to-end rule execution using real sample .drl files. These tests compile
+ * and execute actual Drools rules without mocking, verifying the full pipeline: load -> compile ->
+ * execute -> verify results.
  */
 @DisplayName("Rule Execution Integration Tests")
 class RuleExecutionIntegrationTest {
@@ -328,27 +328,20 @@ class RuleExecutionIntegrationTest {
 
       // Execute each loaded rule with appropriate test data
       Map<String, Map<String, Object>> testDataByRule = new HashMap<>();
-      testDataByRule.put(
-          "pricing.discount.simple", Map.of("amount", 100.0));
-      testDataByRule.put(
-          "pricing.discount.vip", Map.of("customerType", "VIP", "amount", 100.0));
-      testDataByRule.put(
-          "pricing.discount.bulk", Map.of("quantity", 20, "amount", 500.0));
+      testDataByRule.put("pricing.discount.simple", Map.of("amount", 100.0));
+      testDataByRule.put("pricing.discount.vip", Map.of("customerType", "VIP", "amount", 100.0));
+      testDataByRule.put("pricing.discount.bulk", Map.of("quantity", 20, "amount", 500.0));
       testDataByRule.put(
           "pricing.discount.first-time", Map.of("isFirstOrder", true, "amount", 80.0));
       testDataByRule.put(
           "pricing.shipping.standard", Map.of("shippingType", "standard", "weight", 2.0));
       testDataByRule.put(
           "pricing.shipping.express", Map.of("shippingType", "express", "weight", 2.0));
+      testDataByRule.put("validation.customer.age", Map.of("customerAge", 25));
+      testDataByRule.put("validation.customer.credit", Map.of("creditScore", 750));
       testDataByRule.put(
-          "validation.customer.age", Map.of("customerAge", 25));
-      testDataByRule.put(
-          "validation.customer.credit", Map.of("creditScore", 750));
-      testDataByRule.put(
-          "seasonal.holiday.blackfriday",
-          Map.of("isBlackFriday", true, "amount", 100.0));
-      testDataByRule.put(
-          "seasonal.holiday.discount", Map.of("isHoliday", true, "amount", 100.0));
+          "seasonal.holiday.blackfriday", Map.of("isBlackFriday", true, "amount", 100.0));
+      testDataByRule.put("seasonal.holiday.discount", Map.of("isHoliday", true, "amount", 100.0));
 
       int successCount = 0;
       for (Rule rule : allRules) {
@@ -379,8 +372,7 @@ class RuleExecutionIntegrationTest {
       Rule shippingRule = loadSampleRule("pricing.shipping.standard");
 
       boolean loaded =
-          droolsEngineService.loadRules(
-              List.of(discountRule, vipRule, ageRule, shippingRule));
+          droolsEngineService.loadRules(List.of(discountRule, vipRule, ageRule, shippingRule));
       assertThat(loaded).isTrue();
 
       int threadCount = 20;
@@ -388,8 +380,7 @@ class RuleExecutionIntegrationTest {
       CountDownLatch startLatch = new CountDownLatch(1);
       CountDownLatch doneLatch = new CountDownLatch(threadCount);
       AtomicInteger errorCount = new AtomicInteger(0);
-      List<RuleExecutor.ExecutionResult> results =
-          Collections.synchronizedList(new ArrayList<>());
+      List<RuleExecutor.ExecutionResult> results = Collections.synchronizedList(new ArrayList<>());
 
       // Each thread executes a different rule
       String[] ruleIds = {
@@ -421,8 +412,7 @@ class RuleExecutionIntegrationTest {
                   }
                 }
 
-                RuleExecutor.ExecutionResult result =
-                    droolsEngineService.executeRule(ruleId, data);
+                RuleExecutor.ExecutionResult result = droolsEngineService.executeRule(ruleId, data);
                 results.add(result);
               } catch (Exception e) {
                 errorCount.incrementAndGet();

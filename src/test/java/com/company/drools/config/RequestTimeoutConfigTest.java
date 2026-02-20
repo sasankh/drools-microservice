@@ -68,8 +68,7 @@ class RequestTimeoutConfigTest {
         request,
         response,
         (req, res) -> {
-          Object startTime =
-              ((MockHttpServletRequest) req).getAttribute("request.start.time");
+          Object startTime = ((MockHttpServletRequest) req).getAttribute("request.start.time");
           assertThat(startTime).isNotNull();
           assertThat((long) startTime).isGreaterThan(0);
         });

@@ -71,8 +71,7 @@ class S3StorageIntegrationTest {
     clearBucket();
 
     // Build S3RuleStorage with real dependencies
-    CircuitBreaker circuitBreaker =
-        CircuitBreaker.of("s3-test", CircuitBreakerConfig.ofDefaults());
+    CircuitBreaker circuitBreaker = CircuitBreaker.of("s3-test", CircuitBreakerConfig.ofDefaults());
     TimeoutConfig timeoutConfig = new TimeoutConfig();
     SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
 
@@ -134,8 +133,7 @@ class S3StorageIntegrationTest {
     assertThat(retrieved.get().getRuleId()).isEqualTo(ruleId);
     assertThat(retrieved.get().getContent()).isEqualTo(content);
     assertThat(retrieved.get().getMetadata()).isNotNull();
-    assertThat(retrieved.get().getMetadata().getStatus())
-        .isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
+    assertThat(retrieved.get().getMetadata().getStatus()).isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
 
     // Verify exists check
     assertThat(s3RuleStorage.ruleExists(ruleId)).isTrue();
@@ -173,9 +171,7 @@ class S3StorageIntegrationTest {
     assertThat(allRules)
         .extracting(Rule::getRuleId)
         .containsExactlyInAnyOrder(
-            "pricing.discount.simple",
-            "pricing.shipping.standard",
-            "validation.customer.age");
+            "pricing.discount.simple", "pricing.shipping.standard", "validation.customer.age");
 
     // Verify rule count
     assertThat(s3RuleStorage.getTotalRuleCount()).isEqualTo(3);
@@ -183,9 +179,7 @@ class S3StorageIntegrationTest {
     // Verify rule IDs list
     assertThat(s3RuleStorage.getRuleIds())
         .containsExactlyInAnyOrder(
-            "pricing.discount.simple",
-            "pricing.shipping.standard",
-            "validation.customer.age");
+            "pricing.discount.simple", "pricing.shipping.standard", "validation.customer.age");
   }
 
   @Test
@@ -234,8 +228,7 @@ class S3StorageIntegrationTest {
     var listResponse =
         s3Client.listObjectsV2(ListObjectsV2Request.builder().bucket(BUCKET_NAME).build());
     assertThat(listResponse.contents()).hasSize(1);
-    assertThat(listResponse.contents().get(0).key())
-        .isEqualTo("pricing/discount/black-friday.drl");
+    assertThat(listResponse.contents().get(0).key()).isEqualTo("pricing/discount/black-friday.drl");
 
     // Verify round-trip: retrieve by dot-separated ID
     Optional<Rule> retrieved = s3RuleStorage.getRule(ruleId);
@@ -327,9 +320,7 @@ class S3StorageIntegrationTest {
     for (int i = 0; i < numRules; i++) {
       String ruleId = "concurrent.rules.rule-" + i;
       Optional<Rule> rule = s3RuleStorage.getRule(ruleId);
-      assertThat(rule)
-          .as("Rule %s should exist", ruleId)
-          .isPresent();
+      assertThat(rule).as("Rule %s should exist", ruleId).isPresent();
     }
   }
 }

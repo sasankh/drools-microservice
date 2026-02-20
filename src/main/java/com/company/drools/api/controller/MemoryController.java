@@ -129,9 +129,7 @@ public class MemoryController {
 
     logger.debug(
         "Memory info requested - Heap usage: {}/{} MB ({}%)",
-        heapUsed / 1024 / 1024,
-        heapMax / 1024 / 1024,
-        String.format("%.2f", heapUsagePercent));
+        heapUsed / 1024 / 1024, heapMax / 1024 / 1024, String.format("%.2f", heapUsagePercent));
 
     return ResponseEntity.ok(memoryInfo);
   }
@@ -171,8 +169,7 @@ public class MemoryController {
     result.put("freedMemoryMB", freedMemory / 1024 / 1024);
     result.put("note", "This is a suggestion to JVM, actual GC timing is not guaranteed");
 
-    logger.info(
-        "GC triggered - Freed approximately {} MB", Math.max(0, freedMemory / 1024 / 1024));
+    logger.info("GC triggered - Freed approximately {} MB", Math.max(0, freedMemory / 1024 / 1024));
 
     return ResponseEntity.ok(result);
   }

@@ -153,8 +153,7 @@ class DtoTest {
     @DisplayName("success factory method creates success response")
     void testSuccessFactory() {
       Map<String, Object> result = Map.of("amount", 90.0);
-      RuleExecutionResponse response =
-          RuleExecutionResponse.success("rule1", result, 15L);
+      RuleExecutionResponse response = RuleExecutionResponse.success("rule1", result, 15L);
 
       assertThat(response.getRuleId()).isEqualTo("rule1");
       assertThat(response.getResult()).containsEntry("amount", 90.0);
@@ -350,8 +349,7 @@ class DtoTest {
       List<RefreshRulesResponse.RuleError> errors =
           List.of(new RefreshRulesResponse.RuleError("rule1", "compilation error"));
 
-      RefreshRulesResponse response =
-          new RefreshRulesResponse("PARTIAL", 9, 1, 250L, errors);
+      RefreshRulesResponse response = new RefreshRulesResponse("PARTIAL", 9, 1, 250L, errors);
 
       assertThat(response.getStatus()).isEqualTo("PARTIAL");
       assertThat(response.getRulesLoaded()).isEqualTo(9);
@@ -433,9 +431,7 @@ class DtoTest {
     @DisplayName("parameterized constructor sets all fields")
     void testParameterizedConstructor() {
       Map<String, HealthCheckResponse.ComponentHealth> components = new HashMap<>();
-      components.put(
-          "drools",
-          new HealthCheckResponse.ComponentHealth("UP", Map.of("rules", 10)));
+      components.put("drools", new HealthCheckResponse.ComponentHealth("UP", Map.of("rules", 10)));
 
       HealthCheckResponse response = new HealthCheckResponse("UP", components);
       assertThat(response.getStatus()).isEqualTo("UP");

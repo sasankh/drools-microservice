@@ -99,8 +99,7 @@ class GlobalExceptionHandlerTest {
   @DisplayName("handles NoResourceFoundException with 404")
   void testHandleNoResourceFoundException() {
     NoResourceFoundException ex =
-        new NoResourceFoundException(
-            org.springframework.http.HttpMethod.GET, "/nonexistent");
+        new NoResourceFoundException(org.springframework.http.HttpMethod.GET, "/nonexistent");
 
     ResponseEntity<RuleExecutionResponse> response = handler.handleNoResourceFoundException(ex);
 
@@ -124,10 +123,8 @@ class GlobalExceptionHandlerTest {
   void testHandleValidationException() throws Exception {
     BeanPropertyBindingResult bindingResult =
         new BeanPropertyBindingResult(new Object(), "request");
-    bindingResult.addError(
-        new FieldError("request", "ruleId", "Rule ID cannot be null"));
-    bindingResult.addError(
-        new FieldError("request", "data", "Data cannot be null"));
+    bindingResult.addError(new FieldError("request", "ruleId", "Rule ID cannot be null"));
+    bindingResult.addError(new FieldError("request", "data", "Data cannot be null"));
 
     // Need a real MethodParameter to avoid NPE in getMessage()
     Method method = String.class.getMethod("toString");

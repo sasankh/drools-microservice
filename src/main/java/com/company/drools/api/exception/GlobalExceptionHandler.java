@@ -134,8 +134,7 @@ public class GlobalExceptionHandler {
     log.debug("No handler found for path: {}", ex.getResourcePath());
 
     RuleExecutionResponse response =
-        RuleExecutionResponse.failure(
-            null, "NOT_FOUND", "The requested resource was not found");
+        RuleExecutionResponse.failure(null, "NOT_FOUND", "The requested resource was not found");
 
     return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
   }

@@ -14,8 +14,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Base class for integration tests providing Spring Boot context and common utilities.
- * All integration test classes should extend this class.
+ * Base class for integration tests providing Spring Boot context and common utilities. All
+ * integration test classes should extend this class.
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -23,8 +23,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 public abstract class BaseIntegrationTest {
 
   /**
-   * Load sample rules from the sample-rules directory for testing.
-   * Useful for integration tests that need real Drools rules.
+   * Load sample rules from the sample-rules directory for testing. Useful for integration tests
+   * that need real Drools rules.
    *
    * @return List of Rule objects loaded from sample-rules directory
    * @throws IOException if rule files cannot be read
@@ -57,8 +57,8 @@ public abstract class BaseIntegrationTest {
   }
 
   /**
-   * Extract rule ID from file path.
-   * Example: sample-rules/pricing/discount/simple.drl -> pricing.discount.simple
+   * Extract rule ID from file path. Example: sample-rules/pricing/discount/simple.drl ->
+   * pricing.discount.simple
    */
   private String extractRuleIdFromPath(Path path) {
     Path sampleRulesDir = Paths.get("sample-rules");
@@ -67,9 +67,7 @@ public abstract class BaseIntegrationTest {
     return pathStr.replace("\\", "."); // Handle Windows paths
   }
 
-  /**
-   * Load a single rule from the sample-rules directory.
-   */
+  /** Load a single rule from the sample-rules directory. */
   protected Rule loadSampleRule(String ruleId) throws IOException {
     String path = "sample-rules/" + ruleId.replace(".", "/") + ".drl";
     String content = Files.readString(Paths.get(path));

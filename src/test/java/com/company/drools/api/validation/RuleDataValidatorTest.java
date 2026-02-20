@@ -39,7 +39,9 @@ class RuleDataValidatorTest {
     context = mock(ConstraintValidatorContext.class);
     ConstraintValidatorContext.ConstraintViolationBuilder violationBuilder =
         mock(ConstraintValidatorContext.ConstraintViolationBuilder.class);
-    lenient().when(context.buildConstraintViolationWithTemplate(anyString())).thenReturn(violationBuilder);
+    lenient()
+        .when(context.buildConstraintViolationWithTemplate(anyString()))
+        .thenReturn(violationBuilder);
   }
 
   @Nested
@@ -125,7 +127,8 @@ class RuleDataValidatorTest {
     @Test
     @DisplayName("rejects path traversal patterns in keys")
     void testValidate_PathTraversal_Rejected() {
-      // Keys containing dangerous characters are caught by SAFE_STRING_PATTERN via containsDangerousPattern,
+      // Keys containing dangerous characters are caught by SAFE_STRING_PATTERN via
+      // containsDangerousPattern,
       // but path traversal with ".." alone isn't caught by the current patterns.
       // However, using angle brackets or semicolons in a traversal attempt will be caught.
       // The key validator checks containsDangerousPattern, and values check SAFE_STRING_PATTERN.

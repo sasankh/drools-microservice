@@ -52,8 +52,7 @@ class StorageFactoryTest {
   @DisplayName("creates S3 storage for 's3' source")
   void testS3Source() throws Exception {
     setField(storageFactory, "ruleSource", "s3");
-    when(applicationContext.getBean("s3RuleStorage", RuleStorage.class))
-        .thenReturn(s3RuleStorage);
+    when(applicationContext.getBean("s3RuleStorage", RuleStorage.class)).thenReturn(s3RuleStorage);
 
     RuleStorage storage = storageFactory.createRuleStorage();
     assertThat(storage).isEqualTo(s3RuleStorage);
@@ -73,8 +72,7 @@ class StorageFactoryTest {
   @DisplayName("handles uppercase source names")
   void testUppercaseSource() throws Exception {
     setField(storageFactory, "ruleSource", "S3");
-    when(applicationContext.getBean("s3RuleStorage", RuleStorage.class))
-        .thenReturn(s3RuleStorage);
+    when(applicationContext.getBean("s3RuleStorage", RuleStorage.class)).thenReturn(s3RuleStorage);
 
     RuleStorage storage = storageFactory.createRuleStorage();
     assertThat(storage).isEqualTo(s3RuleStorage);

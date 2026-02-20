@@ -15,7 +15,11 @@ import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -24,6 +28,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
@@ -55,8 +60,7 @@ class RedisRuleCacheTest extends BaseUnitTest {
             .permittedNumberOfCallsInHalfOpenState(3)
             .build();
 
-    redisCircuitBreaker =
-        CircuitBreakerRegistry.of(cbConfig).circuitBreaker("redis-test");
+    redisCircuitBreaker = CircuitBreakerRegistry.of(cbConfig).circuitBreaker("redis-test");
 
     // Reset CB to CLOSED state for each test
     redisCircuitBreaker.transitionToClosedState();
@@ -65,9 +69,7 @@ class RedisRuleCacheTest extends BaseUnitTest {
         new RedisRuleCache(redisTemplate, ttlDuration, meterRegistry, redisCircuitBreaker);
   }
 
-  /**
-   * Force the circuit breaker into OPEN state by transitioning it directly.
-   */
+  /** Force the circuit breaker into OPEN state by transitioning it directly. */
   private void forceCircuitBreakerOpen() {
     redisCircuitBreaker.transitionToOpenState();
   }
@@ -260,8 +262,7 @@ class RedisRuleCacheTest extends BaseUnitTest {
       assertThat(capturedRule.getRuleId()).isEqualTo("pricing.discount.vip-complex");
       assertThat(capturedRule.getContent()).contains("Complex VIP Discount");
       assertThat(capturedRule.getContent()).contains("BigDecimal");
-      assertThat(capturedRule.getMetadata().getStatus())
-          .isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
+      assertThat(capturedRule.getMetadata().getStatus()).isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
     }
 
     @Test
@@ -346,6 +347,344 @@ class RedisRuleCacheTest extends BaseUnitTest {
 
       longTtlCache.put(rule);
       verify(valueOperations).set(eq(expectedKey), eq(rule), eq(longTtl));
+    }
+  }
+
+  // ========================================================================
+  // Clear Tests
+  // ========================================================================
+
+  @Nested
+  @DisplayName("Clear")
+  class Clear {
+
+    @Test
+    @DisplayName("clear deletes all cache keys from Redis")
+    void testClear_DeletesAllKeys() {
+      Set<String> keys = new HashSet<>();
+      keys.add("drools:rule:rule1");
+      keys.add("drools:rule:rule2");
+      keys.add("drools:rule:rule3");
+
+      when(redisTemplate.keys("drools:rule:*")).thenReturn(keys);
+      when(redisTemplate.delete(keys)).thenReturn(3L);
+
+      redisRuleCache.clear();
+
+      verify(redisTemplate).keys("drools:rule:*");
+      verify(redisTemplate).delete(keys);
+    }
+
+    @Test
+    @DisplayName("clear with no keys does not call delete")
+    void testClear_NoKeys_DoesNotCallDelete() {
+      when(redisTemplate.keys("drools:rule:*")).thenReturn(new HashSet<>());
+
+      redisRuleCache.clear();
+
+      verify(redisTemplate).keys("drools:rule:*");
+      verify(redisTemplate, never()).delete(any(Set.class));
+    }
+
+    @Test
+    @DisplayName("clear with null keys does not call delete")
+    void testClear_NullKeys_DoesNotCallDelete() {
+      when(redisTemplate.keys("drools:rule:*")).thenReturn(null);
+
+      redisRuleCache.clear();
+
+      verify(redisTemplate).keys("drools:rule:*");
+      verify(redisTemplate, never()).delete(any(Set.class));
+    }
+
+    @Test
+    @DisplayName("clear handles DataAccessException gracefully")
+    void testClear_DataAccessException_HandledGracefully() {
+      when(redisTemplate.keys("drools:rule:*"))
+          .thenThrow(new QueryTimeoutException("Redis timeout"));
+
+      assertThatCode(() -> redisRuleCache.clear()).doesNotThrowAnyException();
+    }
+  }
+
+  // ========================================================================
+  // Size Tests
+  // ========================================================================
+
+  @Nested
+  @DisplayName("Size")
+  class Size {
+
+    @Test
+    @DisplayName("size returns correct count of keys")
+    void testSize_ReturnsCorrectCount() {
+      Set<String> keys = new HashSet<>();
+      keys.add("drools:rule:rule1");
+      keys.add("drools:rule:rule2");
+
+      when(redisTemplate.keys("drools:rule:*")).thenReturn(keys);
+
+      assertThat(redisRuleCache.size()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("size returns 0 when no keys exist")
+    void testSize_NoKeys_ReturnsZero() {
+      when(redisTemplate.keys("drools:rule:*")).thenReturn(null);
+
+      assertThat(redisRuleCache.size()).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("size returns 0 on DataAccessException")
+    void testSize_DataAccessException_ReturnsZero() {
+      when(redisTemplate.keys("drools:rule:*"))
+          .thenThrow(new QueryTimeoutException("Redis timeout"));
+
+      assertThat(redisRuleCache.size()).isEqualTo(0);
+    }
+  }
+
+  // ========================================================================
+  // maxSize Tests
+  // ========================================================================
+
+  @Nested
+  @DisplayName("MaxSize")
+  class MaxSize {
+
+    @Test
+    @DisplayName("maxSize returns Long.MAX_VALUE for Redis cache")
+    void testMaxSize_ReturnsLongMaxValue() {
+      assertThat(redisRuleCache.maxSize()).isEqualTo(Long.MAX_VALUE);
+    }
+  }
+
+  // ========================================================================
+  // getCachedRuleIds Tests
+  // ========================================================================
+
+  @Nested
+  @DisplayName("GetCachedRuleIds")
+  class GetCachedRuleIds {
+
+    @Test
+    @DisplayName("getCachedRuleIds strips prefix and returns rule IDs")
+    void testGetCachedRuleIds_StripsPrefix() {
+      Set<String> keys = new HashSet<>();
+      keys.add("drools:rule:pricing.discount.simple");
+      keys.add("drools:rule:validation.input.basic");
+
+      when(redisTemplate.keys("drools:rule:*")).thenReturn(keys);
+
+      List<String> ruleIds = redisRuleCache.getCachedRuleIds();
+
+      assertThat(ruleIds).hasSize(2);
+      assertThat(ruleIds)
+          .containsExactlyInAnyOrder("pricing.discount.simple", "validation.input.basic");
+    }
+
+    @Test
+    @DisplayName("getCachedRuleIds returns empty list when no keys exist")
+    void testGetCachedRuleIds_NoKeys_ReturnsEmptyList() {
+      when(redisTemplate.keys("drools:rule:*")).thenReturn(new HashSet<>());
+
+      List<String> ruleIds = redisRuleCache.getCachedRuleIds();
+
+      assertThat(ruleIds).isEmpty();
+    }
+
+    @Test
+    @DisplayName("getCachedRuleIds returns empty list when keys are null")
+    void testGetCachedRuleIds_NullKeys_ReturnsEmptyList() {
+      when(redisTemplate.keys("drools:rule:*")).thenReturn(null);
+
+      List<String> ruleIds = redisRuleCache.getCachedRuleIds();
+
+      assertThat(ruleIds).isEmpty();
+    }
+
+    @Test
+    @DisplayName("getCachedRuleIds returns empty list on DataAccessException")
+    void testGetCachedRuleIds_DataAccessException_ReturnsEmptyList() {
+      when(redisTemplate.keys("drools:rule:*"))
+          .thenThrow(new QueryTimeoutException("Redis timeout"));
+
+      List<String> ruleIds = redisRuleCache.getCachedRuleIds();
+
+      assertThat(ruleIds).isEmpty();
+    }
+  }
+
+  // ========================================================================
+  // getStatistics Tests
+  // ========================================================================
+
+  @Nested
+  @DisplayName("GetStatistics")
+  class GetStatistics {
+
+    @Test
+    @DisplayName("getStatistics returns CacheStatistics with correct local stats")
+    void testGetStatistics_ReturnsCorrectStats() {
+      // Setup size mock
+      when(redisTemplate.keys("drools:rule:*")).thenReturn(new HashSet<>());
+
+      // Generate some hits and misses
+      Rule rule = RuleTestUtils.createSimpleRule("rule.one");
+      String key = "drools:rule:rule.one";
+      when(valueOperations.get(key)).thenReturn(rule);
+      redisRuleCache.get("rule.one"); // hit
+
+      when(valueOperations.get("drools:rule:rule.missing")).thenReturn(null);
+      redisRuleCache.get("rule.missing"); // miss
+
+      CacheStatistics stats = redisRuleCache.getStatistics();
+
+      assertThat(stats.getHits()).isEqualTo(1);
+      assertThat(stats.getMisses()).isEqualTo(1);
+      assertThat(stats.getMaxSize()).isEqualTo(Long.MAX_VALUE);
+      assertThat(stats.getLastAccess()).isNotNull();
+    }
+  }
+
+  // ========================================================================
+  // warmUp Tests
+  // ========================================================================
+
+  @Nested
+  @DisplayName("WarmUp")
+  class WarmUp {
+
+    @Test
+    @DisplayName("warmUp puts all provided rules into the cache")
+    void testWarmUp_PutsAllRules() {
+      List<Rule> rules = new ArrayList<>();
+      rules.add(RuleTestUtils.createSimpleRule("rule.one"));
+      rules.add(RuleTestUtils.createSimpleRule("rule.two"));
+      rules.add(RuleTestUtils.createSimpleRule("rule.three"));
+
+      redisRuleCache.warmUp(rules);
+
+      verify(valueOperations, times(3)).set(anyString(), any(Rule.class), eq(ttlDuration));
+      verify(valueOperations).set(eq("drools:rule:rule.one"), any(Rule.class), eq(ttlDuration));
+      verify(valueOperations).set(eq("drools:rule:rule.two"), any(Rule.class), eq(ttlDuration));
+      verify(valueOperations).set(eq("drools:rule:rule.three"), any(Rule.class), eq(ttlDuration));
+    }
+
+    @Test
+    @DisplayName("warmUp with null list does nothing")
+    void testWarmUp_NullList_DoesNothing() {
+      redisRuleCache.warmUp(null);
+
+      verify(valueOperations, never()).set(anyString(), any(Rule.class), any(Duration.class));
+    }
+
+    @Test
+    @DisplayName("warmUp with empty list does nothing")
+    void testWarmUp_EmptyList_DoesNothing() {
+      redisRuleCache.warmUp(new ArrayList<>());
+
+      verify(valueOperations, never()).set(anyString(), any(Rule.class), any(Duration.class));
+    }
+
+    @Test
+    @DisplayName("warmUp handles DataAccessException gracefully")
+    void testWarmUp_DataAccessException_HandledGracefully() {
+      doThrow(new QueryTimeoutException("Redis timeout"))
+          .when(valueOperations)
+          .set(anyString(), any(Rule.class), any(Duration.class));
+
+      List<Rule> rules = new ArrayList<>();
+      rules.add(RuleTestUtils.createSimpleRule("rule.one"));
+
+      // The DataAccessException is caught inside put() -> CB wrapper -> catch Exception
+      assertThatCode(() -> redisRuleCache.warmUp(rules)).doesNotThrowAnyException();
+    }
+  }
+
+  // ========================================================================
+  // evictIfNeeded Tests
+  // ========================================================================
+
+  @Nested
+  @DisplayName("EvictIfNeeded")
+  class EvictIfNeeded {
+
+    @Test
+    @DisplayName("evictIfNeeded is a no-op for Redis cache")
+    void testEvictIfNeeded_IsNoOp() {
+      // Should not throw and should not interact with Redis
+      assertThatCode(() -> redisRuleCache.evictIfNeeded()).doesNotThrowAnyException();
+
+      // No keys/delete calls should be made
+      verify(redisTemplate, never()).keys(anyString());
+      verify(redisTemplate, never()).delete(anyString());
+    }
+  }
+
+  // ========================================================================
+  // isEnabled Tests
+  // ========================================================================
+
+  @Nested
+  @DisplayName("IsEnabled")
+  class IsEnabled {
+
+    @Test
+    @DisplayName("isEnabled returns true when Redis connectivity test succeeds")
+    void testIsEnabled_ConnectivitySucceeds_ReturnsTrue() {
+      when(valueOperations.get("connectivity-test")).thenReturn(null);
+
+      assertThat(redisRuleCache.isEnabled()).isTrue();
+    }
+
+    @Test
+    @DisplayName("isEnabled returns false when Redis connectivity test fails")
+    void testIsEnabled_ConnectivityFails_ReturnsFalse() {
+      when(valueOperations.get("connectivity-test"))
+          .thenThrow(new RedisConnectionFailureException("Cannot connect"));
+
+      assertThat(redisRuleCache.isEnabled()).isFalse();
+    }
+  }
+
+  // ========================================================================
+  // getLocalCacheEfficiency Tests
+  // ========================================================================
+
+  @Nested
+  @DisplayName("GetLocalCacheEfficiency")
+  class GetLocalCacheEfficiency {
+
+    @Test
+    @DisplayName("getLocalCacheEfficiency returns hit rate from statistics")
+    void testGetLocalCacheEfficiency_ReturnsHitRate() {
+      // Setup: no keys for size()
+      when(redisTemplate.keys("drools:rule:*")).thenReturn(new HashSet<>());
+
+      // Generate 3 hits
+      Rule rule = RuleTestUtils.createSimpleRule("rule.one");
+      when(valueOperations.get("drools:rule:rule.one")).thenReturn(rule);
+      redisRuleCache.get("rule.one");
+      redisRuleCache.get("rule.one");
+      redisRuleCache.get("rule.one");
+
+      // Generate 1 miss
+      when(valueOperations.get("drools:rule:rule.missing")).thenReturn(null);
+      redisRuleCache.get("rule.missing");
+
+      // Efficiency = 3/4 = 0.75
+      assertThat(redisRuleCache.getLocalCacheEfficiency())
+          .isCloseTo(0.75, org.assertj.core.data.Offset.offset(0.001));
+    }
+
+    @Test
+    @DisplayName("getLocalCacheEfficiency returns 0.0 when no requests have been made")
+    void testGetLocalCacheEfficiency_NoRequests_ReturnsZero() {
+      when(redisTemplate.keys("drools:rule:*")).thenReturn(new HashSet<>());
+
+      assertThat(redisRuleCache.getLocalCacheEfficiency()).isEqualTo(0.0);
     }
   }
 }

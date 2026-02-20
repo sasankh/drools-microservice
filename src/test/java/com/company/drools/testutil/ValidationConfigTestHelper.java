@@ -4,14 +4,14 @@ import com.company.drools.config.ValidationConfig;
 import java.lang.reflect.Field;
 
 /**
- * Helper utility to create ValidationConfig instances for testing.
- * Since ValidationConfig uses @Value injection, we need to manually set fields via reflection.
+ * Helper utility to create ValidationConfig instances for testing. Since ValidationConfig
+ * uses @Value injection, we need to manually set fields via reflection.
  */
 public class ValidationConfigTestHelper {
 
   /**
-   * Create a ValidationConfig with default test values.
-   * Uses reflection to set private fields since they're normally set by Spring @Value injection.
+   * Create a ValidationConfig with default test values. Uses reflection to set private fields since
+   * they're normally set by Spring @Value injection.
    */
   public static ValidationConfig createTestValidationConfig() {
     ValidationConfig config = new ValidationConfig();

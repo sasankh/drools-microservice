@@ -10,14 +10,14 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Utility class for creating test data and rules.
- * Provides helper methods commonly needed across test classes.
+ * Utility class for creating test data and rules. Provides helper methods commonly needed across
+ * test classes.
  */
 public class RuleTestUtils {
 
   /**
-   * Create a simple valid Drools rule for testing.
-   * Useful for unit tests that don't need complex rule logic.
+   * Create a simple valid Drools rule for testing. Useful for unit tests that don't need complex
+   * rule logic.
    *
    * @param ruleId The rule identifier
    * @return Rule object with simple valid DRL content
@@ -43,9 +43,7 @@ public class RuleTestUtils {
     return new Rule(ruleId, content, RuleMetadata.createNew());
   }
 
-  /**
-   * Create an invalid rule (missing package statement) for testing error handling.
-   */
+  /** Create an invalid rule (missing package statement) for testing error handling. */
   public static Rule createInvalidRule(String ruleId) {
     String content =
         String.format(
@@ -76,8 +74,8 @@ public class RuleTestUtils {
   }
 
   /**
-   * Create test data map from key-value pairs.
-   * Example: createTestData("amount", 100.0, "customerType", "VIP")
+   * Create test data map from key-value pairs. Example: createTestData("amount", 100.0,
+   * "customerType", "VIP")
    *
    * @param keyValuePairs Alternating keys and values
    * @return Map containing the test data
@@ -95,8 +93,8 @@ public class RuleTestUtils {
   }
 
   /**
-   * Extract rule ID from file path.
-   * Example: sample-rules/pricing/discount/simple.drl -> pricing.discount.simple
+   * Extract rule ID from file path. Example: sample-rules/pricing/discount/simple.drl ->
+   * pricing.discount.simple
    */
   private static String extractRuleIdFromPath(String path) {
     Path p = Paths.get(path);
@@ -113,8 +111,8 @@ public class RuleTestUtils {
   }
 
   /**
-   * Get package name from rule ID.
-   * Example: pricing.discount.simple -> com.company.rules.pricing.discount
+   * Get package name from rule ID. Example: pricing.discount.simple ->
+   * com.company.rules.pricing.discount
    */
   private static String getPackageNameFromRuleId(String ruleId) {
     int lastDot = ruleId.lastIndexOf('.');

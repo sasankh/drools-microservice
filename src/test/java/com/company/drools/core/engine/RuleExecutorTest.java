@@ -119,7 +119,8 @@ class RuleExecutorTest {
               $data.put("step3", true);
           end
           """;
-      Rule rule = new Rule("multi.rules", content, com.company.drools.core.model.RuleMetadata.createNew());
+      Rule rule =
+          new Rule("multi.rules", content, com.company.drools.core.model.RuleMetadata.createNew());
       KieContainer kieContainer = compileRule(rule);
       ExecutorService executor = Executors.newSingleThreadExecutor();
       RuleExecutor ruleExecutor = new RuleExecutor(executor);
@@ -163,8 +164,7 @@ class RuleExecutorTest {
 
       Map<String, Object> inputData = new HashMap<>();
 
-      assertThatThrownBy(
-              () -> ruleExecutor.executeRule(mockContainer, "slow.rule", inputData, 1))
+      assertThatThrownBy(() -> ruleExecutor.executeRule(mockContainer, "slow.rule", inputData, 1))
           .isInstanceOf(TimeoutException.class)
           .hasMessageContaining("slow.rule");
 
@@ -294,8 +294,7 @@ class RuleExecutorTest {
                     inputData.put("index", index);
 
                     RuleExecutor.ExecutionResult result =
-                        ruleExecutor.executeRule(
-                            kieContainer, "test.parallel", inputData);
+                        ruleExecutor.executeRule(kieContainer, "test.parallel", inputData);
                     results.add(result);
                   } catch (Exception e) {
                     errors.add(e);

@@ -62,8 +62,7 @@ class DroolsEngineServiceTest {
 
   private void loadRulesSuccessfully(List<Rule> rules) {
     KieContainer newContainer = mock(KieContainer.class);
-    RuleCompiler.CompilationResult result =
-        RuleCompiler.CompilationResult.success(newContainer);
+    RuleCompiler.CompilationResult result = RuleCompiler.CompilationResult.success(newContainer);
     when(ruleCompiler.compileRules(rules)).thenReturn(result);
     service.loadRules(rules);
   }
@@ -88,8 +87,8 @@ class DroolsEngineServiceTest {
 
       RuleExecutor.ExecutionResult execResult =
           RuleExecutor.ExecutionResult.success(expectedResult, 15L);
-      when(ruleExecutor.executeRule(any(KieContainer.class), eq("pricing.discount.simple"),
-          eq(inputData), eq(30L)))
+      when(ruleExecutor.executeRule(
+              any(KieContainer.class), eq("pricing.discount.simple"), eq(inputData), eq(30L)))
           .thenReturn(execResult);
 
       RuleExecutor.ExecutionResult result =
@@ -98,8 +97,9 @@ class DroolsEngineServiceTest {
       assertThat(result.isSuccess()).isTrue();
       assertThat(result.getResult()).containsEntry("executed", true);
       assertThat(result.getResult()).containsEntry("amount", 100.0);
-      verify(ruleExecutor).executeRule(any(KieContainer.class), eq("pricing.discount.simple"),
-          eq(inputData), eq(30L));
+      verify(ruleExecutor)
+          .executeRule(
+              any(KieContainer.class), eq("pricing.discount.simple"), eq(inputData), eq(30L));
     }
 
     @Test
@@ -191,31 +191,31 @@ class DroolsEngineServiceTest {
       Map<String, Object> inputData = RuleTestUtils.createTestData("value", 42);
       RuleExecutor.ExecutionResult execResult =
           RuleExecutor.ExecutionResult.success(Map.of("value", 42, "executed", true), 5L);
-      when(ruleExecutor.executeRule(any(KieContainer.class), eq("concurrent.rule"),
-          any(), anyLong()))
+      when(ruleExecutor.executeRule(
+              any(KieContainer.class), eq("concurrent.rule"), any(), anyLong()))
           .thenReturn(execResult);
 
       int threadCount = 10;
       ExecutorService executor = Executors.newFixedThreadPool(threadCount);
       CountDownLatch startLatch = new CountDownLatch(1);
       CountDownLatch doneLatch = new CountDownLatch(threadCount);
-      List<RuleExecutor.ExecutionResult> results =
-          Collections.synchronizedList(new ArrayList<>());
+      List<RuleExecutor.ExecutionResult> results = Collections.synchronizedList(new ArrayList<>());
       AtomicInteger errorCount = new AtomicInteger(0);
 
       for (int i = 0; i < threadCount; i++) {
-        executor.submit(() -> {
-          try {
-            startLatch.await();
-            RuleExecutor.ExecutionResult r =
-                service.executeRule("concurrent.rule", new HashMap<>(inputData));
-            results.add(r);
-          } catch (Exception e) {
-            errorCount.incrementAndGet();
-          } finally {
-            doneLatch.countDown();
-          }
-        });
+        executor.submit(
+            () -> {
+              try {
+                startLatch.await();
+                RuleExecutor.ExecutionResult r =
+                    service.executeRule("concurrent.rule", new HashMap<>(inputData));
+                results.add(r);
+              } catch (Exception e) {
+                errorCount.incrementAndGet();
+              } finally {
+                doneLatch.countDown();
+              }
+            });
       }
 
       startLatch.countDown();
@@ -234,14 +234,16 @@ class DroolsEngineServiceTest {
       AtomicInteger concurrentLoads = new AtomicInteger(0);
       AtomicInteger maxConcurrentLoads = new AtomicInteger(0);
 
-      when(ruleCompiler.compileRules(anyList())).thenAnswer(invocation -> {
-        int current = concurrentLoads.incrementAndGet();
-        maxConcurrentLoads.updateAndGet(max -> Math.max(max, current));
-        Thread.sleep(50); // simulate work
-        concurrentLoads.decrementAndGet();
-        KieContainer container = mock(KieContainer.class);
-        return RuleCompiler.CompilationResult.success(container);
-      });
+      when(ruleCompiler.compileRules(anyList()))
+          .thenAnswer(
+              invocation -> {
+                int current = concurrentLoads.incrementAndGet();
+                maxConcurrentLoads.updateAndGet(max -> Math.max(max, current));
+                Thread.sleep(50); // simulate work
+                concurrentLoads.decrementAndGet();
+                KieContainer container = mock(KieContainer.class);
+                return RuleCompiler.CompilationResult.success(container);
+              });
 
       int threadCount = 5;
       ExecutorService executor = Executors.newFixedThreadPool(threadCount);
@@ -250,17 +252,18 @@ class DroolsEngineServiceTest {
 
       for (int i = 0; i < threadCount; i++) {
         final int idx = i;
-        executor.submit(() -> {
-          try {
-            startLatch.await();
-            Rule rule = RuleTestUtils.createSimpleRule("write.lock.rule." + idx);
-            service.loadRules(List.of(rule));
-          } catch (Exception e) {
-            // ignore
-          } finally {
-            doneLatch.countDown();
-          }
-        });
+        executor.submit(
+            () -> {
+              try {
+                startLatch.await();
+                Rule rule = RuleTestUtils.createSimpleRule("write.lock.rule." + idx);
+                service.loadRules(List.of(rule));
+              } catch (Exception e) {
+                // ignore
+              } finally {
+                doneLatch.countDown();
+              }
+            });
       }
 
       startLatch.countDown();
@@ -282,53 +285,58 @@ class DroolsEngineServiceTest {
       AtomicBoolean executionDuringLoad = new AtomicBoolean(false);
 
       // Make compileRules slow so we can detect overlap
-      when(ruleCompiler.compileRules(anyList())).thenAnswer(invocation -> {
-        loadInProgress.set(true);
-        Thread.sleep(200);
-        loadInProgress.set(false);
-        KieContainer container = mock(KieContainer.class);
-        return RuleCompiler.CompilationResult.success(container);
-      });
+      when(ruleCompiler.compileRules(anyList()))
+          .thenAnswer(
+              invocation -> {
+                loadInProgress.set(true);
+                Thread.sleep(200);
+                loadInProgress.set(false);
+                KieContainer container = mock(KieContainer.class);
+                return RuleCompiler.CompilationResult.success(container);
+              });
 
       RuleExecutor.ExecutionResult execResult =
           RuleExecutor.ExecutionResult.success(Map.of("executed", true), 5L);
       when(ruleExecutor.executeRule(any(KieContainer.class), anyString(), any(), anyLong()))
-          .thenAnswer(invocation -> {
-            if (loadInProgress.get()) {
-              executionDuringLoad.set(true);
-            }
-            return execResult;
-          });
+          .thenAnswer(
+              invocation -> {
+                if (loadInProgress.get()) {
+                  executionDuringLoad.set(true);
+                }
+                return execResult;
+              });
 
       ExecutorService executor = Executors.newFixedThreadPool(2);
       CountDownLatch startLatch = new CountDownLatch(1);
       CountDownLatch doneLatch = new CountDownLatch(2);
 
       // Thread 1: load rules (write lock)
-      executor.submit(() -> {
-        try {
-          startLatch.await();
-          Rule newRule = RuleTestUtils.createSimpleRule("locking.test.rule");
-          service.loadRules(List.of(newRule));
-        } catch (Exception e) {
-          // ignore
-        } finally {
-          doneLatch.countDown();
-        }
-      });
+      executor.submit(
+          () -> {
+            try {
+              startLatch.await();
+              Rule newRule = RuleTestUtils.createSimpleRule("locking.test.rule");
+              service.loadRules(List.of(newRule));
+            } catch (Exception e) {
+              // ignore
+            } finally {
+              doneLatch.countDown();
+            }
+          });
 
       // Thread 2: execute rule (read lock) - starts slightly after
-      executor.submit(() -> {
-        try {
-          startLatch.await();
-          Thread.sleep(50); // give write lock time to acquire
-          service.executeRule("locking.test.rule", Map.of("key", "value"));
-        } catch (Exception e) {
-          // ignore
-        } finally {
-          doneLatch.countDown();
-        }
-      });
+      executor.submit(
+          () -> {
+            try {
+              startLatch.await();
+              Thread.sleep(50); // give write lock time to acquire
+              service.executeRule("locking.test.rule", Map.of("key", "value"));
+            } catch (Exception e) {
+              // ignore
+            } finally {
+              doneLatch.countDown();
+            }
+          });
 
       startLatch.countDown();
       boolean completed = doneLatch.await(10, TimeUnit.SECONDS);
@@ -345,39 +353,39 @@ class DroolsEngineServiceTest {
       Rule rule = RuleTestUtils.createSimpleRule("corruption.test.rule");
       loadRuleSuccessfully(rule);
 
-      when(ruleExecutor.executeRule(any(KieContainer.class), eq("corruption.test.rule"),
-          any(), anyLong()))
-          .thenAnswer(invocation -> {
-            Map<String, Object> data = invocation.getArgument(2);
-            Map<String, Object> result = new HashMap<>(data);
-            result.put("executed", true);
-            return RuleExecutor.ExecutionResult.success(result, 5L);
-          });
+      when(ruleExecutor.executeRule(
+              any(KieContainer.class), eq("corruption.test.rule"), any(), anyLong()))
+          .thenAnswer(
+              invocation -> {
+                Map<String, Object> data = invocation.getArgument(2);
+                Map<String, Object> result = new HashMap<>(data);
+                result.put("executed", true);
+                return RuleExecutor.ExecutionResult.success(result, 5L);
+              });
 
       int threadCount = 20;
       ExecutorService executor = Executors.newFixedThreadPool(threadCount);
       CountDownLatch startLatch = new CountDownLatch(1);
       CountDownLatch doneLatch = new CountDownLatch(threadCount);
-      List<RuleExecutor.ExecutionResult> results =
-          Collections.synchronizedList(new ArrayList<>());
+      List<RuleExecutor.ExecutionResult> results = Collections.synchronizedList(new ArrayList<>());
 
       for (int i = 0; i < threadCount; i++) {
         final int threadId = i;
-        executor.submit(() -> {
-          try {
-            startLatch.await();
-            Map<String, Object> data = new HashMap<>();
-            data.put("threadId", threadId);
-            data.put("value", threadId * 10);
-            RuleExecutor.ExecutionResult r =
-                service.executeRule("corruption.test.rule", data);
-            results.add(r);
-          } catch (Exception e) {
-            // ignore
-          } finally {
-            doneLatch.countDown();
-          }
-        });
+        executor.submit(
+            () -> {
+              try {
+                startLatch.await();
+                Map<String, Object> data = new HashMap<>();
+                data.put("threadId", threadId);
+                data.put("value", threadId * 10);
+                RuleExecutor.ExecutionResult r = service.executeRule("corruption.test.rule", data);
+                results.add(r);
+              } catch (Exception e) {
+                // ignore
+              } finally {
+                doneLatch.countDown();
+              }
+            });
       }
 
       startLatch.countDown();
@@ -386,11 +394,12 @@ class DroolsEngineServiceTest {
 
       assertThat(completed).isTrue();
       assertThat(results).hasSize(threadCount);
-      results.forEach(r -> {
-        assertThat(r.isSuccess()).isTrue();
-        assertThat(r.getResult()).containsKey("executed");
-        assertThat(r.getResult()).containsKey("threadId");
-      });
+      results.forEach(
+          r -> {
+            assertThat(r.isSuccess()).isTrue();
+            assertThat(r.getResult()).containsKey("executed");
+            assertThat(r.getResult()).containsKey("threadId");
+          });
     }
   }
 
@@ -407,14 +416,13 @@ class DroolsEngineServiceTest {
     void testExecuteRule_RuleNotFound_ReturnsFailure() {
       Map<String, Object> inputData = RuleTestUtils.createTestData("amount", 50.0);
 
-      RuleExecutor.ExecutionResult result =
-          service.executeRule("nonexistent.rule", inputData);
+      RuleExecutor.ExecutionResult result = service.executeRule("nonexistent.rule", inputData);
 
       assertThat(result.isSuccess()).isFalse();
       assertThat(result.getErrorMessage()).contains("Rule not found");
       assertThat(result.getErrorMessage()).contains("nonexistent.rule");
-      verify(ruleExecutor, never()).executeRule(
-          any(KieContainer.class), anyString(), anyMap(), anyLong());
+      verify(ruleExecutor, never())
+          .executeRule(any(KieContainer.class), anyString(), anyMap(), anyLong());
     }
 
     @Test
@@ -431,13 +439,12 @@ class DroolsEngineServiceTest {
       service.loadRules(List.of(rule));
 
       Map<String, Object> inputData = RuleTestUtils.createTestData("amount", 100.0);
-      RuleExecutor.ExecutionResult result =
-          service.executeRule("inactive.rule", inputData);
+      RuleExecutor.ExecutionResult result = service.executeRule("inactive.rule", inputData);
 
       assertThat(result.isSuccess()).isFalse();
       assertThat(result.getErrorMessage()).contains("not active");
-      verify(ruleExecutor, never()).executeRule(
-          any(KieContainer.class), anyString(), anyMap(), anyLong());
+      verify(ruleExecutor, never())
+          .executeRule(any(KieContainer.class), anyString(), anyMap(), anyLong());
     }
 
     @Test
@@ -445,8 +452,7 @@ class DroolsEngineServiceTest {
     void testLoadRules_CompilationFailure_RulesMarkedAsError() {
       Rule rule = RuleTestUtils.createSimpleRule("broken.rule");
       String errorMsg = "Syntax error in DRL file";
-      RuleCompiler.CompilationResult failResult =
-          RuleCompiler.CompilationResult.failure(errorMsg);
+      RuleCompiler.CompilationResult failResult = RuleCompiler.CompilationResult.failure(errorMsg);
       when(ruleCompiler.compileRules(List.of(rule))).thenReturn(failResult);
 
       boolean result = service.loadRules(List.of(rule));
@@ -477,8 +483,7 @@ class DroolsEngineServiceTest {
     void testLoadRules_InvalidDRL_FailsGracefully() {
       Rule invalidRule = RuleTestUtils.createInvalidRule("invalid.drl.rule");
       String errorMsg = "Compilation errors: missing package declaration";
-      RuleCompiler.CompilationResult failResult =
-          RuleCompiler.CompilationResult.failure(errorMsg);
+      RuleCompiler.CompilationResult failResult = RuleCompiler.CompilationResult.failure(errorMsg);
       when(ruleCompiler.compileRules(List.of(invalidRule))).thenReturn(failResult);
 
       boolean result = service.loadRules(List.of(invalidRule));
@@ -536,8 +541,7 @@ class DroolsEngineServiceTest {
         Rule rule = RuleTestUtils.createSimpleRule("refresh.rule." + i);
         KieContainer container = mock(KieContainer.class, "container-" + i);
         containers.add(container);
-        RuleCompiler.CompilationResult result =
-            RuleCompiler.CompilationResult.success(container);
+        RuleCompiler.CompilationResult result = RuleCompiler.CompilationResult.success(container);
         when(ruleCompiler.compileRules(List.of(rule))).thenReturn(result);
 
         service.loadRules(List.of(rule));
@@ -570,21 +574,27 @@ class DroolsEngineServiceTest {
       Map<String, Object> inputData = RuleTestUtils.createTestData("amount", 100.0);
       RuleExecutor.ExecutionResult execResult =
           RuleExecutor.ExecutionResult.success(Map.of("amount", 100.0, "executed", true), 25L);
-      when(ruleExecutor.executeRule(any(KieContainer.class), eq("metrics.success.rule"),
-          eq(inputData), eq(30L)))
+      when(ruleExecutor.executeRule(
+              any(KieContainer.class), eq("metrics.success.rule"), eq(inputData), eq(30L)))
           .thenReturn(execResult);
 
       service.executeRule("metrics.success.rule", inputData);
 
       // Verify success counter was recorded via SimpleMeterRegistry
-      assertThat(meterRegistry.counter("drools.rule.execution.success",
-          "rule_id", "metrics.success.rule").count()).isEqualTo(1.0);
+      assertThat(
+              meterRegistry
+                  .counter("drools.rule.execution.success", "rule_id", "metrics.success.rule")
+                  .count())
+          .isEqualTo(1.0);
 
       // Verify timer was recorded
-      assertThat(meterRegistry.find("drools.rule.execution.time")
-          .tag("rule_id", "metrics.success.rule")
-          .tag("status", "success")
-          .timer()).isNotNull();
+      assertThat(
+              meterRegistry
+                  .find("drools.rule.execution.time")
+                  .tag("rule_id", "metrics.success.rule")
+                  .tag("status", "success")
+                  .timer())
+          .isNotNull();
 
       // Verify metadata was updated with execution stats
       RuleMetadata metadata = service.getRuleMetadata("metrics.success.rule");
@@ -600,14 +610,25 @@ class DroolsEngineServiceTest {
 
       service.executeRule("missing.rule", inputData);
 
-      assertThat(meterRegistry.counter("drools.rule.execution.error",
-          "rule_id", "missing.rule", "error", "rule_not_found").count()).isEqualTo(1.0);
+      assertThat(
+              meterRegistry
+                  .counter(
+                      "drools.rule.execution.error",
+                      "rule_id",
+                      "missing.rule",
+                      "error",
+                      "rule_not_found")
+                  .count())
+          .isEqualTo(1.0);
 
       // Verify error timer was recorded
-      assertThat(meterRegistry.find("drools.rule.execution.time")
-          .tag("rule_id", "missing.rule")
-          .tag("status", "error")
-          .timer()).isNotNull();
+      assertThat(
+              meterRegistry
+                  .find("drools.rule.execution.time")
+                  .tag("rule_id", "missing.rule")
+                  .tag("status", "error")
+                  .timer())
+          .isNotNull();
 
       // Test execution-failed error metrics
       Rule rule = RuleTestUtils.createSimpleRule("failing.rule");
@@ -615,14 +636,21 @@ class DroolsEngineServiceTest {
 
       RuleExecutor.ExecutionResult failResult =
           RuleExecutor.ExecutionResult.failure("Runtime error in rule");
-      when(ruleExecutor.executeRule(any(KieContainer.class), eq("failing.rule"),
-          any(), anyLong()))
+      when(ruleExecutor.executeRule(any(KieContainer.class), eq("failing.rule"), any(), anyLong()))
           .thenReturn(failResult);
 
       service.executeRule("failing.rule", inputData);
 
-      assertThat(meterRegistry.counter("drools.rule.execution.error",
-          "rule_id", "failing.rule", "error", "execution_failed").count()).isEqualTo(1.0);
+      assertThat(
+              meterRegistry
+                  .counter(
+                      "drools.rule.execution.error",
+                      "rule_id",
+                      "failing.rule",
+                      "error",
+                      "execution_failed")
+                  .count())
+          .isEqualTo(1.0);
     }
   }
 }

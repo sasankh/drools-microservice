@@ -1,9 +1,12 @@
 package com.company.drools.api.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import java.lang.reflect.Method;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -123,6 +126,118 @@ class MemoryControllerTest {
           .andExpect(jsonPath("$.heapUsedMB").isNumber())
           .andExpect(jsonPath("$.heapMaxMB").isNumber())
           .andExpect(jsonPath("$.heapUsagePercent").isNumber());
+    }
+  }
+
+  @Nested
+  @DisplayName("Memory Warnings (getMemoryWarnings branch coverage)")
+  class MemoryWarnings {
+
+    private Method getMemoryWarningsMethod;
+    private MemoryController controller;
+
+    @BeforeEach
+    void setUp() throws Exception {
+      controller = new MemoryController();
+      getMemoryWarningsMethod =
+          MemoryController.class.getDeclaredMethod(
+              "getMemoryWarnings", double.class, long.class, long.class);
+      getMemoryWarningsMethod.setAccessible(true);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> invokeGetMemoryWarnings(
+        double heapUsagePercent, long heapUsed, long heapMax) throws Exception {
+      return (List<String>)
+          getMemoryWarningsMethod.invoke(controller, heapUsagePercent, heapUsed, heapMax);
+    }
+
+    @Test
+    @DisplayName("returns critical warning when heap usage exceeds 90%")
+    void testCriticalWarning_Above90Percent() throws Exception {
+      long heapMax = 1024L * 1024 * 1024 * 2; // 2 GB
+      long heapUsed = (long) (heapMax * 0.95);
+
+      List<String> warnings = invokeGetMemoryWarnings(95.0, heapUsed, heapMax);
+
+      assertThat(warnings).anyMatch(w -> w.contains("CRITICAL"));
+      assertThat(warnings).anyMatch(w -> w.contains("90%"));
+    }
+
+    @Test
+    @DisplayName("returns warning when heap usage exceeds 80% but not 90%")
+    void testWarning_Above80Percent() throws Exception {
+      long heapMax = 1024L * 1024 * 1024 * 2; // 2 GB
+      long heapUsed = (long) (heapMax * 0.85);
+
+      List<String> warnings = invokeGetMemoryWarnings(85.0, heapUsed, heapMax);
+
+      assertThat(warnings).anyMatch(w -> w.contains("WARNING"));
+      assertThat(warnings).anyMatch(w -> w.contains("80%"));
+      assertThat(warnings).noneMatch(w -> w.contains("CRITICAL"));
+    }
+
+    @Test
+    @DisplayName("returns caution when heap usage exceeds 70% but not 80%")
+    void testCaution_Above70Percent() throws Exception {
+      long heapMax = 1024L * 1024 * 1024 * 2; // 2 GB
+      long heapUsed = (long) (heapMax * 0.75);
+
+      List<String> warnings = invokeGetMemoryWarnings(75.0, heapUsed, heapMax);
+
+      assertThat(warnings).anyMatch(w -> w.contains("CAUTION"));
+      assertThat(warnings).anyMatch(w -> w.contains("70%"));
+      assertThat(warnings).noneMatch(w -> w.contains("CRITICAL"));
+      assertThat(warnings).noneMatch(w -> w.startsWith("WARNING"));
+    }
+
+    @Test
+    @DisplayName("returns no heap usage warnings when below 70%")
+    void testNoHeapWarnings_Below70Percent() throws Exception {
+      long heapMax = 1024L * 1024 * 1024 * 2; // 2 GB
+      long heapUsed = (long) (heapMax * 0.50);
+
+      List<String> warnings = invokeGetMemoryWarnings(50.0, heapUsed, heapMax);
+
+      assertThat(warnings).noneMatch(w -> w.contains("CRITICAL"));
+      assertThat(warnings).noneMatch(w -> w.startsWith("WARNING"));
+      assertThat(warnings).noneMatch(w -> w.contains("CAUTION"));
+    }
+
+    @Test
+    @DisplayName("returns info warning when heap max is less than 1GB")
+    void testInfoWarning_SmallHeapMax() throws Exception {
+      long heapMax = 512L * 1024 * 1024; // 512 MB
+      long heapUsed = (long) (heapMax * 0.50);
+
+      List<String> warnings = invokeGetMemoryWarnings(50.0, heapUsed, heapMax);
+
+      assertThat(warnings).anyMatch(w -> w.contains("INFO"));
+      assertThat(warnings).anyMatch(w -> w.contains("less than 1GB"));
+    }
+
+    @Test
+    @DisplayName("returns no info warning when heap max is 1GB or more")
+    void testNoInfoWarning_LargeHeapMax() throws Exception {
+      long heapMax = 1024L * 1024 * 1024 * 2; // 2 GB
+      long heapUsed = (long) (heapMax * 0.50);
+
+      List<String> warnings = invokeGetMemoryWarnings(50.0, heapUsed, heapMax);
+
+      assertThat(warnings).noneMatch(w -> w.contains("INFO"));
+    }
+
+    @Test
+    @DisplayName("returns both critical and info warnings when heap is small and above 90%")
+    void testMultipleWarnings_SmallHeapAndHighUsage() throws Exception {
+      long heapMax = 256L * 1024 * 1024; // 256 MB
+      long heapUsed = (long) (heapMax * 0.95);
+
+      List<String> warnings = invokeGetMemoryWarnings(95.0, heapUsed, heapMax);
+
+      assertThat(warnings).hasSize(2);
+      assertThat(warnings).anyMatch(w -> w.contains("CRITICAL"));
+      assertThat(warnings).anyMatch(w -> w.contains("INFO"));
     }
   }
 }
