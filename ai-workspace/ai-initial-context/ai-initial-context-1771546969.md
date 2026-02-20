@@ -1,5 +1,5 @@
 # Drools Rule Engine Microservice - Full AI Context Document
-**Last Updated**: 2026-02-19
+**Last Updated**: 2025-07-22
 **Purpose**: Read ONLY this file to get full project context.
 
 ---
@@ -40,7 +40,7 @@ All 5 core implementation phases are **COMPLETED**:
 **Note**: Phases 4.1-4.3 (Unit Tests, Integration Tests, Performance Tests) were intentionally skipped per user direction. Focus was on Phase 4.4 Documentation, which is complete.
 
 ### Current Development State
-- **Total Implementation Time**: ~8-10 hours across 16+ sessions
+- **Total Implementation Time**: ~8-10 hours across 16 sessions
 - **Files Created**: 53+ Java files, 15+ configuration/documentation files
 - **Lines of Code**: ~4,000+ production code, ~5,100+ documentation
 - **Performance**: Exceeds all targets by 2-100x
@@ -102,17 +102,14 @@ All 5 core implementation phases are **COMPLETED**:
 ### Root Directory
 ```
 drools-microservice/
-├── src/main/java/com/company/drools/     # Java source code (53+ files)
-├── src/main/resources/                   # Configuration and resources
+├── src/main/java/com/company/drools/     # Java source code
+├── src/main/resources/                   # Configuration and rules
 ├── src/test/java/                        # Test files (minimal)
-├── documentations/                       # Complete documentation suite (~5,100 lines)
+├── docs/                                 # Complete documentation suite
 ├── sample-rules/                         # 10 business rule examples
-├── ai-workspace/                         # AI context management
-│   ├── ai-initial-context/              # Consolidated context files
-│   ├── snap-memory/                      # Session implementation history (18+ files)
-│   └── compact-logs/                     # Context compaction logs
+├── snap-memory/                          # Session implementation history (18 files)
+├── ai-workspace/ai-initial-context/      # AI context management
 ├── ai-instructions/                      # AI assistant instructions
-├── project-plan/                         # Project planning and tracking
 ├── project-check-snap/                   # Validation reports
 ├── scripts/                              # Utility scripts
 ├── Dockerfile                            # Multi-stage Docker build
@@ -161,19 +158,18 @@ com.company.drools/
     └── RateLimitingConfig.java           # Rate limiting
 ```
 
-### Documentation Suite
+### Documentation Files
 ```
-documentations/
-├── configuration.md                      # Configuration reference (703 lines, 60+ env vars)
-├── deployment.md                         # Complete deployment guide (864 lines)
-├── rule-development.md                   # Rule development guide (859 lines, 5 examples)
-├── troubleshooting.md                    # Troubleshooting guide (860 lines, 50+ solutions)
-├── simple-start.md                       # Quick testing guide (240 lines)
+docs/
+├── api-documentation.yml                 # OpenAPI 3.0 spec (983 lines, 8 endpoints)
+├── deployment.md                         # Complete deployment guide (800+ lines)
+├── configuration.md                      # Configuration reference (600+ lines, 60+ env vars)
+├── rule-development.md                   # Rule development guide (800+ lines, 5 examples)
+├── troubleshooting.md                    # Troubleshooting guide (700+ lines, 50+ solutions)
 ├── rule-generation-prompt.md             # AI rule generation guide (360 lines)
 ├── rule-generation-prompt-enhanced.md    # Enhanced with safety patterns (450 lines)
 ├── rule-generation-prompt-concise.md     # Quick copy-paste version (150 lines)
-└── drools-documentation/                 # Drools language reference
-    └── rule-language-reference.md        # Detailed DRL reference (~40k tokens)
+└── simple-start.md                       # Quick testing guide (250 lines)
 ```
 
 ### Sample Rules
@@ -291,8 +287,8 @@ sample-rules/
 ### Architecture Pattern
 ```
 Client Request → API Layer → DroolsEngineService → Cache Layer → Storage Layer
-                     ↓                  ↓            ↓            ↓
-             Rule Executor →    LRU/Redis →    S3/Local/Memory
+                                     ↓                  ↓            ↓
+                             Rule Executor →    LRU/Redis →    S3/Local/Memory
 ```
 
 ### Key Technical Decisions
@@ -427,7 +423,7 @@ drools:
 
 ## PHASE 4: TESTING & DOCUMENTATION (COMPLETED - Phase 4.4)
 
-### Duration: Continuous sessions | Files: 9 documentation files | Status: ✅ COMPLETED
+### Duration: Continuous sessions | Files: 5 documentation files | Status: ✅ COMPLETED
 
 ### What Was Completed
 **Phase 4.4 Documentation** (6/6 tasks complete):
@@ -447,15 +443,15 @@ drools:
    - Component health monitoring details
    - Thread pool statistics endpoint
 
-3. **configuration.md** - 703 lines
-   - Complete environment variables reference (60+ variables)
-   - Application properties for all environments
-   - Security configuration templates
-   - Performance tuning guidelines
-   - JVM optimization settings
-   - Validation scripts and examples
+3. **Rule Development Guide** - 800+ lines
+   - Complete DRL syntax reference
+   - 5 detailed rule examples (pricing, discounts, validation, seasonal, compliance)
+   - Development workflow from creation to deployment
+   - Testing strategies (unit tests, API tests, load tests)
+   - Performance optimization techniques
+   - Advanced topics: templates, decision tables, rule flows
 
-4. **deployment.md** - 864 lines
+4. **Deployment Guide** - 800+ lines
    - Local development setup with LocalStack and Redis
    - Production deployment with SystemD
    - AWS deployment (S3, IAM, ElastiCache)
@@ -464,15 +460,15 @@ drools:
    - Monitoring setup (Prometheus, alerting rules)
    - Troubleshooting deployment issues
 
-5. **rule-development.md** - 859 lines
-   - Complete DRL syntax reference
-   - 5 detailed rule examples (pricing, discounts, validation, seasonal, compliance)
-   - Development workflow from creation to deployment
-   - Testing strategies (unit tests, API tests, load tests)
-   - Performance optimization techniques
-   - Advanced topics: templates, decision tables, rule flows
+5. **Configuration Reference** - 600+ lines
+   - Complete environment variables reference (60+ variables)
+   - Application properties for all environments
+   - Security configuration templates
+   - Performance tuning guidelines
+   - JVM optimization settings
+   - Validation scripts and examples
 
-6. **troubleshooting.md** - 860 lines
+6. **Troubleshooting Guide** - 700+ lines
    - Startup issues diagnosis and solutions
    - Rule execution problems
    - Storage issues (S3, Redis)
@@ -482,27 +478,27 @@ drools:
    - Support escalation guidelines
 
 ### Additional Rule Documentation Created
-7. **simple-start.md** - 240 lines
-   - Step-by-step instructions for testing generated rules
-   - LocalStack S3 upload process
-   - Quick templates for common rule patterns
-   - Troubleshooting section
-
-8. **rule-generation-prompt.md** - 360 lines
+7. **Rule Generation Prompt** - 360 lines
    - Interactive AI-guided rule generation process
    - Step-by-step workflow from requirements to production rule
    - Pattern library and best practices
 
-9. **rule-generation-prompt-enhanced.md** - 450 lines
+8. **Rule Generation Prompt (Enhanced)** - 450 lines
    - Production-ready template with error handling
    - Comprehensive safety patterns (null, type, string)
    - Rule attributes reference table
    - Common pitfalls with wrong vs correct examples
 
-10. **rule-generation-prompt-concise.md** - 150 lines
-    - Quick copy-paste version for AI tools
-    - Essential instructions in compact format
-    - Usage example and quick reference card
+9. **Rule Generation Prompt (Concise)** - 150 lines
+   - Quick copy-paste version for AI tools
+   - Essential instructions in compact format
+   - Usage example and quick reference card
+
+10. **Simple Start Guide** - 250 lines
+    - Step-by-step instructions for testing generated rules
+    - LocalStack S3 upload process
+    - Quick templates for common rule patterns
+    - Troubleshooting section
 
 ### What Was Skipped (Per User Direction)
 - **Phase 4.1**: Unit Tests (7 tasks) - ⬜ SKIPPED
@@ -944,7 +940,7 @@ docker-compose up -d
 curl -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
   -d '{
-    "rule_id": "pricing.discount.simple",
+    "ruleId": "pricing.discount.simple",
     "data": {"amount": 100.0}
   }'
 
@@ -954,7 +950,7 @@ curl -X POST http://localhost:8080/execute-rule \
 curl -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
   -d '{
-    "rule_id": "pricing.discount.vip",
+    "ruleId": "pricing.discount.vip",
     "data": {"customerType": "VIP", "amount": 100.0}
   }'
 
@@ -974,7 +970,7 @@ curl -X POST http://localhost:8081/admin/refresh-rules/pricing.discount.custom
 # Test the new rule
 curl -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
-  -d '{"rule_id": "pricing.discount.custom", "data": {...}}'
+  -d '{"ruleId": "pricing.discount.custom", "data": {...}}'
 ```
 
 ### Rule Development Workflow
@@ -1106,17 +1102,17 @@ curl http://localhost:8081/actuator/prometheus
 ## GIT STATE
 
 ### Current Branch
-- **Branch**: restart-1 (or current working branch)
+- **Branch**: code-5 (or current working branch)
 - **Base**: main
-- **Status**: Clean (no uncommitted changes)
 
 ### Recent Commits (Latest First)
 ```
-e43b733 - updated prompt
-e870529 - updated structure
-47e89ac - snap and instruction
-46e79ea - added rule generation prompt
-521260d - rule prompt
+03c0f3d - snap and updates
+36cc11a - code 3-1
+e0ebdef - snap
+59d1578 - added cache
+6a59239 - phase 2-1
+45e518a - initial code
 ```
 
 ### Uncommitted Changes
@@ -1129,14 +1125,10 @@ e870529 - updated structure
 Repository: drools-microservice
 ├─ .git/
 ├─ src/                    # Java source code (53+ files)
-├─ documentations/         # Documentation (9 files, ~5,100 lines)
+├─ docs/                   # Documentation (10 files, ~5,100 lines)
 ├─ sample-rules/           # 10 business rules
+├─ snap-memory/            # 18 session history files
 ├─ ai-workspace/           # AI context management
-│  ├─ ai-initial-context/  # Consolidated context files
-│  ├─ snap-memory/         # 18+ session history files
-│  └─ compact-logs/        # Context compaction logs
-├─ ai-instructions/        # AI assistant instructions
-├─ project-plan/           # Project planning and tracking
 ├─ project-check-snap/     # Validation reports
 └─ [configuration files]   # Docker, Maven, scripts
 ```
@@ -1154,7 +1146,7 @@ git add .
 git commit -m "feat: description"
 
 # Push to remote
-git push origin restart-1
+git push origin code-5
 
 # Create pull request (if needed)
 gh pr create --title "..." --body "..."
@@ -1242,7 +1234,7 @@ aws --endpoint-url=http://localhost:4566 s3 ls \
 # Test rule execution
 curl -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
-  -d '{"rule_id": "pricing.discount.simple", "data": {"amount": 100.0}}'
+  -d '{"ruleId": "pricing.discount.simple", "data": {"amount": 100.0}}'
 
 # Check health
 curl http://localhost:8081/admin/health | jq
@@ -1283,7 +1275,7 @@ curl -X POST http://localhost:8081/admin/refresh-rules/domain.category.myrule
 # 4. Test rule
 curl -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
-  -d '{"rule_id": "domain.category.myrule", "data": {...}}'
+  -d '{"ruleId": "domain.category.myrule", "data": {...}}'
 ```
 
 ### Troubleshooting Commands
@@ -1313,75 +1305,6 @@ docker-compose logs -f app
 lsof -i :8080
 lsof -i :8081
 ```
-
----
-
-## DOCUMENTATION SUITE
-
-### Complete Documentation Coverage
-
-1. **configuration.md** (703 lines)
-   - 60+ environment variables documented
-   - Multi-profile configuration examples
-   - JVM tuning and performance optimization
-   - Security and validation configuration
-   - Complete reference for all settings
-
-2. **deployment.md** (864 lines)
-   - Local development setup
-   - Production deployment with SystemD
-   - AWS deployment (S3, IAM, ElastiCache, EC2)
-   - Docker containerization guide
-   - Load balancer and monitoring setup
-
-3. **rule-development.md** (859 lines)
-   - Complete DRL syntax reference
-   - 5 comprehensive rule examples
-   - Development workflow
-   - Testing strategies
-   - Advanced topics (templates, decision tables, flows)
-
-4. **troubleshooting.md** (860 lines)
-   - Startup and runtime issues
-   - Storage and performance problems
-   - 11 error codes fully documented
-   - 50+ solutions with examples
-   - Emergency recovery procedures
-
-5. **simple-start.md** (240 lines)
-   - Quick testing guide
-   - LocalStack setup instructions
-   - Common rule patterns
-   - Troubleshooting checklist
-
-6. **rule-generation-prompt.md** (360 lines)
-   - AI-assisted rule generation
-   - 8-step systematic process
-   - Pattern library
-   - Complete examples
-
-7. **rule-generation-prompt-enhanced.md** (450 lines)
-   - Production-ready templates
-   - Enhanced safety patterns
-   - Rule attributes reference
-   - Common pitfalls guide
-
-8. **rule-generation-prompt-concise.md** (150 lines)
-   - Quick copy-paste version
-   - Essential instructions
-   - Usage examples
-
-9. **api-documentation.yml** (983 lines)
-   - OpenAPI 3.0 specification
-   - All 8 endpoints documented
-   - Complete schemas and examples
-
-### Documentation Statistics
-- **Total Lines**: ~5,100 lines
-- **Files**: 9 comprehensive documents
-- **Coverage**: 100% of APIs, configurations, deployments
-- **Examples**: 50+ code examples, 10+ sample rules
-- **Solutions**: 50+ troubleshooting solutions
 
 ---
 
