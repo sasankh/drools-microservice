@@ -517,7 +517,7 @@ mvn test jacoco:report
 
   ```bash
   # Monitor memory
-  watch -n 5 'curl -s http://localhost:8081/admin/memory/info | jq'
+  watch -n 5 'curl -s http://localhost:8080/admin/memory/info | jq'
   ```
 
 - [ ] **Memory Stability Test**

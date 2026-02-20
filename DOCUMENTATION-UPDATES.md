@@ -78,16 +78,16 @@ Files Modified: pom.xml, docker-compose.yml, DroolsEngineService.java, MemoryCon
 **Memory Monitoring Commands** (added to Development Workflow):
 ```bash
 # Check memory status
-curl http://localhost:8081/admin/memory/info | jq
+curl http://localhost:8080/admin/memory/info | jq
 
 # Real-time monitoring
-watch -n 5 'curl -s http://localhost:8081/admin/memory/info | jq ".heap.usagePercent"'
+watch -n 5 'curl -s http://localhost:8080/admin/memory/info | jq ".heap.usagePercent"'
 
 # Test memory stability
 for i in {1..10}; do
-    curl -X POST http://localhost:8081/admin/refresh-rules
+    curl -X POST http://localhost:8080/admin/refresh-rules
     sleep 3
-    curl -s http://localhost:8081/admin/memory/info | jq '.heap.usedMB'
+    curl -s http://localhost:8080/admin/memory/info | jq '.heap.usedMB'
 done
 
 # Check GC logs

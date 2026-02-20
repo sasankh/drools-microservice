@@ -406,7 +406,7 @@ Before deep dive, fix these immediate issues:
   ```bash
   # Start Docker Desktop
   ./setup-dev-environment.sh
-  curl http://localhost:8081/admin/health
+  curl http://localhost:8080/admin/health
   ```
 
 - [ ] **Test sample rule execution**

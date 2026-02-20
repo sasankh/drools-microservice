@@ -80,7 +80,7 @@ fi
 
 # Test 5: Check if Drools application can access LocalStack (if running)
 echo -e "${YELLOW}5. Testing Drools application connectivity (optional)...${NC}"
-if curl -s http://localhost:8081/admin/health > /dev/null 2>&1; then
+if curl -s http://localhost:8080/admin/health > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Drools application is running${NC}"
     
     # Test rule execution

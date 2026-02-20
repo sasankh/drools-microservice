@@ -113,10 +113,10 @@ curl -X POST http://localhost:8080/execute-rule \
 ### 6. If Rules Don't Load Automatically
 ```bash
 # Refresh all rules
-curl -X POST http://localhost:8081/admin/refresh-rules
+curl -X POST http://localhost:8080/admin/refresh-rules
 
 # Or refresh just your specific rule
-curl -X POST http://localhost:8081/admin/refresh-rules/pricing.discount.loyalty-discount
+curl -X POST http://localhost:8080/admin/refresh-rules/pricing.discount.loyalty-discount
 ```
 
 ## 🔍 Quick Testing Checklist
@@ -124,7 +124,7 @@ curl -X POST http://localhost:8081/admin/refresh-rules/pricing.discount.loyalty-
 1. **Rule file created in**: `sample-rules/{domain}/{category}/{name}.drl` ✓
 2. **LocalStack running**: `docker-compose ps` shows localstack UP ✓
 3. **Rule uploaded to S3**: Check with `aws --endpoint-url=http://localhost:4566 s3 ls` ✓
-4. **Application running**: Main API on port 8080, Admin on 8081 ✓
+4. **Application running**: Main API and Admin on port 8080, Actuator on 8081 ✓
 5. **Test rule execution**: Use curl command with your rule ID ✓
 
 ## 💡 Rule ID Mapping

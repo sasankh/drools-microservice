@@ -50,7 +50,7 @@ A critical memory leak was fixed where KieContainer instances were not being dis
 
 **Usage**:
 ```bash
-curl http://localhost:8081/admin/memory/info | jq
+curl http://localhost:8080/admin/memory/info | jq
 ```
 
 **Response Structure**:
@@ -130,7 +130,7 @@ curl http://localhost:8081/admin/memory/info | jq
 
 **Usage**:
 ```bash
-curl -X POST http://localhost:8081/admin/memory/gc | jq
+curl -X POST http://localhost:8080/admin/memory/gc | jq
 ```
 
 **Response**:
@@ -163,7 +163,7 @@ curl -X POST http://localhost:8081/admin/memory/gc | jq
 
 **Usage**:
 ```bash
-curl http://localhost:8081/admin/memory/snapshot | jq
+curl http://localhost:8080/admin/memory/snapshot | jq
 ```
 
 **Response**:
@@ -253,10 +253,10 @@ curl http://localhost:8081/admin/memory/snapshot | jq
 
 ```bash
 # Monitor heap usage every 5 seconds
-watch -n 5 'curl -s http://localhost:8081/admin/memory/info | jq ".heap"'
+watch -n 5 'curl -s http://localhost:8080/admin/memory/info | jq ".heap"'
 
 # Alternative: Just show usage percentage
-watch -n 5 'curl -s http://localhost:8081/admin/memory/info | jq ".heap.usagePercent"'
+watch -n 5 'curl -s http://localhost:8080/admin/memory/info | jq ".heap.usagePercent"'
 ```
 
 **When to Use**:
@@ -279,17 +279,17 @@ for i in {1..10}; do
     echo "Refresh $i/10"
 
     # Get memory before
-    before=$(curl -s http://localhost:8081/admin/memory/info | jq -r '.heap.usedMB')
+    before=$(curl -s http://localhost:8080/admin/memory/info | jq -r '.heap.usedMB')
     echo "  Memory before: ${before} MB"
 
     # Refresh rules
-    curl -X POST http://localhost:8081/admin/refresh-rules -s > /dev/null
+    curl -X POST http://localhost:8080/admin/refresh-rules -s > /dev/null
 
     # Wait for GC
     sleep 3
 
     # Get memory after
-    after=$(curl -s http://localhost:8081/admin/memory/info | jq -r '.heap.usedMB')
+    after=$(curl -s http://localhost:8080/admin/memory/info | jq -r '.heap.usedMB')
     echo "  Memory after:  ${after} MB"
 
     # Calculate change
@@ -326,13 +326,13 @@ echo "timestamp,heapUsedMB,heapMaxMB,heapPercent,warnings" > $LOG_FILE
 
 while true; do
     timestamp=$(date +%s)
-    memory=$(curl -s http://localhost:8081/admin/memory/snapshot)
+    memory=$(curl -s http://localhost:8080/admin/memory/snapshot)
 
     heapUsed=$(echo $memory | jq -r '.heapUsedMB')
     heapMax=$(echo $memory | jq -r '.heapMaxMB')
     heapPercent=$(echo $memory | jq -r '.heapUsagePercent')
 
-    warnings=$(curl -s http://localhost:8081/admin/memory/info | jq -r '.warnings | join("; ")')
+    warnings=$(curl -s http://localhost:8080/admin/memory/info | jq -r '.warnings | join("; ")')
 
     echo "$timestamp,$heapUsed,$heapMax,$heapPercent,$warnings" >> $LOG_FILE
 
@@ -362,7 +362,7 @@ EOF
 SLACK_WEBHOOK="https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
 
 while true; do
-    info=$(curl -s http://localhost:8081/admin/memory/info)
+    info=$(curl -s http://localhost:8080/admin/memory/info)
 
     percent=$(echo $info | jq -r '.heap.usagePercent' | cut -d. -f1)
     warnings=$(echo $info | jq -r '.warnings[]')
@@ -391,8 +391,8 @@ done
 **Risk**: OOM imminent (minutes to hours)
 
 **Actions**:
-1. Check for memory leak: `curl -s http://localhost:8081/admin/memory/info | jq '.warnings'`
-2. Trigger manual GC: `curl -X POST http://localhost:8081/admin/memory/gc`
+1. Check for memory leak: `curl -s http://localhost:8080/admin/memory/info | jq '.warnings'`
+2. Trigger manual GC: `curl -X POST http://localhost:8080/admin/memory/gc`
 3. Review recent changes (new rules, code deployments)
 4. If no improvement, restart application
 5. Increase heap size if pattern repeats
@@ -400,13 +400,13 @@ done
 **Investigation**:
 ```bash
 # Check if memory is freeable
-curl -X POST http://localhost:8081/admin/memory/gc
+curl -X POST http://localhost:8080/admin/memory/gc
 
 # Wait 10 seconds
 sleep 10
 
 # Check again
-curl -s http://localhost:8081/admin/memory/info | jq '.heap'
+curl -s http://localhost:8080/admin/memory/info | jq '.heap'
 
 # If usage still > 90%, it's not GC'able → leak or undersized heap
 ```
@@ -463,9 +463,9 @@ if (oldContainer != null && oldContainer != currentKieContainer) {
 ```bash
 # Test memory stability
 for i in {1..10}; do
-    curl -X POST http://localhost:8081/admin/refresh-rules
+    curl -X POST http://localhost:8080/admin/refresh-rules
     sleep 3
-    curl -s http://localhost:8081/admin/memory/info | jq '.heap.usedMB'
+    curl -s http://localhost:8080/admin/memory/info | jq '.heap.usedMB'
 done
 # Memory should remain stable
 ```
@@ -487,13 +487,13 @@ done
 **Investigation**:
 ```bash
 # Check loaded rules
-curl -s http://localhost:8081/admin/rules | jq '.total_rules'
+curl -s http://localhost:8080/admin/rules | jq '.total_rules'
 
 # Check cache size
-curl -s http://localhost:8081/admin/health | jq '.cache.size'
+curl -s http://localhost:8080/admin/health | jq '.cache.size'
 
 # Check memory pools
-curl -s http://localhost:8081/admin/memory/info | jq '.memoryPools'
+curl -s http://localhost:8080/admin/memory/info | jq '.memoryPools'
 ```
 
 **Solution**:
@@ -518,7 +518,7 @@ LRU_CACHE_MAX_SIZE=50  # Reduce from 100
 **Investigation**:
 ```bash
 # Check Metaspace specifically
-curl -s http://localhost:8081/admin/memory/info | \
+curl -s http://localhost:8080/admin/memory/info | \
     jq '.memoryPools[] | select(.name == "Metaspace")'
 ```
 
@@ -688,7 +688,7 @@ jvm_memory_used_bytes{area="heap"} / jvm_memory_max_bytes{area="heap"}
 aws cloudwatch put-metric-data \
     --namespace "DroolsEngine" \
     --metric-name "HeapUsagePercent" \
-    --value $(curl -s http://localhost:8081/admin/memory/snapshot | jq '.heapUsagePercent')
+    --value $(curl -s http://localhost:8080/admin/memory/snapshot | jq '.heapUsagePercent')
 ```
 
 ---
@@ -700,16 +700,16 @@ aws cloudwatch put-metric-data \
 **Commands**:
 ```bash
 # Check memory
-curl http://localhost:8081/admin/memory/info | jq
+curl http://localhost:8080/admin/memory/info | jq
 
 # Monitor real-time
-watch -n 5 'curl -s http://localhost:8081/admin/memory/snapshot | jq'
+watch -n 5 'curl -s http://localhost:8080/admin/memory/snapshot | jq'
 
 # Test stability
 for i in {1..10}; do
-    curl -X POST http://localhost:8081/admin/refresh-rules
+    curl -X POST http://localhost:8080/admin/refresh-rules
     sleep 3
-    curl -s http://localhost:8081/admin/memory/info | jq '.heap.usedMB'
+    curl -s http://localhost:8080/admin/memory/info | jq '.heap.usedMB'
 done
 ```
 

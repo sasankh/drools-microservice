@@ -34,8 +34,8 @@ import org.springframework.web.bind.annotation.*;
 import software.amazon.awssdk.services.s3.S3Client;
 
 /**
- * Admin controller for rule management operations. Available on management port (8081) as
- * configured in application.yml.
+ * Admin controller for rule management operations. Serves on the main application port (8080).
+ * Note: Spring Boot Actuator endpoints (/actuator/*) use the management port (8081).
  */
 @RestController
 @RequestMapping("/admin")

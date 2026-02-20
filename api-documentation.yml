@@ -14,7 +14,7 @@ info:
 
     ## Architecture
     - **Main API**: Rule execution on port 8080
-    - **Admin API**: Management and monitoring on port 8081
+    - **Admin API**: Management and monitoring on port 8080 (same as main API)
 
     ## Security Features
     - Input validation with configurable limits
@@ -40,7 +40,7 @@ servers:
   - url: http://localhost:8080
     description: Main API Server (Local Development)
   - url: http://localhost:8081
-    description: Admin API Server (Local Development)
+    description: Spring Boot Actuator (Management Port)
   - url: https://drools-api.company.com
     description: Production API Server
   - url: https://drools-admin.company.com
@@ -1198,7 +1198,7 @@ tags:
       - Health monitoring with component details
       - System information and version details
       - Thread pool performance monitoring
-      - Available on separate admin port (8081)
+      - Available on main application port (8080)
   
   - name: Rule Management
     description: |

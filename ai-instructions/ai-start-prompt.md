@@ -257,7 +257,7 @@ When auto-compact or manual compact (`/compact` command) happens:
 - Docker image is 347MB optimized multi-stage build
 - LocalStack provides S3 emulation for offline development
 - 10 sample rules available in `sample-rules/` directory
-- Health checks on port 8081: `/admin/health`
+- Health checks on port 8080: `/admin/health`
 
 ### When Documenting
 - API changes: Update `documentations/api-documentation.yml`

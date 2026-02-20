@@ -192,10 +192,10 @@ aws --endpoint-url=http://localhost:4566 s3 cp rules/ s3://local-rules/ --recurs
 aws s3 cp rules/ s3://prod-drools-rules/ --recursive
 
 # Refresh specific rule via API
-curl -X POST http://localhost:8081/admin/refresh-rules/pricing.discount.vip
+curl -X POST http://localhost:8080/admin/refresh-rules/pricing.discount.vip
 
 # Refresh all rules
-curl -X POST http://localhost:8081/admin/refresh-rules
+curl -X POST http://localhost:8080/admin/refresh-rules
 ```
 
 ---
@@ -738,10 +738,10 @@ logger.close();
 
 ```bash
 # Check rule execution metrics
-curl http://localhost:8081/admin/rules
+curl http://localhost:8080/admin/rules
 
 # Check health status
-curl http://localhost:8081/admin/health
+curl http://localhost:8080/admin/health
 
 # View logs
 tail -f /var/log/drools-rule-engine/application.log | grep "rule_id"

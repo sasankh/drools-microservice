@@ -55,9 +55,9 @@ sleep 60
 
 # Check health endpoint
 echo -e "\n${YELLOW}🏥 Checking health endpoint...${NC}"
-if curl -f http://localhost:9081/admin/health > /dev/null 2>&1; then
+if curl -f http://localhost:9080/admin/health > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Health check passed${NC}"
-    curl -s http://localhost:9081/admin/health | jq '.' || echo "Health response received"
+    curl -s http://localhost:9080/admin/health | jq '.' || echo "Health response received"
 else
     echo -e "${RED}❌ Health check failed${NC}"
     echo "Container logs:"
@@ -76,9 +76,9 @@ Next steps:
 1. Run 'docker-compose up' to start the full stack with LocalStack and Redis
 2. Use 'docker-compose logs -f' to monitor logs
 3. Access the API at http://localhost:8080
-4. Access admin endpoints at http://localhost:8081
+4. Access admin endpoints at http://localhost:8080/admin
 
 Docker Test Results:
-- Container tested on ports 9080 (API) and 9081 (Admin)
-- Production docker-compose uses standard ports 8080/8081
+- Container tested on port 9080 (API + Admin)
+- Production docker-compose uses port 8080 (API + Admin) and 8081 (Actuator)
 "

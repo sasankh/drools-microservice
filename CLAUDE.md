@@ -147,7 +147,8 @@ com.company.drools/
 
 3. **API Design**:
    - Main API on port 8080 (`/execute-rule`)
-   - Admin API on port 8081 (`/admin/*`)
+   - Admin API on port 8080 (`/admin/*`) — same port as main API
+   - Actuator API on port 8081 (`/actuator/*`) — Spring Boot management port
 
 4. **Thread Safety**: Each rule execution uses a new KieSession (stateless)
 
@@ -264,20 +265,20 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 5. **Memory Monitoring** (NEW): Real-time memory diagnostics
    ```bash
    # Check current memory status
-   curl http://localhost:8081/admin/memory/info | jq
+   curl http://localhost:8080/admin/memory/info | jq
 
    # Monitor heap usage
-   curl -s http://localhost:8081/admin/memory/info | jq '.heap'
+   curl -s http://localhost:8080/admin/memory/info | jq '.heap'
 
    # Real-time monitoring (updates every 5 seconds)
-   watch -n 5 'curl -s http://localhost:8081/admin/memory/info | jq ".heap.usagePercent"'
+   watch -n 5 'curl -s http://localhost:8080/admin/memory/info | jq ".heap.usagePercent"'
 
    # Test memory leak fix (should remain stable)
    for i in {1..10}; do
        echo "Refresh $i/10"
-       curl -X POST http://localhost:8081/admin/refresh-rules
+       curl -X POST http://localhost:8080/admin/refresh-rules
        sleep 3
-       curl -s http://localhost:8081/admin/memory/info | jq '.heap.usedMB'
+       curl -s http://localhost:8080/admin/memory/info | jq '.heap.usedMB'
    done
    # Memory should NOT grow by 10-100MB each refresh
 
@@ -404,9 +405,9 @@ Check `project.progress.md` and `FIXES-SUMMARY.md` for current status. Project f
 docker-compose logs -f app
 
 # Test health and admin endpoints
-curl http://localhost:8081/admin/health           # Enhanced health with components
-curl http://localhost:8081/admin/rules            # Rule list with metadata and 10 sample rules
-curl http://localhost:8081/admin/thread-pools     # Thread pool statistics
+curl http://localhost:8080/admin/health           # Enhanced health with components
+curl http://localhost:8080/admin/rules            # Rule list with metadata and 10 sample rules
+curl http://localhost:8080/admin/thread-pools     # Thread pool statistics
 
 # Test main API with sample rules
 curl -X POST http://localhost:8080/execute-rule \

@@ -158,16 +158,16 @@ The new `/admin/memory/info` endpoint will help detect memory growth:
 docker-compose up -d
 
 # Monitor memory
-watch -n 5 'curl -s http://localhost:8081/admin/memory/info | jq ".heap.usagePercent"'
+watch -n 5 'curl -s http://localhost:8080/admin/memory/info | jq ".heap.usagePercent"'
 
 # Trigger multiple rule refreshes (should NOT increase memory)
 for i in {1..10}; do
-    curl -X POST http://localhost:8081/admin/refresh-rules
+    curl -X POST http://localhost:8080/admin/refresh-rules
     sleep 5
 done
 
 # Check memory again - should be stable
-curl -s http://localhost:8081/admin/memory/info | jq
+curl -s http://localhost:8080/admin/memory/info | jq
 ```
 
 ### 3. Long-running test

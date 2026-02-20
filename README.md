@@ -99,7 +99,7 @@ sleep 30
 
 # Verify all services are running and healthy
 docker-compose ps
-curl http://localhost:8081/admin/health
+curl http://localhost:8080/admin/health
 ```
 
 ### 3. Set Environment Variables
@@ -156,10 +156,10 @@ docker run -p 8080:8080 -p 8081:8081 \
 
 ```bash
 # Check application health (with comprehensive component status)
-curl http://localhost:8081/admin/health
+curl http://localhost:8080/admin/health
 
 # List available sample rules
-curl http://localhost:8081/admin/rules
+curl http://localhost:8080/admin/rules
 
 # Test rule execution with sample rules
 curl -X POST http://localhost:8080/execute-rule \
@@ -546,16 +546,16 @@ GET /admin/memory/snapshot
 **Usage Example**:
 ```bash
 # Monitor memory in real-time (every 5 seconds)
-watch -n 5 'curl -s http://localhost:8081/admin/memory/info | jq ".heap.usagePercent"'
+watch -n 5 'curl -s http://localhost:8080/admin/memory/info | jq ".heap.usagePercent"'
 
 # Check for memory warnings
-curl -s http://localhost:8081/admin/memory/info | jq '.warnings'
+curl -s http://localhost:8080/admin/memory/info | jq '.warnings'
 
 # Verify memory is stable after rule refreshes
 for i in {1..10}; do
-    curl -X POST http://localhost:8081/admin/refresh-rules
+    curl -X POST http://localhost:8080/admin/refresh-rules
     sleep 3
-    curl -s http://localhost:8081/admin/memory/info | jq '.heap.usedMB'
+    curl -s http://localhost:8080/admin/memory/info | jq '.heap.usedMB'
 done
 ```
 
@@ -609,7 +609,7 @@ end
 ### Base URLs
 
 - **Main API**: `http://localhost:8080`
-- **Admin API**: `http://localhost:8081/admin`
+- **Admin API**: `http://localhost:8080/admin`
 
 ### Endpoints
 
@@ -700,7 +700,7 @@ src/
 docker-compose ps
 
 # Access application
-curl http://localhost:8081/admin/health
+curl http://localhost:8080/admin/health
 ```
 
 #### Manual Docker Compose Setup
@@ -776,10 +776,10 @@ Rules can be updated without restarting the application:
 aws --endpoint-url=http://localhost:4566 s3 cp new-rule.drl s3://local-rules/pricing/discount/
 
 # Refresh specific rule
-curl -X POST http://localhost:8081/admin/refresh-rules/pricing.discount.new-rule
+curl -X POST http://localhost:8080/admin/refresh-rules/pricing.discount.new-rule
 
 # Or refresh all rules
-curl -X POST http://localhost:8081/admin/refresh-rules
+curl -X POST http://localhost:8080/admin/refresh-rules
 ```
 
 ## 🧪 Testing
@@ -932,19 +932,19 @@ Configure your load balancer to use:
 
 ```bash
 # Application health with component status
-curl http://localhost:8081/admin/health
+curl http://localhost:8080/admin/health
 
 # Thread pool statistics
-curl http://localhost:8081/admin/thread-pools
+curl http://localhost:8080/admin/thread-pools
 
 # Cache statistics
-curl http://localhost:8081/admin/health | jq '.components.cache.details'
+curl http://localhost:8080/admin/health | jq '.components.cache.details'
 
 # Circuit breaker status
-curl http://localhost:8081/admin/health | jq '.components."circuit-breakers"'
+curl http://localhost:8080/admin/health | jq '.components."circuit-breakers"'
 
 # Rule performance metrics
-curl http://localhost:8081/admin/rules | jq '.rules[].avg_execution_time_ms'
+curl http://localhost:8080/admin/rules | jq '.rules[].avg_execution_time_ms'
 ```
 
 ### Performance Targets
@@ -1085,13 +1085,13 @@ export REDIS_ENABLED=false
 #### 4. Rule compilation errors
 ```bash
 # Check rule syntax via Docker
-docker-compose exec app curl http://localhost:8081/admin/rules
+docker-compose exec app curl http://localhost:8080/admin/rules
 
 # View detailed error logs
 docker-compose logs app | grep ERROR
 
 # Refresh specific problematic rule
-curl -X POST http://localhost:8081/admin/refresh-rules/problematic.rule.id
+curl -X POST http://localhost:8080/admin/refresh-rules/problematic.rule.id
 ```
 
 #### 5. Image size or performance issues
@@ -1110,7 +1110,7 @@ docker-compose exec app jstat -gc 1
 
 - Check existing issues: [GitHub Issues](https://github.com/your-repo/issues)
 - Review logs: `tail -f logs/application.log`
-- Verify configuration: `curl http://localhost:8081/admin/health`
+- Verify configuration: `curl http://localhost:8080/admin/health`
 - Test with memory storage: `export RULE_SOURCE=memory`
 
 ## 📞 Support

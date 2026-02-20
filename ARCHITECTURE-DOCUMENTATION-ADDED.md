@@ -179,7 +179,7 @@ s3://bucket-name/pricing/discount/vip.drl
 **Docker Compose Stack** (Development):
 - LocalStack (S3 emulation)
 - Redis (optional cache)
-- Application (ports 8080, 8081)
+- Application (port 8080 for API + Admin, port 8081 for Actuator)
 
 **AWS Deployment** (Production):
 - Internet → ALB → ECS Fargate → S3/Redis → CloudWatch

@@ -44,7 +44,7 @@ Quick smoke test to verify basic memory stability.
 ### Test Execution
 ```bash
 for i in {1..10}; do
-    curl -X POST http://localhost:8081/admin/refresh-rules
+    curl -X POST http://localhost:8080/admin/refresh-rules
     sleep 3
     # Check memory
 done
@@ -83,7 +83,7 @@ Verify no gradual memory creep over extended period (simulates 2.5 hours of hour
 ### Test Execution
 ```bash
 for i in {1..50}; do
-    curl -X POST http://localhost:8081/admin/refresh-rules
+    curl -X POST http://localhost:8080/admin/refresh-rules
     sleep 2
     # Monitor every 10 refreshes
 done
@@ -117,7 +117,7 @@ Extreme validation simulating 83 days of hourly rule refreshes. This is the defi
 ### Test Execution
 ```bash
 for i in {1..2000}; do
-    curl -X POST http://localhost:8081/admin/refresh-rules
+    curl -X POST http://localhost:8080/admin/refresh-rules
     sleep 0.1  # 6 refreshes/second
 done
 ```

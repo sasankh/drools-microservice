@@ -191,7 +191,7 @@ curl -X POST http://localhost:8080/execute-rule \
   }'
 
 # 4. Refresh rules if needed:
-curl -X POST http://localhost:8081/admin/refresh-rules
+curl -X POST http://localhost:8080/admin/refresh-rules
 ```
 
 ---

@@ -132,7 +132,7 @@ if $AWS_CMD s3 ls s3://${BUCKET_NAME}/ > /dev/null 2>&1; then
     echo ""
     echo "Test commands:"
     echo "  $AWS_CMD s3 ls s3://${BUCKET_NAME}/"
-    echo "  curl http://localhost:8081/admin/health"
+    echo "  curl http://localhost:8080/admin/health"
     echo "  curl -X POST http://localhost:8080/execute-rule \\"
     echo "    -H 'Content-Type: application/json' \\"
     echo "    -d '{\"ruleId\": \"pricing.discount.simple\", \"data\": {\"amount\": 100}}'"

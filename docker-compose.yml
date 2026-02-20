@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8080:8080"  # Main API
-      - "8081:8081"  # Admin API
+      - "8081:8081"  # Spring Boot Actuator (/actuator/*)
     # Resource limits for container-aware JVM
     deploy:
       resources:
@@ -71,7 +71,7 @@ services:
       - drools-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8081/admin/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/admin/health"]
       interval: 30s
       timeout: 10s
       retries: 3

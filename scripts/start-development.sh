@@ -17,7 +17,7 @@ export SPRING_PROFILES_ACTIVE=local
 
 # Application settings
 export SERVER_PORT=8080
-export ADMIN_PORT=8081
+export ADMIN_PORT=8081  # Spring Boot Actuator management port (/actuator/*)
 
 # Debug settings (optional)
 # export JAVA_OPTS="$JAVA_OPTS -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005"

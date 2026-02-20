@@ -33,7 +33,7 @@ This guide covers deployment options for the Drools Rule Engine Microservice, fr
                               │                     │
                        ┌──────────────┐    ┌─────────────┐
                        │ Admin Portal │    │   Redis     │
-                       │ (Port 8081)  │    │   Cache     │
+                       │ (Port 8080)  │    │   Cache     │
                        └──────────────┘    └─────────────┘
 ```
 
@@ -248,10 +248,10 @@ mvn spring-boot:run \
 
 ```bash
 # Check application health
-curl http://localhost:8081/admin/health
+curl http://localhost:8080/admin/health
 
 # Check system info
-curl http://localhost:8081/admin/info
+curl http://localhost:8080/admin/info
 
 # Test rule execution (if you have rules)
 curl -X POST http://localhost:8080/execute-rule \
@@ -383,7 +383,7 @@ upstream drools_backend {
 }
 
 upstream drools_admin {
-    server 127.0.0.1:8081;
+    server 127.0.0.1:8080;
 }
 
 server {
@@ -590,7 +590,7 @@ USER drools
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:8081/admin/health || exit 1
+  CMD curl -f http://localhost:8080/admin/health || exit 1
 
 # JVM optimization for containers
 ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
@@ -624,7 +624,7 @@ docker run -d \
 docker logs drools-rule-engine
 
 # Check health
-docker exec drools-rule-engine curl http://localhost:8081/admin/health
+docker exec drools-rule-engine curl http://localhost:8080/admin/health
 ```
 
 ### 3. Docker Compose Production
@@ -649,7 +649,7 @@ services:
       - redis
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/admin/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/admin/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -801,10 +801,10 @@ docker logs redis-container
 
 ```bash
 # Check thread pool status
-curl http://localhost:8081/admin/thread-pools
+curl http://localhost:8080/admin/thread-pools
 
 # Check cache statistics
-curl http://localhost:8081/admin/health | jq '.components.cache'
+curl http://localhost:8080/admin/health | jq '.components.cache'
 
 # Check GC logs
 # Add to JAVA_OPTS: -XX:+PrintGC -XX:+PrintGCDetails
@@ -836,16 +836,16 @@ tail -f /var/log/nginx/access.log
 
 ```bash
 # Overall health
-curl http://localhost:8081/admin/health
+curl http://localhost:8080/admin/health
 
 # System information
-curl http://localhost:8081/admin/info
+curl http://localhost:8080/admin/info
 
 # Thread pool statistics
-curl http://localhost:8081/admin/thread-pools
+curl http://localhost:8080/admin/thread-pools
 
 # Rule list
-curl http://localhost:8081/admin/rules
+curl http://localhost:8080/admin/rules
 ```
 
 ---

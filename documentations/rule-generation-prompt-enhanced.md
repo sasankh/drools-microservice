@@ -232,7 +232,7 @@ curl -X POST http://localhost:8080/execute-rule \
 }
 
 # 6. Refresh rules if needed
-curl -X POST http://localhost:8081/admin/refresh-rules/{rule-id}
+curl -X POST http://localhost:8080/admin/refresh-rules/{rule-id}
 ```
 
 ## 🔍 Important Patterns & Best Practices
@@ -372,7 +372,7 @@ Before providing the final rule, ensure:
 - API Endpoint: POST http://localhost:8080/execute-rule
 - Request Format: `{"rule_id": "...", "data": {...}}`
 - S3 Bucket: local-rules (LocalStack port 4566)
-- Admin API: Port 8081 for rule refresh
+- Admin API: Port 8080 for rule refresh
 
 **Output Conventions:**
 - Use camelCase for all field names

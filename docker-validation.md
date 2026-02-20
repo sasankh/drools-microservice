@@ -66,7 +66,7 @@ docker logs -f drools-test
 sleep 60
 
 # Test health check
-curl http://localhost:8081/admin/health
+curl http://localhost:8080/admin/health
 
 # Test main API
 curl -X POST http://localhost:8080/execute-rule \
@@ -172,7 +172,7 @@ docker logs drools-test
 netstat -an | grep 8081
 
 # Check container networking
-docker exec drools-test wget -O- http://localhost:8081/admin/health
+docker exec drools-test wget -O- http://localhost:8080/admin/health
 ```
 
 ### Performance Issues

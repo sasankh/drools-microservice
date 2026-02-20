@@ -305,26 +305,26 @@ docker-compose up -d
 ### 4. Test Memory Monitoring
 ```bash
 # Check memory status
-curl http://localhost:8081/admin/memory/info | jq
+curl http://localhost:8080/admin/memory/info | jq
 
 # Check heap usage
-curl -s http://localhost:8081/admin/memory/info | jq '.heap'
+curl -s http://localhost:8080/admin/memory/info | jq '.heap'
 
 # Monitor memory in real-time
-watch -n 5 'curl -s http://localhost:8081/admin/memory/info | jq ".heap.usagePercent"'
+watch -n 5 'curl -s http://localhost:8080/admin/memory/info | jq ".heap.usagePercent"'
 ```
 
 ### 5. Test Memory Leak Fix
 ```bash
 # Monitor memory before
-curl -s http://localhost:8081/admin/memory/info | jq '.heap.usedMB'
+curl -s http://localhost:8080/admin/memory/info | jq '.heap.usedMB'
 
 # Trigger 10 rule refreshes
 for i in {1..10}; do
     echo "Refresh $i/10"
-    curl -X POST http://localhost:8081/admin/refresh-rules
+    curl -X POST http://localhost:8080/admin/refresh-rules
     sleep 3
-    curl -s http://localhost:8081/admin/memory/info | jq '.heap.usedMB'
+    curl -s http://localhost:8080/admin/memory/info | jq '.heap.usedMB'
 done
 
 # Memory should be stable (not growing by 10-100MB each refresh)
@@ -361,7 +361,7 @@ tail -f gc-logs/gc.log
 # Monitor memory every 5 minutes
 while true; do
     date
-    curl -s http://localhost:8081/admin/memory/info | jq '.heap'
+    curl -s http://localhost:8080/admin/memory/info | jq '.heap'
     sleep 300  # 5 minutes
 done
 ```

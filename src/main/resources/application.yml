@@ -8,6 +8,8 @@ server:
     max-http-post-size: ${MAX_HTTP_POST_SIZE:10MB}
     max-swallow-size: ${MAX_SWALLOW_SIZE:2MB}
 
+# Spring Boot Actuator management port (/actuator/* endpoints only)
+# Note: Custom /admin/* endpoints (AdminController, MemoryController) serve on the main port (8080)
 management:
   server:
     port: ${ADMIN_PORT:8081}

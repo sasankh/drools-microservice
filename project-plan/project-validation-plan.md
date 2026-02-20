@@ -143,7 +143,7 @@ docker-compose ps
 ```bash
 # 4.1 Health Checks
 curl http://localhost:8080/actuator/health
-curl http://localhost:8081/admin/health
+curl http://localhost:8080/admin/health
 
 # 4.2 Sample Rules Execution (All 10)
 # pricing/discount/simple.drl

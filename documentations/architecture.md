@@ -45,7 +45,7 @@ The Drools Rule Engine Microservice is a high-performance, cloud-native business
 - **Stateless Design**: Each request is independent, enabling horizontal scaling
 - **Polyglot Rule Storage**: Rules stored as .drl files in S3 with hierarchical organization
 - **Multi-Tier Caching**: S3 → Redis → LRU → Compiled KieBase for optimal performance
-- **Dual API Architecture**: Main API (port 8080) + Admin API (port 8081)
+- **API Architecture**: All API endpoints on port 8080, Actuator on port 8081
 - **Memory Stable**: Proper resource disposal prevents memory leaks and OOM errors
 - **Cloud-Native**: Containerized, 12-factor app compliant, AWS-ready
 
@@ -67,7 +67,7 @@ The Drools Rule Engine Microservice is a high-performance, cloud-native business
 │                    API GATEWAY LAYER                             │
 │  ┌──────────────┐          ┌──────────────┐                     │
 │  │  Main API    │          │  Admin API   │                     │
-│  │  Port 8080   │          │  Port 8081   │                     │
+│  │  Port 8080   │          │  Port 8080   │                     │
 │  │ /execute-rule│          │ /admin/*     │                     │
 │  └──────────────┘          └──────────────┘                     │
 └─────────────────────────────────────────────────────────────────┘
@@ -150,7 +150,7 @@ The Drools Rule Engine Microservice is a high-performance, cloud-native business
 - **Validation**: Request size, data structure, rule ID format
 - **Security**: Rate limiting, input sanitization
 
-**AdminController** (Admin API - Port 8081)
+**AdminController** (Admin API - Port 8080)
 - **Endpoints**:
   - `GET /admin/health` - Component health checks
   - `GET /admin/rules` - List all loaded rules with metadata
@@ -160,7 +160,7 @@ The Drools Rule Engine Microservice is a high-performance, cloud-native business
 - **Responsibility**: System administration and monitoring
 - **Security**: No rate limiting (trusted internal use)
 
-**MemoryController** (Admin API - Port 8081)
+**MemoryController** (Admin API - Port 8080)
 - **Endpoints**:
   - `GET /admin/memory/info` - Comprehensive memory statistics
   - `POST /admin/memory/gc` - Manual garbage collection trigger
@@ -168,7 +168,7 @@ The Drools Rule Engine Microservice is a high-performance, cloud-native business
 - **Responsibility**: Real-time memory diagnostics and monitoring
 - **Metrics**: Heap usage, GC stats, memory pools, automatic warnings
 
-**ThreadPoolController** (Admin API - Port 8081)
+**ThreadPoolController** (Admin API - Port 8080)
 - **Endpoint**: `GET /admin/thread-pools`
 - **Responsibility**: Thread pool statistics and monitoring
 - **Metrics**: Active threads, queue size, completed tasks
@@ -1298,7 +1298,7 @@ Response:
 ┌─────────────────────────────────────────────────────────────┐
 │                    APPLICATION                               │
 │  Build: ./Dockerfile                                         │
-│  Ports: 8080 (API), 8081 (Admin)                             │
+│  Ports: 8080 (API + Admin), 8081 (Actuator)                   │
 │  Volumes: ./heap-dumps, ./gc-logs                            │
 │  Environment: Docker profile, AWS endpoint override          │
 └─────────────────────────────────────────────────────────────┘
@@ -1480,7 +1480,7 @@ class FileRuleStorage implements RuleStorageService { }
 9. **Disposability**: Fast startup (<30s), graceful shutdown
 10. **Dev/Prod Parity**: Same Docker image, different env vars
 11. **Logs**: Stdout/stderr, structured JSON
-12. **Admin Processes**: Admin API on separate port
+12. **Admin Processes**: Admin API endpoints for management tasks
 
 ---
 

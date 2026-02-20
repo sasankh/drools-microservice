@@ -199,7 +199,7 @@ verify_services() {
     sleep 30
     
     # Check Drools application
-    if wait_for_service "Drools Application" "http://localhost:8081/admin/health"; then
+    if wait_for_service "Drools Application" "http://localhost:8080/admin/health"; then
         log "Drools application is healthy"
     else
         echo -e "${RED}❌ Drools application health check failed${NC}"
@@ -253,16 +253,16 @@ show_completion_status() {
     echo ""
     echo -e "${GREEN}✅ Services Running:${NC}"
     echo "   • Drools Rule Engine:  http://localhost:8080"
-    echo "   • Admin API:          http://localhost:8081"
+    echo "   • Admin API:          http://localhost:8080/admin"
     echo "   • LocalStack S3:      http://localhost:4566"
     echo "   • Redis:              redis://localhost:6379"
     echo ""
     echo -e "${BLUE}📋 Quick Test Commands:${NC}"
     echo "   # Check application health"
-    echo "   curl http://localhost:8081/admin/health"
+    echo "   curl http://localhost:8080/admin/health"
     echo ""
     echo "   # List available rules"
-    echo "   curl http://localhost:8081/admin/rules"
+    echo "   curl http://localhost:8080/admin/rules"
     echo ""
     echo "   # Test simple discount rule"
     echo "   curl -X POST http://localhost:8080/execute-rule \\"
