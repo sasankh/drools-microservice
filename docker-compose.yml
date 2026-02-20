@@ -17,21 +17,27 @@ services:
         reservations:
           memory: 2G
           cpus: '1.0'
+    volumes:
+      - ./heap-dumps:/tmp/heap-dumps
+      - ./gc-logs:/tmp/gc-logs
     environment:
+      # JVM Memory & GC Configuration
+      - JAVA_OPTS=-Xms512m -Xmx2048m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+UseStringDeduplication -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heap-dumps/heapdump.hprof -Xlog:gc*:file=/tmp/gc-logs/gc.log:time,uptime,level,tags
+
       # Rule source configuration
       - RULE_SOURCE=s3
       - RULE_BUCKET_NAME=local-rules
-      
+
       # AWS/LocalStack configuration
       - AWS_REGION=us-east-1
       - AWS_ENDPOINT=http://localstack:4566
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
-      
+
       # Redis configuration
       - REDIS_ENABLED=true
       - REDIS_URL=redis://redis:6379
-      
+
       # Cache configuration
       - LRU_CACHE_MAX_SIZE=100
       - RULE_EXECUTION_TIMEOUT_SECONDS=30

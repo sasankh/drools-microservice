@@ -161,8 +161,21 @@ public class DroolsEngineService {
         return false;
       }
 
-      // Update the container and mark rules as active
+      // Dispose old KieContainer to prevent memory leak
+      // This is critical to avoid OOM errors (exit code 137)
+      KieContainer oldContainer = currentKieContainer;
       currentKieContainer = compilationResult.getKieContainer();
+
+      // Dispose old container to free memory
+      if (oldContainer != null && oldContainer != currentKieContainer) {
+        try {
+          log.info("Disposing old KieContainer to free memory (prevents memory leak)");
+          oldContainer.dispose();
+          log.debug("Old KieContainer disposed successfully");
+        } catch (Exception e) {
+          log.warn("Error disposing old KieContainer: {}", e.getMessage());
+        }
+      }
 
       for (Rule rule : rules) {
         loadedRules.put(rule.getRuleId(), rule);
