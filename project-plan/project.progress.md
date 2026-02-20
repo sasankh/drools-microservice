@@ -5,8 +5,8 @@
 - **Phase 1 Completion**: 2025-07-21 16:55
 - **Phase 2 Completion**: 2025-07-21 17:30
 - **Functionality Testing**: 2025-07-21 18:12 ✅ PASSED
-- **Current Phase**: Phase 4.4 Documentation Complete, Ready for Phase 5 (Deployment & Infrastructure)  
-- **Estimated Completion**: Phase 4 COMPLETE, Phase 5 pending
+- **Current Phase**: Phase 6 Complete — All critical fixes, test coverage push, and documentation updates done
+- **Estimated Completion**: All phases complete (4.3 JMeter deferred)
 
 ---
 
@@ -20,6 +20,7 @@
 | Phase 3: Production Readiness | ✅ COMPLETED | 100% | 2025-07-21 22:00 | 2025-07-22 11:30 |
 | Phase 4: Testing & Documentation | ✅ COMPLETED (4.1, 4.2, 4.4) | 75% | 2025-07-22 14:00 | 2026-02-20 |
 | Phase 5: Deployment & Infrastructure | ✅ COMPLETED | 100% | 2025-07-22 17:00 | 2025-07-22 18:45 |
+| Phase 6: Critical Fixes & Hardening | ✅ COMPLETED | 100% | 2026-02-19 | 2026-02-20 |
 
 ---
 
@@ -739,6 +740,55 @@ All production readiness tasks complete: Health & Monitoring (5), Metrics & Obse
 
 ---
 
+## Phase 6: Critical Fixes & Hardening - ✅ COMPLETED
+
+### 6.1 Critical Bug Fixes - ✅ COMPLETED (2026-02-19)
+## [P6.1.1] - Maven Enforcer Plugin for Java 17
+- **Status**: ✅ COMPLETED
+- **Files Modified**: `pom.xml`
+- **Notes**: Added enforcer rule `[17,18)` to fail builds on wrong Java version
+
+## [P6.1.2] - Memory Leak Fix — KieContainer Disposal
+- **Status**: ✅ COMPLETED
+- **Files Modified**: `DroolsEngineService.java` (lines 164-178)
+- **Notes**: Fixed OOM (exit code 137) by disposing old KieContainers on rule refresh
+
+## [P6.1.3] - Memory Monitoring Endpoint
+- **Status**: ✅ COMPLETED
+- **Files Created**: `MemoryController.java`
+- **Notes**: GET /admin/memory/info with heap, non-heap, GC stats, and warnings
+
+### 6.2 Test Coverage Push - ✅ COMPLETED (2026-02-20)
+- **Status**: ✅ COMPLETED
+- **Coverage Before**: 81% instruction, 63% branch (277 tests)
+- **Coverage After**: 96.2% instruction, 89.7% branch (550 tests)
+- **New Test Files Created**:
+  - `CacheStatisticsTest.java` - 15 tests
+  - `DroolsConfigTest.java` - 4 tests
+  - `RateLimitingConfigTest.java` - 19 tests
+  - `RedisConfigTest.java` - 9 tests
+  - `RuleLoadingConfigTest.java` - 6 tests
+  - `StorageConfigTest.java` - 17 tests
+- **Expanded Test Files**: AdminControllerTest (15→36), LocalLRUCacheTest (13→40), RedisRuleCacheTest (10→28), MemoryControllerTest (8→15), LogSanitizerTest (8→20+), and others
+
+### 6.3 Script & Documentation Hardening - ✅ COMPLETED (2026-02-20)
+## [P6.3.1] - Refactor init-localstack.sh
+- **Status**: ✅ COMPLETED
+- **Files Modified**: `init-localstack.sh` (267→126 lines)
+- **Notes**: Removed 5 hardcoded inline DRL rules. Now always reads from `sample-rules/` directory. Docker-tested with all 10 rules loading successfully.
+
+## [P6.3.2] - Fix API Field Naming in Docs
+- **Status**: ✅ COMPLETED
+- **Files Modified**: `CLAUDE.md`, `README.md`
+- **Notes**: Fixed `ruleId` → `rule_id` everywhere. DTO uses `@JsonProperty("rule_id")` (snake_case).
+
+## [P6.3.3] - Update CLAUDE.md and README.md
+- **Status**: ✅ COMPLETED
+- **Files Modified**: `CLAUDE.md`, `README.md`
+- **Notes**: Updated health score (8.5/10), test coverage stats, init-localstack.sh description, sample rule listing.
+
+---
+
 ## 🔄 Session History
 
 ### Session 1 - 2025-07-21 (Planning)
@@ -795,17 +845,91 @@ All production readiness tasks complete: Health & Monitoring (5), Metrics & Obse
 - **Performance**: Application starts successfully with new layer
 - **Blockers**: None
 
+### Session 4 - 2025-07-21/22 (Phases 2.2-3.4 + 4.4 + 5.1-5.2)
+- **Tasks Completed**:
+  - Phase 2.2-2.5: S3, Redis, Caching, Admin endpoints
+  - Phase 3.1-3.4: Health, Metrics, Performance, Security
+  - Phase 4.4: Complete documentation suite (~3,900 lines)
+  - Phase 5.1-5.2: Docker setup, LocalStack integration, 10 sample rules
+- **Key Achievements**:
+  - Full production-ready microservice
+  - 347MB Docker image with multi-stage build
+  - One-command development setup
+  - Complete documentation package
+
+### Session 5 - 2026-02-19 (Critical Fixes)
+- **Tasks Completed**:
+  - Java 17 enforcement via Maven Enforcer Plugin
+  - Memory leak fix — KieContainer disposal in DroolsEngineService
+  - Memory monitoring endpoint (GET /admin/memory/info)
+- **Key Achievements**:
+  - Fixed OOM errors (exit code 137) on rule refresh
+  - Health score improved from 6.3/10 to baseline
+
+### Session 6 - 2026-02-19 (Test Coverage Phase 1-4)
+- **Tasks Completed**:
+  - Built test infrastructure (BaseUnitTest, BaseIntegrationTest, RuleTestUtils)
+  - Wrote 147 tests across 17 test files
+  - Achieved 55% instruction coverage
+- **Key Achievements**:
+  - Test infrastructure established for all future tests
+  - Core engine at 94% coverage
+
+### Session 7 - 2026-02-20 (Test Coverage Push — 81%)
+- **Tasks Completed**:
+  - Added 130 more tests across 12 new test files
+  - Coverage: 55% → 81% instruction, 63% branch
+  - Total: 277 tests
+- **Key Achievements**:
+  - DTO tests (37), config tests (45), exception tests (18)
+  - Fixed flaky LocalLRUCacheTest concurrent test
+
+### Session 8 - 2026-02-20 (Multi-Agent Coverage Push — 92%)
+- **Tasks Completed**:
+  - Multi-agent session expanding existing test files
+  - Coverage: 81% → 92% instruction, 80% branch
+  - Total: 418 tests
+- **Key Achievements**:
+  - 6 new config test files
+  - Expanded AdminControllerTest (15→36), LocalLRUCacheTest (13→40), RedisRuleCacheTest (10→28)
+
+### Session 9 - 2026-02-20 (Coverage Push to 96.2%)
+- **Tasks Completed**:
+  - Final coverage push to 96.2% instruction / 89.7% branch
+  - Total: 550 tests across 40+ test files
+- **Coverage By Package**:
+  - api/validation: 100% / 94.6%
+  - api/controller: 97.4% / 91.2%
+  - api/filter: 98.6% / 94.1%
+  - cache: 98.3% / 90.0%
+  - common: 98.6% / 90.5%
+  - storage: 94.1% / 89.5%
+  - config: 93.1% / 83.3%
+  - core/engine: 95.7% / 83.3%
+
+### Session 10 - 2026-02-20 (init-localstack.sh Refactor & Docs)
+- **Tasks Completed**:
+  - Refactored init-localstack.sh (267→126 lines)
+  - Docker integration test: all 10 rules loaded and executed
+  - Fixed `ruleId` → `rule_id` in CLAUDE.md and README.md
+  - Updated health score to 8.5/10
+  - Created AI context memory (MEMORY.md)
+- **Key Discoveries**:
+  - Admin endpoints on port 8080 (not 8081 as documented)
+  - DTO uses `@JsonProperty("rule_id")` — snake_case
+  - Docker race condition: app starts before LocalStack init
+
 ---
 
 ## 📊 Metrics
 
 ### Code Statistics
-- **Total Files Created**: 90+ (35+ source Java + 34 test Java + 15+ config/doc files)
-- **Java Source Files**: 34 compiled successfully ✅
-- **Java Test Files**: 34 (3 base/utility + 31 test classes)
-- **Total Lines of Code**: ~10,000+ (source + tests)
+- **Total Files Created**: 95+ (35+ source Java + 40+ test Java + 15+ config/doc files)
+- **Java Source Files**: 35 compiled successfully ✅
+- **Java Test Files**: 40+ (3 base/utility + 37+ test classes)
+- **Total Lines of Code**: ~12,000+ (source + tests)
 - **Documentation**: 500+ lines (README, .env.example, project docs)
-- **Test Coverage**: 92% instruction, 80% branch (418 tests, 100% pass rate) ✅
+- **Test Coverage**: 96.2% instruction, 89.7% branch (550 tests, 100% pass rate) ✅
 
 ### Architecture Components
 - **Controllers**: 2 (RuleExecutionController, AdminController)
@@ -864,20 +988,15 @@ All production readiness tasks complete: Health & Monitoring (5), Metrics & Obse
 
 ## 🚧 Current Focus
 
-**Phase 3.1 Status**: ✅ COMPLETED - All 5 health monitoring tasks finished successfully
-**Phase 3.2 Status**: ✅ COMPLETED - All 7 metrics & observability tasks finished successfully
-**Testing Status**: ✅ COMPLETED - Enhanced health endpoint and metrics integration verified
+**All Phases Complete** (Phase 4.3 JMeter deferred)
 
-**Phase 4 Status**: ✅ **COMPLETED** (4.1 Unit Tests + 4.2 Integration Tests + 4.4 Documentation; 4.3 Performance Tests deferred)
-
-**Phase 5 Status**: ✅ **COMPLETED** - All Docker Setup and Local Development Environment tasks finished successfully
-
-**Next Phase**: Ready for Phase 4.3 (JMeter) or project completion based on requirements
+**Health Score**: 8.5/10
+**Test Coverage**: 96.2% instruction / 89.7% branch (550 tests, 100% pass rate)
 
 **Current Status**:
 - ✅ **Core System**: 100% functional and tested
-- ✅ **API Functionality**: Rule execution working perfectly
-- ✅ **Health Monitoring**: Enhanced health checks implemented
+- ✅ **API Functionality**: Rule execution working perfectly (snake_case `rule_id` DTOs)
+- ✅ **Health Monitoring**: Enhanced health checks + memory monitoring endpoint
 - ✅ **Metrics & Observability**: Comprehensive monitoring with vendor-agnostic metrics
 - ✅ **Structured Logging**: JSON logging with correlation IDs and MDC context
 - ✅ **Performance Optimization**: Connection pooling, thread pools, JVM tuning, circuit breakers
@@ -888,11 +1007,18 @@ All production readiness tasks complete: Health & Monitoring (5), Metrics & Obse
 - ✅ **Architecture**: Complete storage abstraction and caching system
 - ✅ **Docker Setup**: Complete containerization with optimized 347MB images, health checks, validation
 - ✅ **Local Development**: Complete LocalStack integration with 10 sample rules, automated setup script
-- ✅ **Test Coverage**: 92% instruction coverage, 418 tests, 100% pass rate
+- ✅ **Test Coverage**: 96.2% instruction / 89.7% branch, 550 tests, 100% pass rate
+- ✅ **Memory Leak**: Fixed — KieContainer disposal prevents OOM
+- ✅ **Java 17 Enforcement**: Maven Enforcer Plugin
+- ✅ **Scripts**: init-localstack.sh refactored — reads from sample-rules/ (no hardcoded DRL)
+
+**Remaining / Optional**:
+- Phase 4.3: JMeter performance benchmarks (deferred)
+- Java 21 upgrade (user plans to return to this)
+- Coverage gaps: config (83.3% branch), core/engine (83.3% branch)
+- Docker race condition: app may start before LocalStack init
 
 **Blockers**: None
-
-**Dependencies**: All Phase 1 dependencies resolved
 
 ---
 
@@ -948,7 +1074,7 @@ Enhanced Health & Monitoring implementation with all 5 tasks finished successful
 
 ---
 
-**Last Updated**: 2026-02-20 - **Phase 4.1-4.2 COMPLETE - 418 tests, 92% coverage** ✅
+**Last Updated**: 2026-02-20 - **Phase 6 COMPLETE — 550 tests, 96.2% instruction / 89.7% branch coverage** ✅
 
 ---
 

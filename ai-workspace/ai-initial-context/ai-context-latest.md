@@ -1,166 +1,119 @@
 # AI Context - Drools Rule Engine Microservice
 
-**Last Updated**: 2026-02-19 (Session 6 - Test Coverage Complete)
+**Last Updated**: 2026-02-20 (Session 10 — All phases complete)
 
-## 🎯 Project Status
+## Project Status
 
-**Health Score**: 7.5/10 (improved from 6.3/10)
-- ✅ **Test Coverage**: 55% (147 tests, 100% passing)
-- ✅ **Build**: SUCCESS
-- ✅ **Memory**: Stable (leak fixed)
-- ✅ **Java 17**: Enforced
+**Health Score**: 8.5/10
+- **Test Coverage**: 96.2% instruction / 89.7% branch (550 tests, 100% passing)
+- **Build**: SUCCESS (Java 17 enforced by Maven Enforcer Plugin)
+- **Memory**: Stable (KieContainer disposal fix)
+- **Docker**: 347MB image, all 10 sample rules verified
 
-## 📊 Test Coverage Achievement
+## Coverage by Package
 
-### Journey
-- **Start**: 0% (no tests)
-- **Phase 1**: 39% (+39%, core engine fixed)
-- **Phase 2**: 48% (+9%, storage & cache)
-- **Phase 3**: 52% (+4%, integration)
-- **Phase 4**: 55% (+3%, validation & security)
-- **Total**: **147 tests, 100% passing**
+| Package | Instruction | Branch |
+|---------|------------|--------|
+| api/validation | 100% | 94.6% |
+| api/controller | 97.4% | 91.2% |
+| api/filter | 98.6% | 94.1% |
+| cache | 98.3% | 90.0% |
+| common | 98.6% | 90.5% |
+| storage | 94.1% | 89.5% |
+| config | 93.1% | 83.3% |
+| core/engine | 95.7% | 83.3% |
+| api/dto | 96.0% | 86.8% |
+| core/model | 100% | 100% |
+| **Overall** | **96.2%** | **89.7%** |
 
-### Coverage by Package
-| Package | Coverage | Tests |
-|---------|----------|-------|
-| core.engine | 94% | ⭐ |
-| core.model | 86% | ⭐ |
-| api.controller | 47% | 🟡 |
-| storage | 34% | 🟡 |
-| Overall | **55%** | ✅ |
+## Test Files (550 tests across 40+ files)
 
-## 📁 Test Files (147 tests)
+### Core Engine
+- DroolsEngineServiceTest.java, RuleCompilerTest.java, RuleExecutorTest.java
 
-### Phase 1 - Core (77 tests) ✅
-- DroolsEngineServiceTest.java (18)
-- RuleCompilerTest.java (8)
-- RuleExecutorTest.java (10)
-- RuleExecutionControllerTest.java (12)
-- AdminControllerTest.java (15)
-- S3RuleStorageTest.java (14)
+### Controllers
+- RuleExecutionControllerTest.java, AdminControllerTest.java (36), MemoryControllerTest.java (15)
 
-### Phase 2 - Storage & Cache (31 tests) ✅
-- LocalFileStorageTest.java (8)
-- LocalLRUCacheTest.java (13)
-- RedisRuleCacheTest.java (10)
+### Storage & Cache
+- S3RuleStorageTest.java, LocalFileStorageTest.java, InMemoryRuleStorageTest.java (17), StorageFactoryTest.java (5)
+- LocalLRUCacheTest.java (40), RedisRuleCacheTest.java (28), CacheStatisticsTest.java (15)
 
-### Phase 3 - Integration (14 tests) ✅
-- S3StorageIntegrationTest.java (6)
-- RuleExecutionIntegrationTest.java (8)
+### Config
+- DroolsConfigTest.java (4), RateLimitingConfigTest.java (19), RedisConfigTest.java (9)
+- RuleLoadingConfigTest.java (6), StorageConfigTest.java (17), S3ConfigTest.java (10)
+- MetricsConfigTest.java (13), ThreadPoolConfigTest.java (4), CircuitBreakerConfigTest.java (5)
+- LoggingConfigTest.java (9), RequestTimeoutConfigTest.java (4)
 
-### Phase 4 - Validation & Security (25 tests) ✅
-- RuleDataValidatorTest.java (10)
-- LogSanitizerTest.java (8)
-- RateLimitingFilterTest.java (7)
+### API / Validation / Security
+- DtoTest.java (37), GlobalExceptionHandlerTest.java (9), ExceptionTest.java (9)
+- RuleDataValidatorTest.java (10), LogSanitizerTest.java (20+), RateLimitingFilterTest.java (7)
 
-## 🔧 Test Infrastructure Created
+### Integration
+- S3StorageIntegrationTest.java (6), RuleExecutionIntegrationTest.java (8)
 
-```
-src/test/java/com/company/drools/
-├── BaseUnitTest.java
-├── BaseIntegrationTest.java
-├── testutil/
-│   ├── RuleTestUtils.java
-│   └── ValidationConfigTestHelper.java
-└── api/controller/
-    └── TestValidationConfig.java
+## Key Facts
 
-src/test/resources/
-├── application-test.yml
-└── logback-test.xml
-```
+- API request DTO uses **snake_case** (`rule_id`, not `ruleId`) via `@JsonProperty("rule_id")`
+- Admin endpoints are on **port 8080** (same as main API) in Docker — CLAUDE.md says 8081
+- `init-localstack.sh` reads `.drl` files from `sample-rules/` directory (126 lines, no hardcoded rules)
+- Maven requires `source ./set-java-env.sh` before builds (enforcer checks Java version)
+- Spotless formatter runs on pre-commit — always run `mvn spotless:apply` after edits
 
-## 🔑 Critical Fixes (Session 5)
+## Test Patterns
 
-1. **Java 17 Enforcement** - Maven Enforcer Plugin
-2. **Memory Leak Fixed** - KieContainer disposal (lines 164-178)
-3. **Memory Monitoring** - /admin/memory/info endpoint
-4. **Spring Boot 3.x Tests** - Fixed validator injection
+- Unit tests extend `BaseUnitTest` (sets up Mockito) or use plain JUnit 5
+- `@Value` fields injected via `ReflectionTestUtils.setField()` or manual `Field.setAccessible()`
+- `ValidationConfigTestHelper` provides mock `ValidationConfig` for validator tests
+- `RuleTestUtils` has helpers: `createSimpleRule()`, `createTestData()`
+- Metrics verified with real `SimpleMeterRegistry` (not mocked)
+- S3 tests mock `S3Client` with builders: `S3Object.builder()`, `ListObjectsV2Response.builder()`
 
-## 💡 Testing Patterns Established
+## Critical Fixes Applied
 
-1. **Unit Tests**: Mock externals, real KieServices
-2. **Integration Tests**: Testcontainers LocalStack
-3. **Controller Tests**: @WebMvcTest + TestValidationConfig
-4. **Concurrent Tests**: CountDownLatch for thread safety
+1. **Java 17 Enforcement** — Maven Enforcer Plugin, range `[17,18)`
+2. **Memory Leak Fixed** — KieContainer disposal (DroolsEngineService.java lines 164-178)
+3. **Memory Monitoring** — GET /admin/memory/info endpoint
+4. **init-localstack.sh** — Refactored from 267→126 lines, no hardcoded DRL
 
-## 🚀 Common Commands
+## Implementation Phases
+
+| Phase | Status |
+|-------|--------|
+| Phase 1: Core Infrastructure | COMPLETED |
+| Phase 2: Storage & Caching | COMPLETED |
+| Phase 3: Production Readiness | COMPLETED |
+| Phase 4: Testing & Documentation (4.3 JMeter deferred) | COMPLETED |
+| Phase 5: Deployment & Infrastructure | COMPLETED |
+| Phase 6: Critical Fixes & Hardening | COMPLETED |
+
+## Remaining / Optional
+
+- Phase 4.3: JMeter performance benchmarks (deferred)
+- Java 21 upgrade (user plans to return to this)
+- Coverage gaps: config (83.3% branch), core/engine (83.3% branch)
+- Docker race condition: app may start before LocalStack init
+
+## Common Commands
 
 ```bash
-# Setup Java 17
-source ./set-java-env.sh
-
-# Run all tests
-mvn test
-
-# Generate coverage
-mvn test jacoco:report
-open target/site/jacoco/index.html
-
-# Run specific test
-mvn test -Dtest=DroolsEngineServiceTest
+source ./set-java-env.sh        # Setup Java 17
+mvn test                        # Run all 550 tests
+mvn test jacoco:report          # Generate coverage report
+mvn spotless:apply              # Format code
+docker-compose up -d            # Start full stack
 ```
 
-## 📝 Key Learnings
+## Important Locations
 
-### Spring Boot 3.x Test Issues Fixed
-1. **ValidationConfig null**: Use AnnotationConfigApplicationContext
-2. **@MockBean import**: Use .mock.mockito (not .mock.bean)
-3. **MeterRegistry**: Use SimpleMeterRegistry (not mocks)
-4. **RateLimitingFilter**: Exclude from @WebMvcTest context
+- **Memory Leak Fix**: `src/main/java/com/company/drools/core/engine/DroolsEngineService.java:164-178`
+- **Test Config**: `src/test/java/com/company/drools/api/controller/TestValidationConfig.java`
+- **Validation Helper**: `src/test/java/com/company/drools/testutil/ValidationConfigTestHelper.java`
+- **Sample Rules**: `sample-rules/` (10 .drl files — pricing, shipping, seasonal, validation)
 
-### Test Configuration
-```java
-// AdminControllerTest - Proper validator setup
-AnnotationConfigApplicationContext appContext = new AnnotationConfigApplicationContext();
-appContext.registerBean("validationConfig", ValidationConfig.class,
-    () -> ValidationConfigTestHelper.createTestValidationConfig());
-appContext.refresh();
+## Documentation
 
-LocalValidatorFactoryBean validatorFactory = new LocalValidatorFactoryBean();
-validatorFactory.setApplicationContext(appContext);
-validatorFactory.afterPropertiesSet(); // Auto-configures SpringConstraintValidatorFactory
-```
-
-## 🎯 Next Steps (Optional)
-
-To reach 70% coverage:
-- Config class tests (+5%)
-- Exception handler tests (+5%)
-- DTO validation tests (+5%)
-
-Estimated: 15 additional tests
-
-## 📦 Sample Rules
-
-11 working .drl files in `/sample-rules/`:
-- pricing/discount/simple.drl
-- pricing/discount/vip.drl
-- pricing/shipping/domestic.drl
-- seasonal/holiday/black-friday.drl
-- validation/customer/age.drl
-- etc.
-
-All fixed with `import java.util.Map`
-
-## 📚 Documentation
-
-- `CLAUDE.md` - Development guide
-- `project.progress.md` - Phase tracking
-- `FIXES-SUMMARY.md` - Critical fixes
-- `project.documentation.md` - Comprehensive specs
-
-## 🔍 Important Locations
-
-**Memory Leak Fix**:
-`src/main/java/com/company/drools/core/engine/DroolsEngineService.java:164-178`
-
-**Test Config**:
-`src/test/java/com/company/drools/api/controller/TestValidationConfig.java`
-
-**Validation Helper**:
-`src/test/java/com/company/drools/testutil/ValidationConfigTestHelper.java`
-
----
-
-**Session 6 Complete**: Implemented comprehensive test suite with 147 passing tests achieving 55% coverage. All critical paths tested. Production-ready test infrastructure established.
+- `CLAUDE.md` — Development guide (primary reference)
+- `project-plan/project.progress.md` — Phase tracking
+- `project-plan/project.checklist.md` — Task checklist
+- `FIXES-SUMMARY.md` — Critical fixes summary
+- `docs/` — API docs, deployment guide, configuration reference, troubleshooting
