@@ -1,0 +1,70 @@
+# Test Configuration for Drools Rule Engine
+# This configuration is used when running tests with @ActiveProfiles("test")
+
+drools:
+  # Use in-memory rule source for fast unit tests
+  rule-source: memory
+
+  # Cache configuration
+  cache:
+    enabled: true
+    lru-max-size: 10  # Small cache for testing
+
+  # Validation limits (lower for faster tests)
+  validation:
+    data-max-fields: 50
+    data-max-string-length: 500
+
+  # Rate limiting (permissive for tests)
+  rate-limiting:
+    enabled: true
+    requests-per-minute: 1000
+
+  # Thread pool configuration (smaller for tests)
+  thread-pool:
+    rule-execution-max-size: 10
+    storage-max-size: 10
+
+  # Timeout configuration
+  timeout:
+    rule-execution-seconds: 5
+    storage-operation-seconds: 3
+
+# Disable Redis for unit tests (use local cache only)
+redis:
+  enabled: false
+
+# AWS S3 configuration (will use LocalStack in integration tests)
+aws:
+  s3:
+    bucket-name: test-rules
+    endpoint: http://localhost:4566
+    region: us-east-1
+
+# Logging configuration
+logging:
+  level:
+    root: INFO
+    com.company.drools: DEBUG
+    org.springframework: WARN
+    org.testcontainers: INFO
+
+# Spring configuration
+spring:
+  application:
+    name: drools-rule-engine-test
+
+  # Disable banner for cleaner test output
+  main:
+    banner-mode: off
+
+# Metrics configuration (simple for tests)
+management:
+  metrics:
+    export:
+      simple:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
