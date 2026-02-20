@@ -13,6 +13,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
 /**
@@ -20,6 +21,7 @@ import org.springframework.stereotype.Component;
  * evicts oldest entries when maximum capacity is reached.
  */
 @Component
+@Primary
 public class LocalLRUCache implements RuleCache {
 
   private static final Logger log = LoggerFactory.getLogger(LocalLRUCache.class);
