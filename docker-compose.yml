@@ -65,8 +65,10 @@ services:
       - SPRING_PROFILES_ACTIVE=docker
       
     depends_on:
-      - localstack
-      - redis
+      localstack:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - drools-network
     restart: unless-stopped
@@ -95,6 +97,12 @@ services:
     networks:
       - drools-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bash", "-c", "awslocal s3 ls s3://local-rules/ --recursive 2>/dev/null | grep -q .drl"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
