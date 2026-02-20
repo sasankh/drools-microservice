@@ -108,7 +108,7 @@ rule "Simple Discount Rule"
 when
     $data : Map(this["amount"] != null)
 then
-    Double amount = (Double) $data.get("amount");
+    double amount = ((Number) $data.get("amount")).doubleValue();
     $data.put("discount", amount * 0.10);
     $data.put("amount", amount * 0.90);
     $data.put("discountPercent", 10);
@@ -121,10 +121,11 @@ package com.company.rules.pricing.discount
 
 rule "VIP Customer Discount"
 when
-    $data : Map(this["customerType"] == "VIP", $amount : this["amount"])
+    $data : Map(this["customerType"] == "VIP", this["amount"] != null)
 then
-    $data.put("discount", ((Double)$amount) * 0.20);
-    $data.put("amount", ((Double)$amount) * 0.80);
+    double amount = ((Number) $data.get("amount")).doubleValue();
+    $data.put("discount", amount * 0.20);
+    $data.put("amount", amount * 0.80);
     $data.put("discountPercent", 20);
 end
 EOF
@@ -137,8 +138,8 @@ rule "Bulk Order Discount"
 when
     $data : Map(this["quantity"] != null, this["amount"] != null)
 then
-    Integer quantity = (Integer) $data.get("quantity");
-    Double amount = (Double) $data.get("amount");
+    int quantity = ((Number) $data.get("quantity")).intValue();
+    double amount = ((Number) $data.get("amount")).doubleValue();
     if (quantity >= 10) {
         $data.put("discount", amount * 0.15);
         $data.put("amount", amount * 0.85);
@@ -156,7 +157,7 @@ rule "Holiday Season Discount"
 when
     $data : Map(this["isHolidaySeason"] == true, this["amount"] != null)
 then
-    Double amount = (Double) $data.get("amount");
+    double amount = ((Number) $data.get("amount")).doubleValue();
     $data.put("discount", amount * 0.12);
     $data.put("amount", amount * 0.88);
     $data.put("discountPercent", 12);

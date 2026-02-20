@@ -7,7 +7,7 @@ rule "Black Friday 2024 - 25% Off"
 when
     $data : Map(this["promotionCode"] == "BLACK2024", this["amount"] != null)
 then
-    Double amount = (Double) $data.get("amount");
+    double amount = ((Number) $data.get("amount")).doubleValue();
     
     // Minimum $100 for Black Friday promotion
     if (amount >= 100.0) {

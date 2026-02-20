@@ -7,8 +7,8 @@ rule "Customer Credit Validation"
 when
     $data : Map(this["creditScore"] != null, this["requestedAmount"] != null)
 then
-    Integer creditScore = (Integer) $data.get("creditScore");
-    Double requestedAmount = (Double) $data.get("requestedAmount");
+    int creditScore = ((Number) $data.get("creditScore")).intValue();
+    double requestedAmount = ((Number) $data.get("requestedAmount")).doubleValue();
     
     if (creditScore >= 750) {
         $data.put("creditTier", "Excellent");

@@ -5,10 +5,11 @@ import java.util.Map
 // VIP customer gets 20% discount on any purchase
 rule "VIP Customer Discount - 20% Off"
 when
-    $data : Map(this["customerType"] == "VIP", $amount : this["amount"])
+    $data : Map(this["customerType"] == "VIP", this["amount"] != null)
 then
-    $data.put("discount", ((Double)$amount) * 0.20);
-    $data.put("amount", ((Double)$amount) * 0.80);
+    double amount = ((Number) $data.get("amount")).doubleValue();
+    $data.put("discount", amount * 0.20);
+    $data.put("amount", amount * 0.80);
     $data.put("discountPercent", 20);
     $data.put("discountReason", "VIP customer exclusive discount");
     $data.put("customerTier", "VIP");

@@ -8,26 +8,20 @@ A high-performance Drools Rule Engine Microservice designed for 100-1000 RPS bus
 
 **Key Endpoints**:
 - Main API (port 8080): `POST /execute-rule` - Execute business rules
-- Admin API (port 8080 in Docker, port 8081 locally): `/admin/health`, `/admin/rules`, `/admin/refresh-rules`, `/admin/thread-pools`, `/admin/memory/info`
-
-**API Field Names**: JSON uses `rule_id` (snake_case), not `ruleId` (camelCase). Example:
-```json
-{"rule_id": "pricing.discount.simple", "data": {"amount": 100}}
-```
+- Admin API (port 8081): `/admin/health`, `/admin/rules`, `/admin/refresh-rules`, `/admin/thread-pools`, `/admin/memory/info`
 
 ## PROJECT STATUS
 
-**Health Score**: 9.5/10
-**Test Coverage**: 93% instruction, 84% branch (478 tests, 100% pass rate)
+**Health Score**: 9.0/10
+**Test Coverage**: 92% instruction, 80% branch (418 tests, 100% pass rate)
 **All Phases Complete**: Phases 1-5 done. Phase 4.3 (JMeter performance tests) deferred.
-**Docker Validated**: All 10 rules execute successfully, all admin endpoints working.
 
 | Phase | Status | Details |
 |-------|--------|---------|
 | Phase 1: Core Infrastructure | COMPLETED | Spring Boot + Drools setup |
 | Phase 2: Storage & Caching | COMPLETED | S3 + Redis + LRU cache |
 | Phase 3: Production Readiness | COMPLETED | Security, performance, monitoring |
-| Phase 4.1: Unit Tests | COMPLETED | 464 unit tests |
+| Phase 4.1: Unit Tests | COMPLETED | 404 unit tests |
 | Phase 4.2: Integration Tests | COMPLETED | 14 integration tests |
 | Phase 4.3: Performance Tests | DEFERRED | JMeter benchmarks |
 | Phase 4.4: Documentation | COMPLETED | API docs, guides, troubleshooting |
@@ -84,7 +78,7 @@ drools-microservice/
 │   │   │   └── RuleCompiler.java             # DRL compilation to KieBase
 │   │   └── model/
 │   │       ├── Rule.java                     # Rule entity
-│   │       └── RuleMetadata.java             # Rule metadata (timestamps, status, execution stats)
+│   │       └── RuleMetadata.java             # Rule metadata (timestamps, status)
 │   ├── storage/
 │   │   ├── RuleStorage.java                  # Storage interface
 │   │   ├── S3RuleStorage.java                # AWS S3 implementation
@@ -130,9 +124,7 @@ drools-microservice/
 │   ├── api/exception/
 │   │   ├── GlobalExceptionHandlerTest.java   # 10 tests
 │   │   └── ExceptionTest.java               # 9 tests
-│   ├── api/filter/
-│   │   ├── RateLimitingFilterTest.java       # 17 tests (expanded from 7)
-│   │   └── RequestSizeValidationFilterTest.java  # 13 tests (NEW)
+│   ├── api/filter/RateLimitingFilterTest.java  # 7 tests
 │   ├── api/validation/RuleDataValidatorTest.java  # 10 tests
 │   ├── cache/
 │   │   ├── LocalLRUCacheTest.java            # 40 tests
@@ -155,9 +147,6 @@ drools-microservice/
 │   │   ├── DroolsEngineServiceTest.java      # 18 tests
 │   │   ├── RuleExecutorTest.java             # 10 tests
 │   │   └── RuleCompilerTest.java             # 8 tests
-│   ├── core/model/
-│   │   ├── RuleTest.java                     # 12 tests (NEW)
-│   │   └── RuleMetadataTest.java             # 25 tests (NEW)
 │   ├── integration/
 │   │   ├── RuleExecutionIntegrationTest.java # 8 tests
 │   │   └── S3StorageIntegrationTest.java     # 6 tests
@@ -221,7 +210,7 @@ drools-microservice/
 ### Security (Phase 3.4)
 - Custom validation annotations (@ValidRuleId, @ValidRuleData) with configurable limits
 - Rate limiting: In-memory per-client tracking with per-minute/per-hour limits
-- Request size protection: Spring Boot limits + custom RequestSizeValidationFilter
+- Request size protection: Spring Boot limits + custom filter
 - CORS: Configurable (allow-all default, restrictable via env vars)
 - Log sanitization: Credit card, SSN, email, token, password detection and masking
 
@@ -241,8 +230,8 @@ drools-microservice/
 
 ## PHASE 4: TESTING & DOCUMENTATION
 
-### 4.1 Unit Tests (COMPLETED) - 464 unit tests
-- 37 test files across all packages (34 original + 3 new in Session 10)
+### 4.1 Unit Tests (COMPLETED) - 404 unit tests
+- 34 test files across all packages
 - Key testing patterns:
   - SimpleMeterRegistry (not mocked) for metrics config tests
   - Reflection `setField()` for @Value injection without Spring context
@@ -267,20 +256,21 @@ drools-microservice/
 - Rule development guide (docs/rule-development.md)
 - Troubleshooting guide (docs/troubleshooting.md)
 
-### Coverage by Package (JaCoCo - Session 10)
+### Coverage by Package (JaCoCo)
 | Package | Instruction | Branch |
 |---------|-------------|--------|
-| core.model | 100% | 100% |
-| api.filter | 98% | 94% |
+| api.exception | 100% | n/a |
 | cache | 98% | 90% |
 | api.controller | 97% | 91% |
 | api.dto | 95% | 86% |
 | core.engine | 94% | 80% |
 | config | 93% | 81% |
 | common | 93% | 78% |
+| core.model | 87% | 50% |
 | storage | 85% | 78% |
 | api.validation | 79% | 69% |
-| **Overall** | **93%** | **84%** |
+| api.filter | 71% | 61% |
+| **Overall** | **92%** | **80%** |
 
 ### Known Test Issues (Fixed)
 1. **LocalLRUCacheTest flaky concurrent tests**: Access-ordered LinkedHashMap `get()` is a structural modification under read lock. Fixed by relaxing size assertions in concurrent tests - primary goal is thread safety (no exceptions), not strict eviction count.
@@ -303,7 +293,7 @@ drools-microservice/
 2. **Caching**: S3 -> Redis (optional) -> Local LRU -> Compiled KieBase
 3. **Thread Safety**: Each rule execution uses a new KieSession (stateless); ReadWriteLock for rule loading
 4. **Memory Leak Prevention**: KieContainer disposal on rule refresh (DroolsEngineService lines 164-178)
-5. **API Ports**: Main 8080, Admin 8081 (locally); both on 8080 in Docker
+5. **API Ports**: Main 8080, Admin 8081
 6. **Rule ID Transformation**: Dots to slashes, append .drl
 7. **Security**: Multi-layer validation, rate limiting, log sanitization
 8. **Resilience**: Circuit breakers for S3/Redis, request timeouts, thread pools
@@ -313,32 +303,25 @@ drools-microservice/
 - **Rule Execution Flow**: Request -> Validate -> Load from cache/storage -> Compile to KieBase -> Create KieSession -> Fire rules -> Return modified data
 - **Rule Refresh**: POST /admin/refresh-rules -> Reload from S3 -> Recompile -> Dispose old KieContainer -> Update cache
 - **Cache Statistics**: Hit rate, miss rate, eviction count, size, utilization tracked per cache layer
-- **DRL Type Safety**: JSON integers deserialize as `Integer`, not `Double`. DRL rules must use `((Number) $data.get("field")).doubleValue()` instead of `(Double)` casts. Fixed in all 10 sample rules.
 
 ## PERFORMANCE METRICS
 
-- Startup time: ~3s (target: <60s)
-- Rule execution: 1-12ms (target: <100ms)
-- API response: <15ms (target: <500ms)
+- Startup time: 1.3s (target: <60s)
+- Rule execution: 1ms (target: <100ms)
+- API response: <10ms (target: <500ms)
 - Docker image: 347MB (target: <500MB)
 - Container startup: <3s
-- Memory: 175MB / 2048MB (8.5%) after 10 rule executions
 
 ## SAMPLE RULES & TESTING
 
-10 sample rules in `sample-rules/` (all tested and verified in Docker):
+10 sample rules in `sample-rules/`:
 - `pricing/discount/simple.drl` - 10% discount on amount > $50
-- `pricing/discount/vip.drl` - 20% VIP customer discount
-- `pricing/discount/bulk.drl` - 15% bulk order discount (10+ items)
-- `pricing/discount/first-time.drl` - 5% first-time customer discount
-- `pricing/shipping/standard.drl` - Standard shipping cost by weight
-- `pricing/shipping/express.drl` - Express shipping with free over $100
-- `validation/customer/age.drl` - Customer age validation (18+)
-- `validation/customer/credit.drl` - Credit score validation with tiers
-- `seasonal/holiday/discount.drl` - 12% holiday season discount
-- `seasonal/holiday/blackfriday.drl` - 25% Black Friday promotion
-
-**Important DRL Pattern**: All rules use `((Number) ...).doubleValue()` for numeric map values to handle JSON Integer/Double ambiguity.
+- `pricing/discount/vip.drl` - 20% VIP discount
+- `pricing/discount/bulk.drl` - Tiered bulk discounts
+- `pricing/discount/seasonal.drl` - Holiday discounts
+- `pricing/shipping/calculator.drl` - Shipping cost calculation
+- `validation/order/basic.drl` - Order validation
+- And 4 more covering various business scenarios
 
 ## DOCKER & DEPLOYMENT
 
@@ -348,24 +331,18 @@ drools-microservice/
 
 # Manual setup
 docker-compose up -d
-bash init-localstack.sh
+./init-localstack.sh
 
-# Test rule execution (note: use rule_id not ruleId)
+# Test
 curl -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
-  -d '{"rule_id": "pricing.discount.simple", "data": {"amount": 100}}'
+  -d '{"ruleId": "pricing.discount.simple", "data": {"amount": 100}}'
 
-# Health check (port 8080 in Docker)
-curl http://localhost:8080/admin/health
+# Health check
+curl http://localhost:8081/admin/health
 
 # Memory monitoring
-curl http://localhost:8080/admin/memory/info
-
-# Rule listing
-curl http://localhost:8080/admin/rules
-
-# Refresh rules from S3
-curl -X POST http://localhost:8080/admin/refresh-rules
+curl http://localhost:8081/admin/memory/info
 ```
 
 ## DEFERRED FEATURES
@@ -381,14 +358,15 @@ curl -X POST http://localhost:8080/admin/refresh-rules
 
 **Recent Commits**:
 ```
-c1a0bab new tests
-9fcb79a added snap
 77893d3 Test suite: 418 tests, 92% instruction coverage, 80% branch coverage
 7cf5fc2 added md
 114055d compact
+3253656 new context
+6edae5a compact
+d1d3684 added test
 ```
 
-**Uncommitted Changes**: 10 modified files (DRL rules + init-localstack.sh - Integer/Double cast fix)
+**Working tree**: Clean (no uncommitted changes)
 
 ## DEVELOPMENT WORKFLOW COMMANDS
 
@@ -443,24 +421,10 @@ docker-compose down
 - Fixed flaky concurrent eviction test
 - Committed as 77893d3
 
-### Session 9 (Feb 2026)
-- Verified test completeness after interrupted Session 8
-- Fixed flaky concurrent test, generated JaCoCo report
-- Committed all work, updated documentation
-
-### Session 10 (Feb 2026)
-- Coverage gap fix: api.filter (71% -> 98%), core.model (87%/50% -> 100%/100%)
-- Created 3 new test files: RequestSizeValidationFilterTest (13), RuleTest (12), RuleMetadataTest (25)
-- Expanded RateLimitingFilterTest (7 -> 17)
-- Total: 478 tests, 93% instruction / 84% branch coverage
-- Fixed DRL Integer/Double casting bug in all 10 sample rules + init-localstack.sh
-- Docker validation: all 10 rules execute, all admin endpoints work, error handling verified
-
 ## NEXT STEPS
 
 Potential work (no explicit request pending):
 1. **Phase 4.3**: JMeter performance benchmarks (validate 100-1000 RPS claims)
-2. **Remaining coverage gaps**: api.validation (79%/69%), storage (85%/78%), common (93%/78%)
+2. **Remaining coverage gaps**: api.filter (71%), api.validation (79%), core.model (87%/50% branch)
 3. **Terraform/IaC**: AWS ECS deployment (separate project)
-4. **Commit current work**: 10 DRL fixes + init-localstack.sh + new test files uncommitted
-5. **Project considered feature-complete** at current state
+4. **Project considered feature-complete** at current state

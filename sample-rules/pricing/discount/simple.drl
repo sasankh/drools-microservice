@@ -7,7 +7,7 @@ rule "Simple Discount Rule - 10% Off"
 when
     $data : Map(this["amount"] != null)
 then
-    Double amount = (Double) $data.get("amount");
+    double amount = ((Number) $data.get("amount")).doubleValue();
     if (amount >= 50.0) {
         $data.put("discount", amount * 0.10);
         $data.put("amount", amount * 0.90);

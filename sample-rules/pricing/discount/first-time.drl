@@ -7,7 +7,7 @@ rule "First Time Customer Discount - 5% Off"
 when
     $data : Map(this["isFirstTimeCustomer"] == true, this["amount"] != null)
 then
-    Double amount = (Double) $data.get("amount");
+    double amount = ((Number) $data.get("amount")).doubleValue();
     $data.put("discount", amount * 0.05);
     $data.put("amount", amount * 0.95);
     $data.put("discountPercent", 5);

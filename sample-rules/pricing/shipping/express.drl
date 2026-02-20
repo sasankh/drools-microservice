@@ -7,9 +7,9 @@ rule "Express Shipping Cost"
 when
     $data : Map(this["shippingType"] == "express", this["weight"] != null, this["amount"] != null)
 then
-    Double weight = (Double) $data.get("weight");
-    Double amount = (Double) $data.get("amount");
-    Double shippingCost;
+    double weight = ((Number) $data.get("weight")).doubleValue();
+    double amount = ((Number) $data.get("amount")).doubleValue();
+    double shippingCost;
     
     // Free express shipping over $100
     if (amount >= 100.0) {

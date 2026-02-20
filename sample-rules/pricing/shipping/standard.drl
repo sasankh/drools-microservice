@@ -7,8 +7,8 @@ rule "Standard Shipping Cost"
 when
     $data : Map(this["shippingType"] == "standard", this["weight"] != null)
 then
-    Double weight = (Double) $data.get("weight");
-    Double shippingCost;
+    double weight = ((Number) $data.get("weight")).doubleValue();
+    double shippingCost;
     
     if (weight <= 1.0) {
         shippingCost = 5.99;

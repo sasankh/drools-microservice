@@ -7,8 +7,8 @@ rule "Bulk Order Discount - 15% Off"
 when
     $data : Map(this["quantity"] != null, this["amount"] != null)
 then
-    Integer quantity = (Integer) $data.get("quantity");
-    Double amount = (Double) $data.get("amount");
+    int quantity = ((Number) $data.get("quantity")).intValue();
+    double amount = ((Number) $data.get("amount")).doubleValue();
     if (quantity >= 10) {
         $data.put("discount", amount * 0.15);
         $data.put("amount", amount * 0.85);

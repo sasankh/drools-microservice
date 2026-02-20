@@ -7,7 +7,7 @@ rule "Holiday Season Discount - 12% Off"
 when
     $data : Map(this["isHolidaySeason"] == true, this["amount"] != null)
 then
-    Double amount = (Double) $data.get("amount");
+    double amount = ((Number) $data.get("amount")).doubleValue();
     $data.put("discount", amount * 0.12);
     $data.put("amount", amount * 0.88);
     $data.put("discountPercent", 12);
