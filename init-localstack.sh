@@ -64,145 +64,25 @@ else
     exit 1
 fi
 
-# Create directory structure for rules
-echo -e "${YELLOW}📁 Creating rule directory structure...${NC}"
-
-# Create sample directories in S3
-$AWS_CMD s3api put-object \
-    --bucket ${BUCKET_NAME} \
-    --key pricing/discount/ \
-    --content-length 0 > /dev/null 2>&1 || true
-
-$AWS_CMD s3api put-object \
-    --bucket ${BUCKET_NAME} \
-    --key pricing/shipping/ \
-    --content-length 0 > /dev/null 2>&1 || true
-
-$AWS_CMD s3api put-object \
-    --bucket ${BUCKET_NAME} \
-    --key validation/customer/ \
-    --content-length 0 > /dev/null 2>&1 || true
-
-$AWS_CMD s3api put-object \
-    --bucket ${BUCKET_NAME} \
-    --key seasonal/holiday/ \
-    --content-length 0 > /dev/null 2>&1 || true
-
-echo -e "${GREEN}✅ Rule directory structure created${NC}"
-
-# Check for mounted sample rules directory
-RULES_DIR="/tmp/sample-rules"
-if [ -d "$RULES_DIR" ]; then
-    echo -e "${YELLOW}📤 Found mounted sample rules directory, uploading files...${NC}"
-    $AWS_CMD s3 sync ${RULES_DIR}/ s3://${BUCKET_NAME}/ --exclude "README.md"
-    RULE_COUNT=$($AWS_CMD s3 ls s3://${BUCKET_NAME}/ --recursive | grep '\.drl$' | wc -l)
-    echo -e "${GREEN}✅ Uploaded ${RULE_COUNT} sample rule files from mounted directory${NC}"
+# Resolve sample-rules directory
+# In Docker (docker-compose mount): /tmp/sample-rules
+# Standalone (run from repo root): ./sample-rules relative to script location
+if [ -d "/tmp/sample-rules" ]; then
+    RULES_DIR="/tmp/sample-rules"
 else
-    echo -e "${YELLOW}📝 No mounted sample rules found, creating basic sample rules...${NC}"
-
-# Simple discount rule (compatible with existing DroolsEngineService)
-cat > /tmp/simple-discount.drl << 'EOF'
-package com.company.rules.pricing.discount
-
-rule "Simple Discount Rule"
-when
-    $data : Map(this["amount"] != null)
-then
-    double amount = ((Number) $data.get("amount")).doubleValue();
-    $data.put("discount", amount * 0.10);
-    $data.put("amount", amount * 0.90);
-    $data.put("discountPercent", 10);
-end
-EOF
-
-# VIP customer rule (compatible with existing DroolsEngineService)
-cat > /tmp/vip-discount.drl << 'EOF'
-package com.company.rules.pricing.discount
-
-rule "VIP Customer Discount"
-when
-    $data : Map(this["customerType"] == "VIP", this["amount"] != null)
-then
-    double amount = ((Number) $data.get("amount")).doubleValue();
-    $data.put("discount", amount * 0.20);
-    $data.put("amount", amount * 0.80);
-    $data.put("discountPercent", 20);
-end
-EOF
-
-# Bulk order rule 
-cat > /tmp/bulk-order.drl << 'EOF'
-package com.company.rules.pricing.discount
-
-rule "Bulk Order Discount"
-when
-    $data : Map(this["quantity"] != null, this["amount"] != null)
-then
-    int quantity = ((Number) $data.get("quantity")).intValue();
-    double amount = ((Number) $data.get("amount")).doubleValue();
-    if (quantity >= 10) {
-        $data.put("discount", amount * 0.15);
-        $data.put("amount", amount * 0.85);
-        $data.put("discountPercent", 15);
-        $data.put("discountReason", "Bulk order discount");
-    }
-end
-EOF
-
-# Seasonal holiday rule
-cat > /tmp/holiday-discount.drl << 'EOF'
-package com.company.rules.seasonal.holiday
-
-rule "Holiday Season Discount"
-when
-    $data : Map(this["isHolidaySeason"] == true, this["amount"] != null)
-then
-    double amount = ((Number) $data.get("amount")).doubleValue();
-    $data.put("discount", amount * 0.12);
-    $data.put("amount", amount * 0.88);
-    $data.put("discountPercent", 12);
-    $data.put("discountReason", "Holiday season special");
-end
-EOF
-
-# Customer validation rule
-cat > /tmp/customer-validation.drl << 'EOF'
-package com.company.rules.validation.customer
-
-rule "Customer Age Validation"
-when
-    $data : Map(this["customerAge"] != null)
-then
-    Integer age = (Integer) $data.get("customerAge");
-    if (age < 18) {
-        $data.put("validationResult", "REJECTED");
-        $data.put("validationReason", "Customer must be 18 or older");
-    } else {
-        $data.put("validationResult", "APPROVED");
-        $data.put("ageGroup", age >= 65 ? "Senior" : age >= 25 ? "Adult" : "Young Adult");
-    }
-end
-EOF
-
-    # Upload basic sample rules to S3
-    echo -e "${YELLOW}📤 Uploading basic sample rules to S3...${NC}"
-
-    # Upload discount rules
-    $AWS_CMD s3 cp /tmp/simple-discount.drl s3://${BUCKET_NAME}/pricing/discount/simple.drl
-    $AWS_CMD s3 cp /tmp/vip-discount.drl s3://${BUCKET_NAME}/pricing/discount/vip.drl
-    $AWS_CMD s3 cp /tmp/bulk-order.drl s3://${BUCKET_NAME}/pricing/discount/bulk.drl
-
-    # Upload seasonal rules
-    $AWS_CMD s3 cp /tmp/holiday-discount.drl s3://${BUCKET_NAME}/seasonal/holiday/discount.drl
-
-    # Upload validation rules
-    $AWS_CMD s3 cp /tmp/customer-validation.drl s3://${BUCKET_NAME}/validation/customer/age.drl
-
-    # Cleanup temp files
-    rm -f /tmp/simple-discount.drl /tmp/vip-discount.drl /tmp/bulk-order.drl /tmp/holiday-discount.drl /tmp/customer-validation.drl
-    
-    echo -e "${GREEN}✅ Created and uploaded 5 basic sample rules${NC}"
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    RULES_DIR="${SCRIPT_DIR}/sample-rules"
 fi
+
+if [ ! -d "$RULES_DIR" ]; then
+    echo -e "${RED}❌ Sample rules directory not found at ${RULES_DIR}${NC}"
+    echo -e "${RED}   Make sure sample-rules/ exists in the project root${NC}"
+    exit 1
+fi
+
+# Upload all .drl files from sample-rules directory
+echo -e "${YELLOW}📤 Uploading sample rules from ${RULES_DIR}...${NC}"
+$AWS_CMD s3 sync "${RULES_DIR}/" s3://${BUCKET_NAME}/ --exclude "README.md"
 
 # List all uploaded rules
 echo -e "${YELLOW}📋 Listing all rules in S3...${NC}"
@@ -260,8 +140,5 @@ else
     echo -e "${RED}❌ LocalStack S3 initialization failed${NC}"
     exit 1
 fi
-
-# Clean up temporary files
-rm -f /tmp/simple-discount.drl /tmp/vip-discount.drl /tmp/bulk-order.drl /tmp/holiday-discount.drl /tmp/customer-validation.drl
 
 echo -e "${GREEN}🎉 LocalStack S3 initialization complete!${NC}"
