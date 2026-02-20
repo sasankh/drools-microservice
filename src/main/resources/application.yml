@@ -31,7 +31,14 @@ spring:
     multipart:
       max-file-size: ${MAX_FILE_SIZE:5MB}
       max-request-size: ${MAX_REQUEST_SIZE:10MB}
-  
+
+  # Spring MVC Configuration
+  mvc:
+    # Disable NoResourceFoundException for unmapped paths (Spring Boot 3.2+)
+    # This prevents log errors when ResourceHttpRequestHandler can't find static resources
+    throw-exception-if-no-handler-found: false
+    log-resolved-exception: false
+
   # Redis Configuration (Optional)
   data:
     redis:

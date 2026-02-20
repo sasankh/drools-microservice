@@ -12,6 +12,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -119,6 +120,24 @@ public class GlobalExceptionHandler {
             "Please reduce the size of your request payload");
 
     return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(response);
+  }
+
+  /**
+   * Handle NoResourceFoundException - Spring Boot 3.x throws this when a path doesn't match any
+   * handler. This is normal behavior when Spring Boot tries multiple handlers (e.g., actuator's
+   * CompositeHandlerAdapter), so we suppress the error logging to avoid log noise.
+   */
+  @ExceptionHandler(NoResourceFoundException.class)
+  public ResponseEntity<RuleExecutionResponse> handleNoResourceFoundException(
+      NoResourceFoundException ex) {
+    // Log at debug level only - this is normal Spring Boot routing behavior
+    log.debug("No handler found for path: {}", ex.getResourcePath());
+
+    RuleExecutionResponse response =
+        RuleExecutionResponse.failure(
+            null, "NOT_FOUND", "The requested resource was not found");
+
+    return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
   }
 
   @ExceptionHandler(Exception.class)
