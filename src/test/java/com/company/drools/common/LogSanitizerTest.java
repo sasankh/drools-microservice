@@ -121,4 +121,100 @@ class LogSanitizerTest extends BaseUnitTest {
       assertThat(LogSanitizer.sanitizeValue("key", null)).isNull();
     }
   }
+
+  @Nested
+  @DisplayName("Edge Case Branch Coverage")
+  class EdgeCases {
+
+    @Test
+    @DisplayName("masks credit card without separators")
+    void testCreditCardNoSeparators() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("payment", "4111111111111111");
+
+      Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
+
+      assertThat(result.get("payment")).isEqualTo("****-****-****-1111");
+    }
+
+    @Test
+    @DisplayName("masks SSN without separators")
+    void testSsnNoSeparators() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("identifier", "123456789");
+
+      Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
+
+      assertThat(result.get("identifier")).isEqualTo("***-**-6789");
+    }
+
+    @Test
+    @DisplayName("email key with non-email value passes through")
+    void testEmailKeyNonEmailValue() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("email", "not-an-email");
+
+      Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
+
+      assertThat(result.get("email")).isEqualTo("not-an-email");
+    }
+
+    @Test
+    @DisplayName("email with @ at position 0 or 1 is redacted")
+    void testEmailAtSymbolAtStart() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("email", "@example.com");
+
+      Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
+
+      assertThat(result.get("email")).isEqualTo("[REDACTED]");
+    }
+
+    @Test
+    @DisplayName("non-sensitive key returns value unchanged")
+    void testNonSensitiveKey() {
+      Object result = LogSanitizer.sanitizeValue("customfield", "safe value");
+
+      assertThat(result).isEqualTo("safe value");
+    }
+
+    @Test
+    @DisplayName("safeDataRepresentation with large map truncates")
+    void testSafeDataRepresentationLargeMap() {
+      Map<String, Object> data = new HashMap<>();
+      for (int i = 0; i < 15; i++) {
+        data.put("field" + i, "value" + i);
+      }
+
+      String result = LogSanitizer.safeDataRepresentation(data);
+
+      assertThat(result).contains("more fields)");
+    }
+
+    @Test
+    @DisplayName("safeDataRepresentation with null returns null string")
+    void testSafeDataRepresentationNull() {
+      assertThat(LogSanitizer.safeDataRepresentation(null)).isEqualTo("null");
+    }
+
+    @Test
+    @DisplayName("safeDataRepresentation with empty map returns {}")
+    void testSafeDataRepresentationEmpty() {
+      assertThat(LogSanitizer.safeDataRepresentation(new HashMap<>())).isEqualTo("{}");
+    }
+
+    @Test
+    @DisplayName("safeDataRepresentation with small map shows all keys")
+    void testSafeDataRepresentationSmallMap() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("amount", 100);
+      data.put("currency", "USD");
+
+      String result = LogSanitizer.safeDataRepresentation(data);
+
+      assertThat(result).contains("amount");
+      assertThat(result).contains("currency");
+      assertThat(result).doesNotContain("more fields");
+    }
+  }
 }

@@ -653,4 +653,89 @@ class DroolsEngineServiceTest {
           .isEqualTo(1.0);
     }
   }
+
+  // =========================================================================
+  // Additional Branch Coverage Tests
+  // =========================================================================
+
+  @Nested
+  @DisplayName("Additional Coverage")
+  class AdditionalCoverage {
+
+    @Test
+    @DisplayName("getAllRuleMetadata returns immutable copy of all metadata")
+    void testGetAllRuleMetadata() {
+      Rule rule1 = RuleTestUtils.createSimpleRule("meta.rule.one");
+      Rule rule2 = RuleTestUtils.createSimpleRule("meta.rule.two");
+      loadRulesSuccessfully(List.of(rule1, rule2));
+
+      Map<String, RuleMetadata> allMetadata = service.getAllRuleMetadata();
+
+      assertThat(allMetadata).hasSize(2);
+      assertThat(allMetadata).containsKey("meta.rule.one");
+      assertThat(allMetadata).containsKey("meta.rule.two");
+      assertThat(allMetadata.get("meta.rule.one").getStatus())
+          .isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
+    }
+
+    @Test
+    @DisplayName("getActiveRulesCount returns 0 when all rules are in error state")
+    void testGetActiveRulesCount_AllError() {
+      Rule rule = RuleTestUtils.createSimpleRule("error.rule");
+      RuleCompiler.CompilationResult failResult =
+          RuleCompiler.CompilationResult.failure("Syntax error");
+      when(ruleCompiler.compileRules(List.of(rule))).thenReturn(failResult);
+
+      service.loadRules(List.of(rule));
+
+      assertThat(service.getActiveRulesCount()).isEqualTo(0);
+      assertThat(service.getLoadedRulesCount()).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("dispose error during loadRules is handled gracefully")
+    void testLoadRules_DisposeError_HandledGracefully() {
+      // Initial container throws on dispose
+      doThrow(new RuntimeException("dispose error")).when(initialKieContainer).dispose();
+
+      Rule rule = RuleTestUtils.createSimpleRule("dispose.test.rule");
+      KieContainer newContainer = mock(KieContainer.class);
+      RuleCompiler.CompilationResult result = RuleCompiler.CompilationResult.success(newContainer);
+      when(ruleCompiler.compileRules(List.of(rule))).thenReturn(result);
+
+      // Should not throw - error is caught and logged
+      boolean loaded = service.loadRules(List.of(rule));
+
+      assertThat(loaded).isTrue();
+      assertThat(service.hasRule("dispose.test.rule")).isTrue();
+    }
+
+    @Test
+    @DisplayName("executeRule with execution failure records error metrics and timer")
+    void testExecuteRule_ExecutionFailure_RecordsMetricsAndTimer() {
+      Rule rule = RuleTestUtils.createSimpleRule("fail.exec.rule");
+      loadRuleSuccessfully(rule);
+
+      Map<String, Object> inputData = RuleTestUtils.createTestData("amount", 100.0);
+      RuleExecutor.ExecutionResult failResult =
+          RuleExecutor.ExecutionResult.failure("Rule threw exception");
+      when(ruleExecutor.executeRule(
+              any(KieContainer.class), eq("fail.exec.rule"), eq(inputData), eq(30L)))
+          .thenReturn(failResult);
+
+      RuleExecutor.ExecutionResult result = service.executeRule("fail.exec.rule", inputData);
+
+      assertThat(result.isSuccess()).isFalse();
+      assertThat(result.getErrorMessage()).contains("Rule threw exception");
+
+      // Verify error timer was recorded
+      assertThat(
+              meterRegistry
+                  .find("drools.rule.execution.time")
+                  .tag("rule_id", "fail.exec.rule")
+                  .tag("status", "error")
+                  .timer())
+          .isNotNull();
+    }
+  }
 }

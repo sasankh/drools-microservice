@@ -107,6 +107,30 @@ class S3ConfigTest {
       assertThat(client).isNotNull();
       client.close();
     }
+
+    @Test
+    @DisplayName("s3Client with key but no secret uses default credentials")
+    void testS3ClientKeyButNoSecret() throws Exception {
+      setField(s3Config, "endpoint", "http://localhost:4566");
+      setField(s3Config, "accessKeyId", "test-key");
+      setField(s3Config, "secretAccessKey", "");
+
+      var client = s3Config.s3Client();
+      assertThat(client).isNotNull();
+      client.close();
+    }
+
+    @Test
+    @DisplayName("s3Client with secret but no key uses default credentials")
+    void testS3ClientSecretButNoKey() throws Exception {
+      setField(s3Config, "endpoint", "http://localhost:4566");
+      setField(s3Config, "accessKeyId", "");
+      setField(s3Config, "secretAccessKey", "test-secret");
+
+      var client = s3Config.s3Client();
+      assertThat(client).isNotNull();
+      client.close();
+    }
   }
 
   private void setField(Object target, String fieldName, Object value) throws Exception {
