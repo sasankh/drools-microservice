@@ -464,4 +464,292 @@ class S3RuleStorageTest {
       assertThat(meterRegistry.find("drools.storage.operation.time").timer().count()).isEqualTo(1);
     }
   }
+
+  // ========================================================================
+  // getTotalRuleCount Tests
+  // ========================================================================
+
+  @Nested
+  @DisplayName("getTotalRuleCount")
+  class GetTotalRuleCount {
+
+    @Test
+    @DisplayName("counts only .drl files")
+    void testCountsOnlyDrlFiles() {
+      List<S3Object> objects =
+          List.of(
+              createS3Object("pricing/discount/simple.drl"),
+              createS3Object("README.md"),
+              createS3Object("pricing/discount/vip.drl"));
+
+      ListObjectsV2Response response =
+          ListObjectsV2Response.builder().contents(objects).isTruncated(false).build();
+
+      when(s3Client.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(response);
+
+      assertThat(s3RuleStorage.getTotalRuleCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("handles pagination")
+    void testHandlesPagination() {
+      List<S3Object> page1 = List.of(createS3Object("rules/rule1.drl"));
+      ListObjectsV2Response response1 =
+          ListObjectsV2Response.builder()
+              .contents(page1)
+              .isTruncated(true)
+              .nextContinuationToken("token")
+              .build();
+
+      List<S3Object> page2 =
+          List.of(createS3Object("rules/rule2.drl"), createS3Object("rules/rule3.drl"));
+      ListObjectsV2Response response2 =
+          ListObjectsV2Response.builder().contents(page2).isTruncated(false).build();
+
+      when(s3Client.listObjectsV2(any(ListObjectsV2Request.class)))
+          .thenReturn(response1)
+          .thenReturn(response2);
+
+      assertThat(s3RuleStorage.getTotalRuleCount()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("returns 0 on S3 error")
+    void testReturnsZeroOnError() {
+      when(s3Client.listObjectsV2(any(ListObjectsV2Request.class)))
+          .thenThrow(SdkException.builder().message("Access denied").build());
+
+      assertThat(s3RuleStorage.getTotalRuleCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("returns 0 for empty bucket")
+    void testEmptyBucket() {
+      ListObjectsV2Response response =
+          ListObjectsV2Response.builder().contents(new ArrayList<>()).isTruncated(false).build();
+
+      when(s3Client.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(response);
+
+      assertThat(s3RuleStorage.getTotalRuleCount()).isZero();
+    }
+  }
+
+  // ========================================================================
+  // getRuleIds Tests
+  // ========================================================================
+
+  @Nested
+  @DisplayName("getRuleIds")
+  class GetRuleIds {
+
+    @Test
+    @DisplayName("returns rule IDs transformed from S3 keys")
+    void testReturnsTransformedRuleIds() {
+      List<S3Object> objects =
+          List.of(
+              createS3Object("pricing/discount/simple.drl"),
+              createS3Object("validation/customer/credit.drl"),
+              createS3Object("README.md"));
+
+      ListObjectsV2Response response =
+          ListObjectsV2Response.builder().contents(objects).isTruncated(false).build();
+
+      when(s3Client.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(response);
+
+      List<String> ruleIds = s3RuleStorage.getRuleIds();
+
+      assertThat(ruleIds)
+          .containsExactlyInAnyOrder("pricing.discount.simple", "validation.customer.credit");
+    }
+
+    @Test
+    @DisplayName("handles pagination")
+    void testHandlesPagination() {
+      List<S3Object> page1 = List.of(createS3Object("rules/rule1.drl"));
+      ListObjectsV2Response response1 =
+          ListObjectsV2Response.builder()
+              .contents(page1)
+              .isTruncated(true)
+              .nextContinuationToken("token")
+              .build();
+
+      List<S3Object> page2 = List.of(createS3Object("rules/rule2.drl"));
+      ListObjectsV2Response response2 =
+          ListObjectsV2Response.builder().contents(page2).isTruncated(false).build();
+
+      when(s3Client.listObjectsV2(any(ListObjectsV2Request.class)))
+          .thenReturn(response1)
+          .thenReturn(response2);
+
+      assertThat(s3RuleStorage.getRuleIds()).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("returns empty list on S3 error")
+    void testReturnsEmptyOnError() {
+      when(s3Client.listObjectsV2(any(ListObjectsV2Request.class)))
+          .thenThrow(SdkException.builder().message("Access denied").build());
+
+      assertThat(s3RuleStorage.getRuleIds()).isEmpty();
+    }
+  }
+
+  // ========================================================================
+  // saveRule Error Handling Tests
+  // ========================================================================
+
+  @Nested
+  @DisplayName("saveRule Error Handling")
+  class SaveRuleErrorHandling {
+
+    @Test
+    @DisplayName("throws RuntimeException on S3 error")
+    void testSaveRuleS3Error() {
+      Rule rule = new Rule("test.rule", SAMPLE_DRL, RuleMetadata.createNew());
+
+      when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+          .thenThrow(SdkException.builder().message("Permission denied").build());
+
+      assertThatThrownBy(() -> s3RuleStorage.saveRule(rule))
+          .isInstanceOf(RuntimeException.class)
+          .hasMessageContaining("Failed to save rule to S3");
+    }
+  }
+
+  // ========================================================================
+  // ruleExists Edge Cases
+  // ========================================================================
+
+  @Nested
+  @DisplayName("ruleExists")
+  class RuleExists {
+
+    @Test
+    @DisplayName("returns true when rule exists")
+    void testReturnsTrue() {
+      when(s3Client.headObject(any(HeadObjectRequest.class)))
+          .thenReturn(createHeadObjectResponse());
+
+      assertThat(s3RuleStorage.ruleExists("pricing.discount.simple")).isTrue();
+    }
+
+    @Test
+    @DisplayName("returns false for NoSuchKeyException")
+    void testReturnsFalseNotFound() {
+      when(s3Client.headObject(any(HeadObjectRequest.class)))
+          .thenThrow(NoSuchKeyException.builder().message("Not found").build());
+
+      assertThat(s3RuleStorage.ruleExists("nonexistent.rule")).isFalse();
+    }
+
+    @Test
+    @DisplayName("returns false on generic S3 error")
+    void testReturnsFalseOnGenericError() {
+      when(s3Client.headObject(any(HeadObjectRequest.class)))
+          .thenThrow(SdkException.builder().message("Access denied").build());
+
+      assertThat(s3RuleStorage.ruleExists("any.rule")).isFalse();
+    }
+  }
+
+  // ========================================================================
+  // deleteRule S3 Error Tests
+  // ========================================================================
+
+  @Nested
+  @DisplayName("deleteRule Error Handling")
+  class DeleteRuleErrorHandling {
+
+    @Test
+    @DisplayName("throws RuntimeException on S3 delete error")
+    void testDeleteS3Error() {
+      when(s3Client.headObject(any(HeadObjectRequest.class)))
+          .thenReturn(createHeadObjectResponse());
+      when(s3Client.deleteObject(any(DeleteObjectRequest.class)))
+          .thenThrow(SdkException.builder().message("Delete failed").build());
+
+      assertThatThrownBy(() -> s3RuleStorage.deleteRule("test.rule"))
+          .isInstanceOf(RuntimeException.class)
+          .hasMessageContaining("Failed to delete rule from S3");
+    }
+  }
+
+  // ========================================================================
+  // getAllRules Partial Failure Tests
+  // ========================================================================
+
+  @Nested
+  @DisplayName("getAllRules Partial Failures")
+  class GetAllRulesPartialFailures {
+
+    @Test
+    @DisplayName("continues loading when individual rule fails")
+    void testContinuesOnIndividualFailure() {
+      List<S3Object> objects =
+          List.of(createS3Object("rules/rule1.drl"), createS3Object("rules/rule2.drl"));
+
+      ListObjectsV2Response response =
+          ListObjectsV2Response.builder().contents(objects).isTruncated(false).build();
+
+      when(s3Client.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(response);
+
+      // First rule succeeds, second fails
+      ResponseBytes<GetObjectResponse> responseBytes = createMockResponseBytes(SAMPLE_DRL);
+      when(s3Client.getObjectAsBytes(any(GetObjectRequest.class)))
+          .thenReturn(responseBytes)
+          .thenThrow(SdkException.builder().message("Timeout").build());
+
+      List<Rule> rules = s3RuleStorage.getAllRules();
+
+      assertThat(rules).hasSize(1);
+    }
+  }
+
+  // ========================================================================
+  // Metadata Edge Cases
+  // ========================================================================
+
+  @Nested
+  @DisplayName("Metadata Creation")
+  class MetadataCreation {
+
+    @Test
+    @DisplayName("handles S3Object with null lastModified")
+    void testS3ObjectNullLastModified() {
+      S3Object s3Object = S3Object.builder().key("rules/test.drl").size(100L).build();
+
+      List<S3Object> objects = List.of(s3Object);
+      ListObjectsV2Response response =
+          ListObjectsV2Response.builder().contents(objects).isTruncated(false).build();
+
+      when(s3Client.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(response);
+
+      ResponseBytes<GetObjectResponse> responseBytes = createMockResponseBytes(SAMPLE_DRL);
+      when(s3Client.getObjectAsBytes(any(GetObjectRequest.class))).thenReturn(responseBytes);
+
+      List<Rule> rules = s3RuleStorage.getAllRules();
+
+      assertThat(rules).hasSize(1);
+      assertThat(rules.get(0).getMetadata().getStatus())
+          .isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
+    }
+
+    @Test
+    @DisplayName("handles HeadObjectResponse with null lastModified")
+    void testHeadObjectNullLastModified() {
+      setupCircuitBreakerPassthrough();
+
+      ResponseBytes<GetObjectResponse> responseBytes = createMockResponseBytes(SAMPLE_DRL);
+      when(s3Client.getObjectAsBytes(any(GetObjectRequest.class))).thenReturn(responseBytes);
+
+      HeadObjectResponse headResponse = HeadObjectResponse.builder().build();
+      when(s3Client.headObject(any(HeadObjectRequest.class))).thenReturn(headResponse);
+
+      Optional<Rule> result = s3RuleStorage.getRule("test.rule");
+
+      assertThat(result).isPresent();
+      assertThat(result.get().getMetadata().getStatus())
+          .isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
+    }
+  }
 }

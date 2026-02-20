@@ -188,4 +188,213 @@ class RuleDataValidatorTest {
       assertThat(result).isTrue();
     }
   }
+
+  @Nested
+  @DisplayName("Null Data")
+  class NullData {
+
+    @Test
+    @DisplayName("rejects null data map")
+    void testValidate_NullData_Rejected() {
+      assertThat(validator.isValid(null, context)).isFalse();
+    }
+  }
+
+  @Nested
+  @DisplayName("Key Validation")
+  class KeyValidation {
+
+    @Test
+    @DisplayName("rejects empty key")
+    void testEmptyKey() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("", "value");
+
+      assertThat(validator.isValid(data, context)).isFalse();
+    }
+
+    @Test
+    @DisplayName("rejects key exceeding max length")
+    void testKeyTooLong() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("a".repeat(101), "value");
+
+      assertThat(validator.isValid(data, context)).isFalse();
+    }
+
+    @Test
+    @DisplayName("accepts key at max length (100)")
+    void testKeyAtMaxLength() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("a".repeat(100), "value");
+
+      assertThat(validator.isValid(data, context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("rejects key containing dangerous pattern")
+    void testKeyWithDangerousPattern() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("javascript", 123);
+
+      assertThat(validator.isValid(data, context)).isFalse();
+    }
+
+    @Test
+    @DisplayName("rejects key containing eval pattern")
+    void testKeyWithEvalPattern() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("eval(", 123);
+
+      assertThat(validator.isValid(data, context)).isFalse();
+    }
+
+    @Test
+    @DisplayName("rejects key containing exec pattern")
+    void testKeyWithExecPattern() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("exec(cmd)", 123);
+
+      assertThat(validator.isValid(data, context)).isFalse();
+    }
+  }
+
+  @Nested
+  @DisplayName("Value Type Validation")
+  class ValueTypeValidation {
+
+    @Test
+    @DisplayName("accepts null value in map")
+    void testNullValue() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("key", null);
+
+      assertThat(validator.isValid(data, context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("accepts boolean true")
+    void testBooleanTrue() {
+      assertThat(validator.isValid(Map.of("flag", true), context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("accepts boolean false")
+    void testBooleanFalse() {
+      assertThat(validator.isValid(Map.of("flag", false), context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("accepts integer at boundary")
+    void testIntegerAtBoundary() {
+      assertThat(validator.isValid(Map.of("amount", 1_000_000), context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("rejects negative number exceeding max")
+    void testNegativeNumberExceedsMax() {
+      assertThat(validator.isValid(Map.of("amount", -1_000_001L), context)).isFalse();
+    }
+
+    @Test
+    @DisplayName("accepts zero")
+    void testZero() {
+      assertThat(validator.isValid(Map.of("amount", 0), context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("accepts double value within range")
+    void testDoubleValue() {
+      assertThat(validator.isValid(Map.of("price", 99.99), context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("accepts float value within range")
+    void testFloatValue() {
+      assertThat(validator.isValid(Map.of("weight", 5.5f), context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("accepts string at max length (500)")
+    void testStringAtMaxLength() {
+      assertThat(validator.isValid(Map.of("text", "a".repeat(500)), context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("accepts empty string")
+    void testEmptyStringValue() {
+      assertThat(validator.isValid(Map.of("text", ""), context)).isTrue();
+    }
+  }
+
+  @Nested
+  @DisplayName("Other Type Validation")
+  class OtherTypeValidation {
+
+    @Test
+    @DisplayName("accepts list with safe toString")
+    void testListValue() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("items", java.util.List.of(1, 2, 3));
+
+      assertThat(validator.isValid(data, context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("rejects object with dangerous toString")
+    void testObjectWithDangerousToString() {
+      Object dangerous =
+          new Object() {
+            @Override
+            public String toString() {
+              return "exec(malicious)";
+            }
+          };
+
+      Map<String, Object> data = new HashMap<>();
+      data.put("obj", dangerous);
+
+      assertThat(validator.isValid(data, context)).isFalse();
+    }
+
+    @Test
+    @DisplayName("rejects object with long toString")
+    void testObjectWithLongToString() {
+      Object longObj =
+          new Object() {
+            @Override
+            public String toString() {
+              return "x".repeat(501);
+            }
+          };
+
+      Map<String, Object> data = new HashMap<>();
+      data.put("obj", longObj);
+
+      assertThat(validator.isValid(data, context)).isFalse();
+    }
+  }
+
+  @Nested
+  @DisplayName("Dangerous Pattern Detection")
+  class DangerousPatternDetection {
+
+    @Test
+    @DisplayName("rejects javascript pattern (case insensitive)")
+    void testJavascriptPattern() {
+      assertThat(validator.isValid(Map.of("field", "JAVASCRIPT code"), context)).isFalse();
+    }
+
+    @Test
+    @DisplayName("rejects eval pattern with space")
+    void testEvalPattern() {
+      assertThat(validator.isValid(Map.of("field", "eval (code)"), context)).isFalse();
+    }
+
+    @Test
+    @DisplayName("rejects exec pattern")
+    void testExecPattern() {
+      assertThat(validator.isValid(Map.of("field", "EXEC (cmd)"), context)).isFalse();
+    }
+  }
 }

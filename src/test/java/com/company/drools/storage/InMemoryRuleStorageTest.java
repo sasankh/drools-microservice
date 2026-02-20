@@ -82,6 +82,22 @@ class InMemoryRuleStorageTest {
     void testHasRuleFalse() {
       assertThat(storage.hasRule("nonexistent")).isFalse();
     }
+
+    @Test
+    @DisplayName("addRule overwrites existing rule")
+    void testAddRuleOverwrite() {
+      storage.addRule("pricing.discount.simple", "new content");
+      Rule rule = storage.loadRule("pricing.discount.simple");
+      assertThat(rule.getContent()).isEqualTo("new content");
+      assertThat(storage.getRuleCount()).isEqualTo(2); // count unchanged
+    }
+
+    @Test
+    @DisplayName("removeRule silently handles non-existent rule")
+    void testRemoveNonExistentRule() {
+      storage.removeRule("nonexistent.rule"); // should not throw
+      assertThat(storage.getRuleCount()).isEqualTo(2); // unchanged
+    }
   }
 
   @Nested
