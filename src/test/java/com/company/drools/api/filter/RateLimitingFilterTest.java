@@ -222,4 +222,179 @@ class RateLimitingFilterTest extends BaseUnitTest {
       verify(filterChain).doFilter(directRequest, directResponse);
     }
   }
+
+  @Nested
+  @DisplayName("URI Pattern Matching")
+  class UriPatternMatching {
+
+    @Test
+    @DisplayName("applies rate limiting to /api/ prefix endpoints")
+    void testFilter_ApiPrefix_AppliesRateLimit() throws Exception {
+      when(request.getRequestURI()).thenReturn("/api/some-endpoint");
+      when(request.getRemoteAddr()).thenReturn("192.168.1.1");
+
+      StringWriter stringWriter = new StringWriter();
+      when(response.getWriter()).thenReturn(new PrintWriter(stringWriter));
+
+      // Exhaust limit
+      for (int i = 0; i < 6; i++) {
+        filter.doFilter(request, response, filterChain);
+      }
+
+      verify(response).setStatus(429);
+    }
+
+    @Test
+    @DisplayName("skips rate limiting for non-API, non-execute-rule URIs")
+    void testFilter_OtherEndpoints_SkipsRateLimit() throws Exception {
+      when(request.getRequestURI()).thenReturn("/health");
+
+      filter.doFilter(request, response, filterChain);
+
+      verify(filterChain).doFilter(request, response);
+    }
+
+    @Test
+    @DisplayName("skips rate limiting for /actuator endpoints")
+    void testFilter_ActuatorEndpoint_SkipsRateLimit() throws Exception {
+      when(request.getRequestURI()).thenReturn("/actuator/metrics");
+
+      filter.doFilter(request, response, filterChain);
+
+      verify(filterChain).doFilter(request, response);
+    }
+  }
+
+  @Nested
+  @DisplayName("Client Identification Edge Cases")
+  class ClientIdentificationEdgeCases {
+
+    @Test
+    @DisplayName("identifies client by X-Client-Id header")
+    void testFilter_XClientIdHeader_IdentifiesClient() throws Exception {
+      when(request.getRequestURI()).thenReturn("/execute-rule");
+      when(request.getHeader("X-Client-Id")).thenReturn("my-service");
+
+      StringWriter stringWriter = new StringWriter();
+      when(response.getWriter()).thenReturn(new PrintWriter(stringWriter));
+
+      // Exhaust limit for X-Client-Id client
+      for (int i = 0; i < 6; i++) {
+        filter.doFilter(request, response, filterChain);
+      }
+
+      // Different client ID via IP should still be allowed
+      HttpServletRequest otherRequest = org.mockito.Mockito.mock(HttpServletRequest.class);
+      HttpServletResponse otherResponse = org.mockito.Mockito.mock(HttpServletResponse.class);
+      when(otherRequest.getRequestURI()).thenReturn("/execute-rule");
+      when(otherRequest.getRemoteAddr()).thenReturn("10.0.0.5");
+
+      filter.doFilter(otherRequest, otherResponse, filterChain);
+
+      verify(filterChain).doFilter(otherRequest, otherResponse);
+    }
+
+    @Test
+    @DisplayName("ignores empty X-API-Key and falls through to next identifier")
+    void testFilter_EmptyApiKey_FallsThrough() throws Exception {
+      when(request.getRequestURI()).thenReturn("/execute-rule");
+      when(request.getHeader("X-API-Key")).thenReturn("");
+      when(request.getRemoteAddr()).thenReturn("10.0.0.99");
+
+      filter.doFilter(request, response, filterChain);
+
+      verify(filterChain).doFilter(request, response);
+    }
+
+    @Test
+    @DisplayName("ignores non-Bearer Authorization header")
+    void testFilter_BasicAuth_FallsThrough() throws Exception {
+      when(request.getRequestURI()).thenReturn("/execute-rule");
+      when(request.getHeader("Authorization")).thenReturn("Basic dXNlcjpwYXNz");
+      when(request.getRemoteAddr()).thenReturn("10.0.0.88");
+
+      filter.doFilter(request, response, filterChain);
+
+      verify(filterChain).doFilter(request, response);
+    }
+
+    @Test
+    @DisplayName("ignores empty X-Client-Id and falls through to IP")
+    void testFilter_EmptyClientId_FallsThrough() throws Exception {
+      when(request.getRequestURI()).thenReturn("/execute-rule");
+      when(request.getHeader("X-Client-Id")).thenReturn("");
+      when(request.getRemoteAddr()).thenReturn("10.0.0.77");
+
+      filter.doFilter(request, response, filterChain);
+
+      verify(filterChain).doFilter(request, response);
+    }
+
+    @Test
+    @DisplayName("uses first IP from X-Forwarded-For with single value")
+    void testFilter_SingleForwardedFor_UsesIt() throws Exception {
+      when(request.getRequestURI()).thenReturn("/execute-rule");
+      when(request.getHeader("X-Forwarded-For")).thenReturn("198.51.100.5");
+      when(request.getRemoteAddr()).thenReturn("10.0.0.1");
+
+      filter.doFilter(request, response, filterChain);
+
+      verify(filterChain).doFilter(request, response);
+    }
+  }
+
+  @Nested
+  @DisplayName("Rate Limit Response")
+  class RateLimitResponse {
+
+    @Test
+    @DisplayName("429 response contains proper JSON error body")
+    void testFilter_RateLimitExceeded_ProperResponseBody() throws Exception {
+      when(request.getRequestURI()).thenReturn("/execute-rule");
+      when(request.getRemoteAddr()).thenReturn("10.0.0.200");
+
+      StringWriter stringWriter = new StringWriter();
+      PrintWriter printWriter = new PrintWriter(stringWriter);
+      when(response.getWriter()).thenReturn(printWriter);
+
+      // Exhaust limit
+      for (int i = 0; i < 6; i++) {
+        filter.doFilter(request, response, filterChain);
+      }
+
+      printWriter.flush();
+      String responseBody = stringWriter.toString();
+
+      ObjectMapper mapper = new ObjectMapper();
+      @SuppressWarnings("unchecked")
+      java.util.Map<String, Object> parsed =
+          mapper.readValue(responseBody, java.util.Map.class);
+
+      org.assertj.core.api.Assertions.assertThat(parsed).containsKey("error");
+      @SuppressWarnings("unchecked")
+      java.util.Map<String, Object> error =
+          (java.util.Map<String, Object>) parsed.get("error");
+      org.assertj.core.api.Assertions.assertThat(error.get("code"))
+          .isEqualTo("RATE_LIMIT_EXCEEDED");
+      org.assertj.core.api.Assertions.assertThat(error.get("message"))
+          .isEqualTo("Rate limit exceeded");
+      org.assertj.core.api.Assertions.assertThat(error).containsKey("timestamp");
+    }
+
+    @Test
+    @DisplayName("adds rate limit headers on allowed requests")
+    void testFilter_AllowedRequest_AddsHeaders() throws Exception {
+      when(request.getRequestURI()).thenReturn("/execute-rule");
+      when(request.getRemoteAddr()).thenReturn("10.0.0.201");
+
+      filter.doFilter(request, response, filterChain);
+
+      verify(response).setHeader(
+          org.mockito.ArgumentMatchers.eq("X-RateLimit-Limit"),
+          org.mockito.ArgumentMatchers.anyString());
+      verify(response).setHeader(
+          org.mockito.ArgumentMatchers.eq("X-RateLimit-Remaining"),
+          org.mockito.ArgumentMatchers.anyString());
+    }
+  }
 }
