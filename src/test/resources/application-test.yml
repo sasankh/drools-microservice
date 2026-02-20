@@ -12,8 +12,14 @@ drools:
 
   # Validation limits (lower for faster tests)
   validation:
-    data-max-fields: 50
-    data-max-string-length: 500
+    rule-id:
+      max-length: 255
+    data:
+      max-fields: 50
+      max-string-length: 500
+      max-number-value: 1000000
+    request:
+      max-size-bytes: 1048576
 
   # Rate limiting (permissive for tests)
   rate-limiting:

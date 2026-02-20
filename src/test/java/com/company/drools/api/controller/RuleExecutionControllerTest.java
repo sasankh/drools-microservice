@@ -30,8 +30,16 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@WebMvcTest(RuleExecutionController.class)
-@Import({GlobalExceptionHandler.class, ValidationConfig.class})
+@WebMvcTest(
+    controllers = RuleExecutionController.class,
+    excludeFilters = @org.springframework.context.annotation.ComponentScan.Filter(
+        type = org.springframework.context.annotation.FilterType.ASSIGNABLE_TYPE,
+        classes = {
+            com.company.drools.api.filter.RateLimitingFilter.class
+        }
+    )
+)
+@Import({GlobalExceptionHandler.class, ValidationConfig.class, TestValidationConfig.class})
 @ActiveProfiles("test")
 class RuleExecutionControllerTest {
 

@@ -15,6 +15,7 @@ import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
 import com.company.drools.storage.RuleStorage;
 import com.company.drools.storage.StorageFactory;
+import com.company.drools.testutil.ValidationConfigTestHelper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -25,7 +26,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.support.StaticApplicationContext;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
@@ -55,12 +56,14 @@ class AdminControllerTest {
     // Create a Spring context with ValidationConfig so @ValidRuleId validator works.
     // The SpringConstraintValidatorFactory allows Hibernate Validator to inject Spring beans
     // into custom ConstraintValidators like RuleIdValidator.
-    StaticApplicationContext appContext = new StaticApplicationContext();
-    appContext.getBeanFactory().registerSingleton("validationConfig", new ValidationConfig());
+    AnnotationConfigApplicationContext appContext = new AnnotationConfigApplicationContext();
+    appContext.registerBean("validationConfig", com.company.drools.config.ValidationConfig.class,
+        () -> ValidationConfigTestHelper.createTestValidationConfig());
     appContext.refresh();
 
     LocalValidatorFactoryBean validatorFactory = new LocalValidatorFactoryBean();
     validatorFactory.setApplicationContext(appContext);
+    // afterPropertiesSet() automatically configures SpringConstraintValidatorFactory when app context is set
     validatorFactory.afterPropertiesSet();
 
     // Build MockMvc with validator
