@@ -20,6 +20,20 @@ This file contains complete project context and is the **fastest way to get up t
 
 If the ai-initial-context file doesn't exist or you need deeper detail, follow this sequence:
 
+### Phase 0: AI Workflow Instructions (REQUIRED FIRST)
+
+Read these files **first** to understand how to work with this project's AI workflow:
+
+1. **[ai-instructions/snap-memory-instructions.md](snap-memory-instructions.md)** - How to create session logs
+2. **[ai-instructions/ai-initial-context-instructions.md](ai-initial-context-instructions.md)** - How to update consolidated context
+
+**After Phase 0, you should know:**
+- How to create comprehensive snap-memory session logs
+- When and how to update the ai-initial-context file
+- The workflow for preserving session knowledge
+
+---
+
 ### Phase 1: Core Project Understanding (REQUIRED)
 
 Read these files **in this exact order** to understand what the Drools project is:
@@ -36,29 +50,39 @@ Read these files **in this exact order** to understand what the Drools project i
 
 ---
 
-### Phase 2: Implementation Status (REQUIRED)
+### Phase 2: Project Planning & Implementation Status (REQUIRED)
 
-Read these to understand what's been built:
+**Read ALL files in the `project-plan/` directory** to understand what's been built:
 
-4. **[project-plan/project.progress.md](../project-plan/project.progress.md)** - Detailed progress tracking
-5. **[project-plan/project.checklist.md](../project-plan/project.checklist.md)** - Task completion status
-6. **[project-plan/project.documentation.md](../project-plan/project.documentation.md)** - Complete project specifications
+4. **[project-plan/project.prompt.md](../project-plan/project.prompt.md)** - Original implementation requirements (if not already read)
+5. **[project-plan/project.progress.md](../project-plan/project.progress.md)** - Detailed progress tracking
+6. **[project-plan/project.checklist.md](../project-plan/project.checklist.md)** - Task completion status (85+ tasks)
+7. **[project-plan/project.documentation.md](../project-plan/project.documentation.md)** - Complete project specifications
+8. **[project-plan/project-validation-plan.md](../project-plan/project-validation-plan.md)** - Validation checklist
 
 **After Phase 2, you should know:**
 - All 5 phases are complete (Core Infrastructure, Storage & Caching, Production Readiness, Documentation, Deployment)
 - What was implemented in each phase
 - Known issues and deferred features
 - Performance metrics achieved (2-100x better than targets)
+- Validation approach and results
 
 ---
 
-### Phase 3: Technical Architecture (REQUIRED)
+### Phase 3: Complete Documentation Suite (REQUIRED)
 
-Read these to understand the system design:
+**Read ALL files in the `documentations/` directory** to understand the system design and operations:
 
-7. **[documentations/deployment.md](../documentations/deployment.md)** - Deployment guide and architecture
-8. **[documentations/configuration.md](../documentations/configuration.md)** - Configuration reference (60+ env vars)
-9. **[documentations/api-documentation.yml](../documentations/api-documentation.yml)** - OpenAPI 3.0 spec (8 endpoints)
+9. **[documentations/deployment.md](../documentations/deployment.md)** - Deployment guide and architecture (800+ lines)
+10. **[documentations/configuration.md](../documentations/configuration.md)** - Configuration reference (60+ env vars, 600+ lines)
+11. **[documentations/rule-development.md](../documentations/rule-development.md)** - Rule development guide (5 examples, 800+ lines)
+12. **[documentations/troubleshooting.md](../documentations/troubleshooting.md)** - Troubleshooting guide (50+ solutions, 700+ lines)
+13. **[documentations/simple-start.md](../documentations/simple-start.md)** - Quick testing guide (250 lines)
+14. **[documentations/rule-generation-prompt.md](../documentations/rule-generation-prompt.md)** - AI rule generation guide (360 lines)
+15. **[documentations/rule-generation-prompt-enhanced.md](../documentations/rule-generation-prompt-enhanced.md)** - Enhanced with safety patterns (450 lines)
+16. **[documentations/rule-generation-prompt-concise.md](../documentations/rule-generation-prompt-concise.md)** - Quick copy-paste version (150 lines)
+
+17. **[api-documentation.yml](../api-documentation.yml)** - OpenAPI 3.0 specification (983 lines, 8 endpoints)
 
 **After Phase 3, you should know:**
 - Multi-tier caching architecture (S3 → Redis → LRU)
@@ -66,52 +90,39 @@ Read these to understand the system design:
 - Security hardening (validation, rate limiting, CORS, log sanitization)
 - Docker containerization (347MB optimized image)
 - LocalStack integration for offline development
+- How to create and test Drools rules
+- How to troubleshoot common issues
+- How to use AI assistance for rule generation
+- Complete API endpoints and configuration options
 
 ---
 
-### Phase 4: Development & Testing (OPTIONAL - Read if working with rules or setup)
+### Phase 4: Sample Rules (OPTIONAL - Read if working with rules)
 
-Read these if working on rules or setting up the dev environment:
+Read these to understand the available sample rules:
 
-10. **[documentations/rule-development.md](../documentations/rule-development.md)** - Rule development guide (5 examples)
-11. **[sample-rules/README.md](../sample-rules/README.md)** - 10 sample business rules
-12. **[documentations/simple-start.md](../documentations/simple-start.md)** - Quick testing guide
+18. **[sample-rules/README.md](../sample-rules/README.md)** - 10 sample business rules documentation
 
 **After Phase 4, you should know:**
-- How to create Drools .drl files
+- All 10 available sample rules (pricing, shipping, validation, seasonal)
 - Rule ID to file path transformation (`pricing.discount.vip` → `pricing/discount/vip.drl`)
 - How to test rules with LocalStack S3
-- 10 sample rules available for reference
+- Example rule patterns and structures
 
 ---
 
-### Phase 5: Troubleshooting & Operations (OPTIONAL - Read if debugging)
-
-Read these if troubleshooting issues:
-
-13. **[documentations/troubleshooting.md](../documentations/troubleshooting.md)** - Troubleshooting guide (50+ solutions)
-14. **[project-plan/project-validation-plan.md](../project-plan/project-validation-plan.md)** - Validation checklist
-
-**After Phase 5, you should know:**
-- Common startup issues and solutions
-- Error codes reference (11 documented codes)
-- Performance troubleshooting
-- Emergency recovery procedures
-
----
-
-### Phase 6: Session History (OPTIONAL - Read latest snap-memory if available)
+### Phase 5: Session History (OPTIONAL - Read latest snap-memory if available)
 
 Check for recent snap-memory files to understand latest work:
 
-15. **[ai-workspace/snap-memory/](../ai-workspace/snap-memory/)** - Session logs (18 files)
+19. **[ai-workspace/snap-memory/](../ai-workspace/snap-memory/)** - Session logs (18 files)
 
 **Command to find latest:**
 ```bash
 ls -t ai-workspace/snap-memory/ | head -1
 ```
 
-**After Phase 6, you should know:**
+**After Phase 5, you should know:**
 - What was accomplished in recent sessions
 - Recent decisions and architectural changes
 - Any issues encountered and resolved
@@ -361,7 +372,7 @@ drools-microservice/
 | User Says | You Do |
 |-----------|--------|
 | "Load context" | Read `ai-workspace/ai-initial-context/ai-initial-context-latest.md` (fastest) |
-| "Full context" | Follow all 6 phases above |
+| "Full context" | Follow Phase 0 (AI workflow) + all 5 project phases above |
 | "Quick context" | Read README + CLAUDE.md + ai-initial-context |
 | "What's the status?" | Read CLAUDE.md + project.progress.md + latest snap-memory |
 | "snap-memory" | Follow snap-memory-instructions.md |
