@@ -3,24 +3,31 @@ info:
   title: Drools Rule Engine Microservice API
   description: |
     A high-performance business rule execution microservice built with Spring Boot and Drools.
-    
+
     ## Features
     - **High Performance**: Support for 100-1000 requests per second
+    - **Memory Stable**: Proper resource disposal prevents memory leaks and OOM errors
+    - **Real-time Monitoring**: Memory diagnostics with automatic warnings (NEW)
     - **Security Hardened**: Input validation, rate limiting, CORS protection
     - **Production Ready**: Health monitoring, metrics, circuit breakers
     - **Scalable**: Multi-tier caching with S3 storage backend
-    
+
     ## Architecture
     - **Main API**: Rule execution on port 8080
     - **Admin API**: Management and monitoring on port 8081
-    
+
     ## Security Features
     - Input validation with configurable limits
     - Rate limiting with HTTP headers
     - Request size protection
     - CORS configuration
     - Sensitive data sanitization in logs
-    
+
+    ## Recent Updates (2026-02-19)
+    - **Java 17 Enforcement**: Maven Enforcer Plugin ensures correct Java version
+    - **Memory Leak Fixed**: Proper KieContainer disposal prevents OOM crashes
+    - **Memory Monitoring Added**: New `/admin/memory/*` endpoints for diagnostics
+
   version: "1.0.0"
   contact:
     name: Drools Rule Engine Team
@@ -617,6 +624,124 @@ paths:
                     status: "error"
                     error: "Failed to compile rule: Syntax error at line 15"
 
+  # Memory Monitoring Endpoints (NEW)
+  /admin/memory/info:
+    get:
+      tags:
+        - Memory Monitoring
+      summary: Get Comprehensive Memory Information
+      description: |
+        Returns detailed memory statistics including heap usage, memory pools, and garbage collection metrics.
+
+        **Use Cases:**
+        - Monitor memory usage in production
+        - Detect memory leaks early
+        - Verify memory stability after rule refreshes
+        - Get warnings before OOM occurs
+
+        **Warning Levels:**
+        - `CRITICAL`: Heap > 90% - OOM risk is HIGH
+        - `WARNING`: Heap > 80% - consider increasing heap size
+        - `CAUTION`: Heap > 70% - monitor closely
+
+      operationId: getMemoryInfo
+      responses:
+        '200':
+          description: Memory information retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryInfo'
+              example:
+                heap:
+                  usedMB: 245
+                  committedMB: 512
+                  maxMB: 2048
+                  usagePercent: "11.96"
+                nonHeap:
+                  usedMB: 85
+                  committedMB: 90
+                  maxMB: 512
+                runtime:
+                  maxMemoryMB: 2048
+                  totalMemoryMB: 512
+                  usedMemoryMB: 245
+                  freeMemoryMB: 267
+                  usagePercent: "11.96"
+                memoryPools:
+                  - name: "G1 Old Gen"
+                    type: "HEAP"
+                    usedMB: 156
+                    maxMB: 2048
+                    usagePercent: "7.62"
+                  - name: "G1 Eden Space"
+                    type: "HEAP"
+                    usedMB: 45
+                    maxMB: -1
+                    usagePercent: "N/A"
+                garbageCollectors:
+                  - name: "G1 Young Generation"
+                    collectionCount: 12
+                    collectionTimeMs: 45
+                  - name: "G1 Old Generation"
+                    collectionCount: 2
+                    collectionTimeMs: 15
+                warnings: []
+
+  /admin/memory/gc:
+    post:
+      tags:
+        - Memory Monitoring
+      summary: Trigger Garbage Collection
+      description: |
+        Manually trigger garbage collection (for diagnostics only).
+
+        **Warning:** This is a suggestion to the JVM and may not execute immediately.
+        Should NOT be used in production under load.
+
+        **Use Cases:**
+        - Diagnostic troubleshooting
+        - Memory testing scenarios
+        - Verifying GC behavior
+
+      operationId: triggerGC
+      responses:
+        '200':
+          description: GC triggered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GCResult'
+              example:
+                message: "Garbage collection triggered"
+                usedBeforeMB: 450
+                usedAfterMB: 250
+                freedMemoryMB: 200
+                note: "This is a suggestion to JVM, actual GC timing is not guaranteed"
+
+  /admin/memory/snapshot:
+    get:
+      tags:
+        - Memory Monitoring
+      summary: Get Quick Memory Snapshot
+      description: |
+        Returns a quick memory snapshot for trending and monitoring.
+        Lightweight alternative to `/admin/memory/info` for frequent polling.
+
+      operationId: getMemorySnapshot
+      responses:
+        '200':
+          description: Memory snapshot retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemorySnapshot'
+              example:
+                timestamp: 1708390000000
+                heapUsedMB: 245
+                heapMaxMB: 2048
+                heapUsagePercent: 11.96
+
 components:
   schemas:
     RuleExecutionRequest:
@@ -944,6 +1069,111 @@ components:
         - Used in rate limiting and monitoring
         - JWT tokens supported
 
+    MemoryInfo:
+      type: object
+      description: Comprehensive memory information including heap, non-heap, and GC statistics
+      properties:
+        heap:
+          type: object
+          properties:
+            usedMB:
+              type: integer
+              description: Heap memory currently used (in MB)
+            committedMB:
+              type: integer
+              description: Heap memory committed by JVM (in MB)
+            maxMB:
+              type: integer
+              description: Maximum heap memory (in MB)
+            usagePercent:
+              type: string
+              description: Heap usage percentage
+        nonHeap:
+          type: object
+          properties:
+            usedMB:
+              type: integer
+            committedMB:
+              type: integer
+            maxMB:
+              type: integer
+        runtime:
+          type: object
+          properties:
+            maxMemoryMB:
+              type: integer
+            totalMemoryMB:
+              type: integer
+            usedMemoryMB:
+              type: integer
+            freeMemoryMB:
+              type: integer
+            usagePercent:
+              type: string
+        memoryPools:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              type:
+                type: string
+                enum: [HEAP, NON_HEAP]
+              usedMB:
+                type: integer
+              maxMB:
+                type: integer
+              usagePercent:
+                type: string
+        garbageCollectors:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              collectionCount:
+                type: integer
+              collectionTimeMs:
+                type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+          description: Memory warnings (CRITICAL, WARNING, CAUTION)
+
+    GCResult:
+      type: object
+      description: Garbage collection trigger result
+      properties:
+        message:
+          type: string
+        usedBeforeMB:
+          type: integer
+        usedAfterMB:
+          type: integer
+        freedMemoryMB:
+          type: integer
+        note:
+          type: string
+
+    MemorySnapshot:
+      type: object
+      description: Quick memory snapshot for trending
+      properties:
+        timestamp:
+          type: integer
+          format: int64
+          description: Unix timestamp in milliseconds
+        heapUsedMB:
+          type: integer
+        heapMaxMB:
+          type: integer
+        heapUsagePercent:
+          type: number
+          format: double
+
 security:
   - ApiKeyAuth: []
   - BearerAuth: []
@@ -973,12 +1203,29 @@ tags:
   - name: Rule Management
     description: |
       Rule lifecycle management operations.
-      
+
       **Features:**
       - List all loaded rules with metadata
       - Refresh rules from storage backend
       - Hot-reload without service restart
       - Detailed refresh status and error reporting
+
+  - name: Memory Monitoring
+    description: |
+      Real-time memory diagnostics and monitoring (NEW).
+
+      **Features:**
+      - Comprehensive memory statistics (heap, non-heap, pools)
+      - Garbage collection metrics
+      - Automatic warning system (CRITICAL > 90%, WARNING > 80%)
+      - Manual GC trigger for diagnostics
+      - Quick snapshots for trending
+
+      **Use Cases:**
+      - Prevent OOM errors by monitoring memory growth
+      - Verify memory stability after rule refreshes
+      - Troubleshoot memory leaks
+      - Production memory monitoring
 
 externalDocs:
   description: Complete Project Documentation

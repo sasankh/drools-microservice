@@ -2,13 +2,60 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ Important: Recent Critical Fixes (2026-02-19)
+
+**CRITICAL**: Two major issues were fixed in this session:
+
+1. **Java Version Enforcement** ✅
+   - Maven Enforcer Plugin now enforces Java 17
+   - Build will fail if using wrong Java version
+   - Use `source ./set-java-env.sh` for local development
+
+2. **Memory Leak Fixed** ✅
+   - KieContainer disposal prevents OOM errors (exit code 137)
+   - Fixed in `DroolsEngineService.java` lines 164-178
+   - Memory now stable, can run indefinitely
+
+3. **Memory Monitoring Added** ✅
+   - New endpoint: `GET /admin/memory/info`
+   - Real-time memory diagnostics with warnings
+   - Heap dumps on OOM: `./heap-dumps/`
+   - GC logs: `./gc-logs/`
+
+**Files Modified**:
+- `pom.xml` - Maven Enforcer Plugin added
+- `docker-compose.yml` - Memory diagnostics configured
+- `DroolsEngineService.java` - KieContainer disposal logic
+- `MemoryController.java` - NEW monitoring endpoint
+
+See `FIXES-SUMMARY.md` for complete details.
+
 ## Project Overview
 
 This is a Drools Rule Engine Microservice designed for high-performance business rule execution (100-1000 RPS). Rules are stored in AWS S3 and executed via REST API.
 
-**Tech Stack**: Java 17, Spring Boot 3.x, Drools 8.44.0.Final, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
+**Tech Stack**: Java 17 (enforced), Spring Boot 3.x, Drools 8.44.0.Final, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
+
+**Health Status**: 6.3/10 - Critical fixes complete, needs test coverage
 
 ## Common Commands
+
+### Java 17 Setup (Required for Local Development)
+
+**IMPORTANT**: Java 17 is required. Maven will enforce this automatically.
+
+```bash
+# Option 1: Use the setup script (temporary for current terminal)
+source ./set-java-env.sh
+
+# Option 2: Permanent setup (add to ~/.zshrc or ~/.bashrc)
+export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+export PATH="$JAVA_HOME/bin:$PATH"
+
+# Verify Java 17 is active
+java -version   # Should show "openjdk version 17.x.x"
+mvn -version    # Should show "Java version: 17.x.x"
+```
 
 ### Build & Run (once project is initialized)
 
@@ -202,11 +249,11 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
    ```bash
    # Build and test Docker image
    ./docker-build-test.sh
-   
+
    # Manual Docker validation steps
    docker build -t drools-rule-engine:latest .
    docker images drools-rule-engine:latest  # Should be ~347MB
-   
+
    # Test container startup and health
    docker run -d --name test-container -p 9080:8080 -p 9081:8081 \
      -e RULE_SOURCE=memory drools-rule-engine:latest
@@ -214,16 +261,50 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
    docker stop test-container && docker rm test-container
    ```
 
+5. **Memory Monitoring** (NEW): Real-time memory diagnostics
+   ```bash
+   # Check current memory status
+   curl http://localhost:8081/admin/memory/info | jq
+
+   # Monitor heap usage
+   curl -s http://localhost:8081/admin/memory/info | jq '.heap'
+
+   # Real-time monitoring (updates every 5 seconds)
+   watch -n 5 'curl -s http://localhost:8081/admin/memory/info | jq ".heap.usagePercent"'
+
+   # Test memory leak fix (should remain stable)
+   for i in {1..10}; do
+       echo "Refresh $i/10"
+       curl -X POST http://localhost:8081/admin/refresh-rules
+       sleep 3
+       curl -s http://localhost:8081/admin/memory/info | jq '.heap.usedMB'
+   done
+   # Memory should NOT grow by 10-100MB each refresh
+
+   # Check GC logs
+   tail -f gc-logs/gc.log
+
+   # Check heap dumps (if OOM occurred)
+   ls -lh heap-dumps/
+   ```
+
 ## Implementation Status
 
-Check `project.progress.md` for current status. Project follows these phases:
+Check `project.progress.md` and `FIXES-SUMMARY.md` for current status. Project follows these phases:
 1. ✅ Core Infrastructure (Spring Boot + Drools setup) - COMPLETED
-2. ✅ Storage & Caching (S3 + Redis) - COMPLETED  
+2. ✅ Storage & Caching (S3 + Redis) - COMPLETED
 3. ✅ Production Readiness (Security, Performance, Monitoring) - COMPLETED
 4. ✅ Testing & Documentation (Phase 4.4 only) - COMPLETED
 5. ✅ Deployment & Infrastructure - COMPLETED
+6. ✅ Critical Fixes (Java 17, Memory Leak, Monitoring) - COMPLETED 2026-02-19
 
-**Current Focus**: Project completion - All core phases finished successfully
+**Current Status**:
+- **Health Score**: 6.3/10 (improved from broken state)
+- **Critical Issues**: FIXED ✅ (Java version, memory leak)
+- **Test Coverage**: 0% ⚠️ (Phase 4.1-4.3 pending)
+- **Next Priority**: Testing and validation
+
+**Current Focus**: Testing memory leak fix, adding test coverage (see `project-improvement-plan.md`)
 
 ## Performance Targets
 
@@ -240,13 +321,28 @@ Check `project.progress.md` for current status. Project follows these phases:
 
 ## Important Project Files
 
+**Project Planning**:
 - `project.checklist.md`: Detailed task breakdown (85+ core tasks, 80 completed)
-- `project.progress.md`: Track implementation progress (Phase 5.1 complete)
+- `project.progress.md`: Track implementation progress (Phase 5.2 complete)
 - `project.documentation.md`: Comprehensive project specifications
 - `project.prompt.md`: Original implementation requirements
+- `project-improvement-plan.md`: 3-week improvement roadmap (NEW)
+
+**Recent Fixes** (2026-02-19):
+- `FIXES-SUMMARY.md`: Summary of critical fixes applied (NEW)
+- `MEMORY-LEAK-ANALYSIS.md`: Deep dive into memory leak issue (NEW)
+- `project-revisit-analysis.md`: Complete project health assessment (NEW)
+- `set-java-env.sh`: Java 17 environment setup script (NEW)
+
+**Session Documentation**:
 - `snap-memory/`: Session memory files documenting implementation progress
+- `snap-memory/snap-memory-1771549384.md`: Latest session (critical fixes)
+
+**Docker & Validation**:
 - `docker-build-test.sh`: Automated Docker build and validation script
 - `docker-validation.md`: Comprehensive Docker validation checklist
+- `heap-dumps/`: OOM heap dumps for analysis
+- `gc-logs/`: GC logs for performance tuning
 
 ## Recent Completions 
 

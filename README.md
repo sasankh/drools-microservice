@@ -9,9 +9,11 @@ A high-performance business rule execution microservice built with Spring Boot a
 - **Multi-tier Caching**: Local LRU + Redis distributed caching for optimal performance
 - **Rule Management**: REST APIs for hot-reloading and monitoring rules
 - **Production Ready**: Health checks, metrics, monitoring, and comprehensive security
+- **Memory Stable**: Proper resource disposal prevents memory leaks and OOM errors
+- **Real-time Monitoring**: Memory diagnostics endpoint with automatic warnings
 - **Security Hardened**: Input validation, rate limiting, CORS, and sensitive data protection
 - **Performance Optimized**: Connection pooling, thread pools, circuit breakers, and JVM tuning
-- **Development Friendly**: LocalStack integration for offline S3 testing
+- **Development Friendly**: LocalStack integration for offline S3 testing, one-command setup
 
 ## 🏗️ Architecture
 
@@ -50,10 +52,12 @@ Client Request → REST API → Rule Engine → Cache Layer → Storage Layer
 
 ### Prerequisites
 
-- Java 17 or higher
-- Maven 3.6+
+- **Java 17** (Required - enforced by Maven Enforcer Plugin)
+- Maven 3.8+
 - Docker and Docker Compose
 - AWS CLI (for S3 setup)
+
+**Important**: This project requires **Java 17** specifically. The build will fail if using a different Java version.
 
 ### 1. Clone the Repository
 
@@ -62,7 +66,26 @@ git clone <repository-url>
 cd drools-microservice
 ```
 
-### 2. One-Command Development Environment Setup
+### 2. Set Up Java 17 Environment
+
+For local development (not needed for Docker-only):
+
+```bash
+# Option 1: Use the provided setup script (temporary for current terminal)
+source ./set-java-env.sh
+
+# Option 2: Permanent setup (add to ~/.zshrc or ~/.bashrc)
+export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+export PATH="$JAVA_HOME/bin:$PATH"
+
+# Verify Java 17 is active
+java -version   # Should show "openjdk version 17.x.x"
+mvn -version    # Should show "Java version: 17.x.x"
+```
+
+**Note**: The Maven Enforcer Plugin will automatically verify you're using Java 17 and fail the build with a clear error message if not.
+
+### 3. One-Command Development Environment Setup
 
 ```bash
 # Complete automated setup (builds, starts services, validates everything)
@@ -429,6 +452,111 @@ POST /admin/refresh-rules/pricing.discount.vip
   "current_version": "2025-07-21T17:00:00Z",
   "compilation_time_ms": 45
 }
+```
+
+#### Memory Monitoring (NEW)
+
+Real-time memory diagnostics and monitoring endpoints to track JVM memory usage and prevent OOM errors.
+
+**Get Comprehensive Memory Info**
+```bash
+GET /admin/memory/info
+
+{
+  "heap": {
+    "usedMB": 245,
+    "committedMB": 512,
+    "maxMB": 2048,
+    "usagePercent": "11.96"
+  },
+  "nonHeap": {
+    "usedMB": 85,
+    "committedMB": 90,
+    "maxMB": 512
+  },
+  "runtime": {
+    "maxMemoryMB": 2048,
+    "totalMemoryMB": 512,
+    "usedMemoryMB": 245,
+    "freeMemoryMB": 267,
+    "usagePercent": "11.96"
+  },
+  "memoryPools": [
+    {
+      "name": "G1 Old Gen",
+      "type": "HEAP",
+      "usedMB": 156,
+      "maxMB": 2048,
+      "usagePercent": "7.62"
+    },
+    {
+      "name": "G1 Eden Space",
+      "type": "HEAP",
+      "usedMB": 45,
+      "maxMB": -1,
+      "usagePercent": "N/A"
+    }
+  ],
+  "garbageCollectors": [
+    {
+      "name": "G1 Young Generation",
+      "collectionCount": 12,
+      "collectionTimeMs": 45
+    },
+    {
+      "name": "G1 Old Generation",
+      "collectionCount": 2,
+      "collectionTimeMs": 15
+    }
+  ],
+  "warnings": []
+}
+```
+
+**Warning Levels**:
+- `CRITICAL`: Heap usage > 90% - OOM risk is HIGH
+- `WARNING`: Heap usage > 80% - consider increasing heap size
+- `CAUTION`: Heap usage > 70% - monitor closely
+
+**Trigger Garbage Collection (Diagnostics Only)**
+```bash
+POST /admin/memory/gc
+
+{
+  "message": "Garbage collection triggered",
+  "usedBeforeMB": 450,
+  "usedAfterMB": 250,
+  "freedMemoryMB": 200,
+  "note": "This is a suggestion to JVM, actual GC timing is not guaranteed"
+}
+```
+
+**Get Quick Memory Snapshot**
+```bash
+GET /admin/memory/snapshot
+
+{
+  "timestamp": 1708390000000,
+  "heapUsedMB": 245,
+  "heapMaxMB": 2048,
+  "heapUsagePercent": 11.96
+}
+```
+
+**Usage Example**:
+```bash
+# Monitor memory in real-time (every 5 seconds)
+watch -n 5 'curl -s http://localhost:8081/admin/memory/info | jq ".heap.usagePercent"'
+
+# Check for memory warnings
+curl -s http://localhost:8081/admin/memory/info | jq '.warnings'
+
+# Verify memory is stable after rule refreshes
+for i in {1..10}; do
+    curl -X POST http://localhost:8081/admin/refresh-rules
+    sleep 3
+    curl -s http://localhost:8081/admin/memory/info | jq '.heap.usedMB'
+done
 ```
 
 ### Rule Development
