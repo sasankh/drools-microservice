@@ -1,5 +1,7 @@
 package com.company.rules.pricing.discount
 
+import java.util.Map
+
 // VIP customer gets 20% discount on any purchase
 rule "VIP Customer Discount - 20% Off"
 when
