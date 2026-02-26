@@ -367,13 +367,11 @@ class RateLimitingFilterTest extends BaseUnitTest {
 
       ObjectMapper mapper = new ObjectMapper();
       @SuppressWarnings("unchecked")
-      java.util.Map<String, Object> parsed =
-          mapper.readValue(responseBody, java.util.Map.class);
+      java.util.Map<String, Object> parsed = mapper.readValue(responseBody, java.util.Map.class);
 
       org.assertj.core.api.Assertions.assertThat(parsed).containsKey("error");
       @SuppressWarnings("unchecked")
-      java.util.Map<String, Object> error =
-          (java.util.Map<String, Object>) parsed.get("error");
+      java.util.Map<String, Object> error = (java.util.Map<String, Object>) parsed.get("error");
       org.assertj.core.api.Assertions.assertThat(error.get("code"))
           .isEqualTo("RATE_LIMIT_EXCEEDED");
       org.assertj.core.api.Assertions.assertThat(error.get("message"))
@@ -389,12 +387,14 @@ class RateLimitingFilterTest extends BaseUnitTest {
 
       filter.doFilter(request, response, filterChain);
 
-      verify(response).setHeader(
-          org.mockito.ArgumentMatchers.eq("X-RateLimit-Limit"),
-          org.mockito.ArgumentMatchers.anyString());
-      verify(response).setHeader(
-          org.mockito.ArgumentMatchers.eq("X-RateLimit-Remaining"),
-          org.mockito.ArgumentMatchers.anyString());
+      verify(response)
+          .setHeader(
+              org.mockito.ArgumentMatchers.eq("X-RateLimit-Limit"),
+              org.mockito.ArgumentMatchers.anyString());
+      verify(response)
+          .setHeader(
+              org.mockito.ArgumentMatchers.eq("X-RateLimit-Remaining"),
+              org.mockito.ArgumentMatchers.anyString());
     }
   }
 }

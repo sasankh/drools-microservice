@@ -41,8 +41,7 @@ class RuleMetadataTest {
     void testNullLoadedAt() {
       assertThatThrownBy(
               () ->
-                  new RuleMetadata(
-                      "1.0", null, null, RuleMetadata.RuleStatus.ACTIVE, null, 0, 0.0))
+                  new RuleMetadata("1.0", null, null, RuleMetadata.RuleStatus.ACTIVE, null, 0, 0.0))
           .isInstanceOf(NullPointerException.class)
           .hasMessage("Loaded at cannot be null");
     }
@@ -51,8 +50,7 @@ class RuleMetadataTest {
     @DisplayName("throws NullPointerException when status is null")
     void testNullStatus() {
       assertThatThrownBy(
-              () ->
-                  new RuleMetadata("1.0", LocalDateTime.now(), null, null, null, 0, 0.0))
+              () -> new RuleMetadata("1.0", LocalDateTime.now(), null, null, null, 0, 0.0))
           .isInstanceOf(NullPointerException.class)
           .hasMessage("Rule status cannot be null");
     }
@@ -72,13 +70,7 @@ class RuleMetadataTest {
     void testNullErrorMessage() {
       RuleMetadata metadata =
           new RuleMetadata(
-              "1.0",
-              LocalDateTime.now(),
-              null,
-              RuleMetadata.RuleStatus.ACTIVE,
-              null,
-              0,
-              0.0);
+              "1.0", LocalDateTime.now(), null, RuleMetadata.RuleStatus.ACTIVE, null, 0, 0.0);
 
       assertThat(metadata.getErrorMessage()).isNull();
     }
@@ -138,8 +130,7 @@ class RuleMetadataTest {
     @Test
     @DisplayName("transitions to DISABLED status")
     void testWithStatusDisabled() {
-      RuleMetadata metadata =
-          RuleMetadata.createNew().withStatus(RuleMetadata.RuleStatus.DISABLED);
+      RuleMetadata metadata = RuleMetadata.createNew().withStatus(RuleMetadata.RuleStatus.DISABLED);
 
       assertThat(metadata.getStatus()).isEqualTo(RuleMetadata.RuleStatus.DISABLED);
     }
@@ -147,8 +138,7 @@ class RuleMetadataTest {
     @Test
     @DisplayName("transitions to ERROR status")
     void testWithStatusError() {
-      RuleMetadata metadata =
-          RuleMetadata.createNew().withStatus(RuleMetadata.RuleStatus.ERROR);
+      RuleMetadata metadata = RuleMetadata.createNew().withStatus(RuleMetadata.RuleStatus.ERROR);
 
       assertThat(metadata.getStatus()).isEqualTo(RuleMetadata.RuleStatus.ERROR);
     }
@@ -179,8 +169,7 @@ class RuleMetadataTest {
     @Test
     @DisplayName("sets status to ERROR with message")
     void testWithErrorSetsStatusAndMessage() {
-      RuleMetadata original =
-          RuleMetadata.createNew().withStatus(RuleMetadata.RuleStatus.ACTIVE);
+      RuleMetadata original = RuleMetadata.createNew().withStatus(RuleMetadata.RuleStatus.ACTIVE);
 
       RuleMetadata errored = original.withError("Compilation failed: syntax error");
 
@@ -240,8 +229,7 @@ class RuleMetadataTest {
     @Test
     @DisplayName("second execution calculates running average correctly")
     void testSecondExecution() {
-      RuleMetadata after =
-          RuleMetadata.createNew().withExecution(10.0).withExecution(20.0);
+      RuleMetadata after = RuleMetadata.createNew().withExecution(10.0).withExecution(20.0);
 
       assertThat(after.getExecutionCount()).isEqualTo(2);
       assertThat(after.getAverageExecutionTimeMs()).isCloseTo(15.0, within(0.001));
@@ -274,8 +262,7 @@ class RuleMetadataTest {
     void testWithExecutionPreservesFields() {
       LocalDateTime now = LocalDateTime.now();
       RuleMetadata original =
-          new RuleMetadata(
-              "2.0", now, null, RuleMetadata.RuleStatus.ACTIVE, null, 0, 0.0);
+          new RuleMetadata("2.0", now, null, RuleMetadata.RuleStatus.ACTIVE, null, 0, 0.0);
 
       RuleMetadata after = original.withExecution(5.0);
 
@@ -317,8 +304,7 @@ class RuleMetadataTest {
     void testWithLastModifiedPreservesFields() {
       LocalDateTime now = LocalDateTime.now();
       RuleMetadata original =
-          new RuleMetadata(
-              "3.0", now, null, RuleMetadata.RuleStatus.ACTIVE, "test", 5, 2.5);
+          new RuleMetadata("3.0", now, null, RuleMetadata.RuleStatus.ACTIVE, "test", 5, 2.5);
 
       RuleMetadata updated = original.withLastModified(Instant.now());
 
@@ -383,8 +369,7 @@ class RuleMetadataTest {
           .isEqualTo(RuleMetadata.RuleStatus.LOADING);
       assertThat(RuleMetadata.RuleStatus.valueOf("ACTIVE"))
           .isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
-      assertThat(RuleMetadata.RuleStatus.valueOf("ERROR"))
-          .isEqualTo(RuleMetadata.RuleStatus.ERROR);
+      assertThat(RuleMetadata.RuleStatus.valueOf("ERROR")).isEqualTo(RuleMetadata.RuleStatus.ERROR);
       assertThat(RuleMetadata.RuleStatus.valueOf("DISABLED"))
           .isEqualTo(RuleMetadata.RuleStatus.DISABLED);
     }

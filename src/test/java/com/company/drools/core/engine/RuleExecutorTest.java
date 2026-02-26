@@ -151,7 +151,7 @@ class RuleExecutorTest {
       KieContainer mockContainer = mock(KieContainer.class);
       KieSession mockSession = mock(KieSession.class);
       when(mockContainer.newKieSession()).thenReturn(mockSession);
-      when(mockSession.fireAllRules())
+      when(mockSession.fireAllRules(anyInt()))
           .thenAnswer(
               invocation -> {
                 // Simulate a long-running rule execution
@@ -198,7 +198,7 @@ class RuleExecutorTest {
       KieContainer mockContainer = mock(KieContainer.class);
       KieSession mockSession = mock(KieSession.class);
       when(mockContainer.newKieSession()).thenReturn(mockSession);
-      when(mockSession.fireAllRules())
+      when(mockSession.fireAllRules(anyInt()))
           .thenAnswer(
               invocation -> {
                 Thread.sleep(5_000);
@@ -352,7 +352,7 @@ class RuleExecutorTest {
       KieContainer mockContainer = mock(KieContainer.class);
       KieSession mockSession = mock(KieSession.class);
       when(mockContainer.newKieSession()).thenReturn(mockSession);
-      when(mockSession.fireAllRules()).thenReturn(0);
+      when(mockSession.fireAllRules(anyInt())).thenReturn(0);
 
       ExecutorService executor = Executors.newSingleThreadExecutor();
       RuleExecutor ruleExecutor = new RuleExecutor(executor);

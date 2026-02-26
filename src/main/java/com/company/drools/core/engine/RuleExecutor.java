@@ -18,12 +18,19 @@ public class RuleExecutor {
   private static final Logger log = LoggerFactory.getLogger(RuleExecutor.class);
 
   private static final long DEFAULT_TIMEOUT_SECONDS = 30;
+  private static final int DEFAULT_MAX_RULE_FIRINGS = 10000;
 
   private final Executor ruleExecutionExecutor;
+  private final int maxRuleFirings;
 
   public RuleExecutor(@Qualifier("ruleExecutionExecutor") Executor ruleExecutionExecutor) {
+    this(ruleExecutionExecutor, DEFAULT_MAX_RULE_FIRINGS);
+  }
+
+  public RuleExecutor(Executor ruleExecutionExecutor, int maxRuleFirings) {
     this.ruleExecutionExecutor = ruleExecutionExecutor;
-    log.info("RuleExecutor initialized with custom thread pool");
+    this.maxRuleFirings = maxRuleFirings;
+    log.info("RuleExecutor initialized with custom thread pool, maxRuleFirings={}", maxRuleFirings);
   }
 
   public ExecutionResult executeRule(
@@ -39,10 +46,11 @@ public class RuleExecutor {
     log.debug("Executing rule {} with timeout {}s", ruleId, timeoutSeconds);
 
     long startTime = System.currentTimeMillis();
+    CompletableFuture<Map<String, Object>> future = null;
 
     try {
       // Execute rule in custom thread pool to handle timeout and provide better concurrency control
-      CompletableFuture<Map<String, Object>> future =
+      future =
           CompletableFuture.supplyAsync(
               () -> {
                 return executeRuleInternal(kieContainer, ruleId, inputData);
@@ -56,6 +64,7 @@ public class RuleExecutor {
       return ExecutionResult.success(result, executionTime);
 
     } catch (java.util.concurrent.TimeoutException e) {
+      future.cancel(true);
       log.error("Rule {} execution timed out after {}s", ruleId, timeoutSeconds);
       throw new TimeoutException("Rule execution: " + ruleId, timeoutSeconds, e);
 
@@ -75,9 +84,9 @@ public class RuleExecutor {
       // Insert input data as facts
       kieSession.insert(inputData);
 
-      // Fire all rules
-      int rulesFired = kieSession.fireAllRules();
-      log.debug("Fired {} rules for rule ID {}", rulesFired, ruleId);
+      // Fire rules with a safety limit to prevent infinite loops
+      int rulesFired = kieSession.fireAllRules(maxRuleFirings);
+      log.debug("Fired {} rules for rule ID {} (limit: {})", rulesFired, ruleId, maxRuleFirings);
 
       // Extract results from the modified input data
       // The rules should modify the input map to add results

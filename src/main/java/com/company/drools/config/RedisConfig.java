@@ -2,6 +2,8 @@ package com.company.drools.config;
 
 import com.company.drools.core.model.Rule;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
+import com.fasterxml.jackson.databind.jsontype.PolymorphicTypeValidator;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.time.Duration;
 import org.slf4j.Logger;
@@ -55,7 +57,13 @@ public class RedisConfig {
   private Jackson2JsonRedisSerializer<Rule> createRuleJsonSerializer() {
     ObjectMapper objectMapper = new ObjectMapper();
     objectMapper.registerModule(new JavaTimeModule());
-    objectMapper.enableDefaultTyping(ObjectMapper.DefaultTyping.NON_FINAL);
+    PolymorphicTypeValidator ptv =
+        BasicPolymorphicTypeValidator.builder()
+            .allowIfBaseType("com.company.drools.core.model")
+            .allowIfBaseType("java.util")
+            .allowIfBaseType("java.time")
+            .build();
+    objectMapper.activateDefaultTyping(ptv, ObjectMapper.DefaultTyping.NON_FINAL);
 
     Jackson2JsonRedisSerializer<Rule> serializer =
         new Jackson2JsonRedisSerializer<>(objectMapper, Rule.class);

@@ -82,18 +82,16 @@ services:
   localstack:
     image: localstack/localstack:2.3
     ports:
-      - "4566:4566"  # LocalStack edge port
+      - "127.0.0.1:4566:4566"  # LocalStack edge port
     environment:
       - SERVICES=s3
       - DEBUG=1
       - DATA_DIR=/tmp/localstack/data
       - PERSISTENCE=1
-      - DOCKER_HOST=unix:///var/run/docker.sock
     volumes:
       - "./init-localstack.sh:/etc/localstack/init/ready.d/init-aws.sh"
       - "./sample-rules:/tmp/sample-rules"
       - "localstack-data:/tmp/localstack"
-      - "/var/run/docker.sock:/var/run/docker.sock"
     networks:
       - drools-network
     restart: unless-stopped
@@ -107,7 +105,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     command: redis-server --appendonly yes --requirepass ""
     volumes:
       - redis-data:/data

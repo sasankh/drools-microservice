@@ -69,7 +69,8 @@ public class LocalLRUCache implements RuleCache {
       return Optional.empty();
     }
 
-    lock.readLock().lock();
+    // Write lock required: access-ordered LinkedHashMap mutates internal structure on get()
+    lock.writeLock().lock();
     try {
       Rule rule = cache.get(ruleId);
       lastAccess = Instant.now();
@@ -86,7 +87,7 @@ public class LocalLRUCache implements RuleCache {
         return Optional.empty();
       }
     } finally {
-      lock.readLock().unlock();
+      lock.writeLock().unlock();
     }
   }
 

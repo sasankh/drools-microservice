@@ -730,8 +730,7 @@ class S3RuleStorageTest {
       List<Rule> rules = s3RuleStorage.getAllRules();
 
       assertThat(rules).hasSize(1);
-      assertThat(rules.get(0).getMetadata().getStatus())
-          .isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
+      assertThat(rules.get(0).getMetadata().getStatus()).isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
     }
 
     @Test
@@ -748,8 +747,7 @@ class S3RuleStorageTest {
       Optional<Rule> result = s3RuleStorage.getRule("test.rule");
 
       assertThat(result).isPresent();
-      assertThat(result.get().getMetadata().getStatus())
-          .isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
+      assertThat(result.get().getMetadata().getStatus()).isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
     }
   }
 }

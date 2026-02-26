@@ -236,7 +236,8 @@ class RequestSizeValidationFilterTest extends BaseUnitTest {
 
       String responseBody = stringWriter.toString();
       @SuppressWarnings("unchecked")
-      java.util.Map<String, Object> parsed = objectMapper.readValue(responseBody, java.util.Map.class);
+      java.util.Map<String, Object> parsed =
+          objectMapper.readValue(responseBody, java.util.Map.class);
 
       assertThat(parsed).containsKey("rule_id");
       assertThat(parsed).containsKey("result");
