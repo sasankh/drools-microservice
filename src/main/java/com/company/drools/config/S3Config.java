@@ -73,6 +73,7 @@ public class S3Config {
 
     // Configure endpoint for LocalStack or custom S3-compatible services
     if (StringUtils.hasText(endpoint)) {
+      validateEndpoint(endpoint);
       log.info("Using custom S3 endpoint: {}", endpoint);
       clientBuilder
           .endpointOverride(URI.create(endpoint))
@@ -121,6 +122,31 @@ public class S3Config {
         .backoffStrategy(BackoffStrategy.defaultStrategy())
         .throttlingBackoffStrategy(BackoffStrategy.defaultThrottlingStrategy())
         .build();
+  }
+
+  private void validateEndpoint(String endpointUrl) {
+    URI uri = URI.create(endpointUrl);
+    String scheme = uri.getScheme();
+    if (scheme == null || (!scheme.equals("http") && !scheme.equals("https"))) {
+      throw new IllegalArgumentException(
+          "Invalid S3 endpoint scheme: " + scheme + ". Only http and https are allowed.");
+    }
+    String host = uri.getHost();
+    if (host == null) {
+      throw new IllegalArgumentException("Invalid S3 endpoint: no host specified");
+    }
+    boolean allowed =
+        host.equals("localhost")
+            || host.equals("127.0.0.1")
+            || host.endsWith(".amazonaws.com")
+            || host.endsWith(".localstack.cloud");
+    if (!allowed) {
+      log.warn(
+          "S3 endpoint host '{}' is not in the standard allowlist "
+              + "(localhost, *.amazonaws.com, *.localstack.cloud). "
+              + "Ensure this is intentional.",
+          host);
+    }
   }
 
   // Configuration properties for external access

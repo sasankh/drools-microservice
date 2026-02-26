@@ -4,9 +4,11 @@ import com.company.drools.core.model.Rule;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -18,7 +20,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.stereotype.Component;
 
 /**
@@ -169,8 +174,8 @@ public class RedisRuleCache implements RuleCache {
   @Override
   public void clear() {
     try {
-      Set<String> keys = redisTemplate.keys(CACHE_KEY_PREFIX + "*");
-      if (keys != null && !keys.isEmpty()) {
+      Set<String> keys = scanForKeys(CACHE_KEY_PREFIX + "*");
+      if (!keys.isEmpty()) {
         Long deletedCount = redisTemplate.delete(keys);
         log.info("Cleared Redis cache: {} rules removed", deletedCount);
       }
@@ -183,8 +188,7 @@ public class RedisRuleCache implements RuleCache {
   @Override
   public long size() {
     try {
-      Set<String> keys = redisTemplate.keys(CACHE_KEY_PREFIX + "*");
-      return keys != null ? keys.size() : 0;
+      return scanForKeys(CACHE_KEY_PREFIX + "*").size();
 
     } catch (DataAccessException e) {
       log.warn("Redis error during size operation", e);
@@ -202,8 +206,8 @@ public class RedisRuleCache implements RuleCache {
   @Override
   public List<String> getCachedRuleIds() {
     try {
-      Set<String> keys = redisTemplate.keys(CACHE_KEY_PREFIX + "*");
-      if (keys == null || keys.isEmpty()) {
+      Set<String> keys = scanForKeys(CACHE_KEY_PREFIX + "*");
+      if (keys.isEmpty()) {
         return new ArrayList<>();
       }
 
@@ -275,6 +279,24 @@ public class RedisRuleCache implements RuleCache {
       log.warn("Redis connectivity test failed", e);
       return false;
     }
+  }
+
+  /** Uses SCAN instead of KEYS to avoid blocking Redis in production. */
+  private Set<String> scanForKeys(String pattern) {
+    Set<String> result =
+        redisTemplate.execute(
+            (RedisCallback<Set<String>>)
+                connection -> {
+                  Set<String> keys = new HashSet<>();
+                  ScanOptions options = ScanOptions.scanOptions().match(pattern).count(100).build();
+                  try (Cursor<byte[]> cursor = connection.keyCommands().scan(options)) {
+                    while (cursor.hasNext()) {
+                      keys.add(new String(cursor.next(), StandardCharsets.UTF_8));
+                    }
+                  }
+                  return keys;
+                });
+    return result != null ? result : Set.of();
   }
 
   /** Builds the Redis cache key for a rule ID. */

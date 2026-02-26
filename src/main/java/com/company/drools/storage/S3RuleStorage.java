@@ -323,7 +323,11 @@ public class S3RuleStorage implements RuleStorage {
    * "pricing/discount/simple.drl"
    */
   private String ruleIdToS3Key(String ruleId) {
-    return ruleId.replace(".", "/") + ".drl";
+    String s3Key = ruleId.replace(".", "/") + ".drl";
+    if (s3Key.contains("../") || s3Key.startsWith("/")) {
+      throw new IllegalArgumentException("Invalid rule ID: path traversal detected");
+    }
+    return s3Key;
   }
 
   /**

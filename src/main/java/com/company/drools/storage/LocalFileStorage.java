@@ -156,7 +156,12 @@ public class LocalFileStorage implements RuleStorage {
 
   private Path getRuleFilePath(String ruleId) {
     String relativePath = ruleId.replace(".", "/") + ".drl";
-    return Paths.get(rulesDirectory, relativePath);
+    Path filePath = Paths.get(rulesDirectory, relativePath).normalize();
+    Path rulesRoot = Paths.get(rulesDirectory).normalize();
+    if (!filePath.startsWith(rulesRoot)) {
+      throw new IllegalArgumentException("Invalid rule ID: path traversal detected");
+    }
+    return filePath;
   }
 
   private String pathToRuleId(Path path) {

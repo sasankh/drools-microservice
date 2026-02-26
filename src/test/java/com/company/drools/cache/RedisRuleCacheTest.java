@@ -30,6 +30,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
@@ -72,6 +73,12 @@ class RedisRuleCacheTest extends BaseUnitTest {
   /** Force the circuit breaker into OPEN state by transitioning it directly. */
   private void forceCircuitBreakerOpen() {
     redisCircuitBreaker.transitionToOpenState();
+  }
+
+  /** Mocks the SCAN-based key lookup to return the given keys. */
+  @SuppressWarnings("unchecked")
+  private void mockScanKeys(Set<String> keys) {
+    when(redisTemplate.execute(any(RedisCallback.class))).thenReturn(keys);
   }
 
   // ========================================================================
@@ -366,41 +373,41 @@ class RedisRuleCacheTest extends BaseUnitTest {
       keys.add("drools:rule:rule2");
       keys.add("drools:rule:rule3");
 
-      when(redisTemplate.keys("drools:rule:*")).thenReturn(keys);
+      mockScanKeys(keys);
       when(redisTemplate.delete(keys)).thenReturn(3L);
 
       redisRuleCache.clear();
 
-      verify(redisTemplate).keys("drools:rule:*");
       verify(redisTemplate).delete(keys);
     }
 
     @Test
     @DisplayName("clear with no keys does not call delete")
+    @SuppressWarnings("unchecked")
     void testClear_NoKeys_DoesNotCallDelete() {
-      when(redisTemplate.keys("drools:rule:*")).thenReturn(new HashSet<>());
+      mockScanKeys(new HashSet<>());
 
       redisRuleCache.clear();
 
-      verify(redisTemplate).keys("drools:rule:*");
       verify(redisTemplate, never()).delete(any(Set.class));
     }
 
     @Test
-    @DisplayName("clear with null keys does not call delete")
+    @DisplayName("clear with null keys (scan returns empty) does not call delete")
+    @SuppressWarnings("unchecked")
     void testClear_NullKeys_DoesNotCallDelete() {
-      when(redisTemplate.keys("drools:rule:*")).thenReturn(null);
+      mockScanKeys(null);
 
       redisRuleCache.clear();
 
-      verify(redisTemplate).keys("drools:rule:*");
       verify(redisTemplate, never()).delete(any(Set.class));
     }
 
     @Test
     @DisplayName("clear handles DataAccessException gracefully")
+    @SuppressWarnings("unchecked")
     void testClear_DataAccessException_HandledGracefully() {
-      when(redisTemplate.keys("drools:rule:*"))
+      when(redisTemplate.execute(any(RedisCallback.class)))
           .thenThrow(new QueryTimeoutException("Redis timeout"));
 
       assertThatCode(() -> redisRuleCache.clear()).doesNotThrowAnyException();
@@ -422,7 +429,7 @@ class RedisRuleCacheTest extends BaseUnitTest {
       keys.add("drools:rule:rule1");
       keys.add("drools:rule:rule2");
 
-      when(redisTemplate.keys("drools:rule:*")).thenReturn(keys);
+      mockScanKeys(keys);
 
       assertThat(redisRuleCache.size()).isEqualTo(2);
     }
@@ -430,15 +437,16 @@ class RedisRuleCacheTest extends BaseUnitTest {
     @Test
     @DisplayName("size returns 0 when no keys exist")
     void testSize_NoKeys_ReturnsZero() {
-      when(redisTemplate.keys("drools:rule:*")).thenReturn(null);
+      mockScanKeys(null);
 
       assertThat(redisRuleCache.size()).isEqualTo(0);
     }
 
     @Test
     @DisplayName("size returns 0 on DataAccessException")
+    @SuppressWarnings("unchecked")
     void testSize_DataAccessException_ReturnsZero() {
-      when(redisTemplate.keys("drools:rule:*"))
+      when(redisTemplate.execute(any(RedisCallback.class)))
           .thenThrow(new QueryTimeoutException("Redis timeout"));
 
       assertThat(redisRuleCache.size()).isEqualTo(0);
@@ -475,7 +483,7 @@ class RedisRuleCacheTest extends BaseUnitTest {
       keys.add("drools:rule:pricing.discount.simple");
       keys.add("drools:rule:validation.input.basic");
 
-      when(redisTemplate.keys("drools:rule:*")).thenReturn(keys);
+      mockScanKeys(keys);
 
       List<String> ruleIds = redisRuleCache.getCachedRuleIds();
 
@@ -487,7 +495,7 @@ class RedisRuleCacheTest extends BaseUnitTest {
     @Test
     @DisplayName("getCachedRuleIds returns empty list when no keys exist")
     void testGetCachedRuleIds_NoKeys_ReturnsEmptyList() {
-      when(redisTemplate.keys("drools:rule:*")).thenReturn(new HashSet<>());
+      mockScanKeys(new HashSet<>());
 
       List<String> ruleIds = redisRuleCache.getCachedRuleIds();
 
@@ -497,7 +505,7 @@ class RedisRuleCacheTest extends BaseUnitTest {
     @Test
     @DisplayName("getCachedRuleIds returns empty list when keys are null")
     void testGetCachedRuleIds_NullKeys_ReturnsEmptyList() {
-      when(redisTemplate.keys("drools:rule:*")).thenReturn(null);
+      mockScanKeys(null);
 
       List<String> ruleIds = redisRuleCache.getCachedRuleIds();
 
@@ -506,8 +514,9 @@ class RedisRuleCacheTest extends BaseUnitTest {
 
     @Test
     @DisplayName("getCachedRuleIds returns empty list on DataAccessException")
+    @SuppressWarnings("unchecked")
     void testGetCachedRuleIds_DataAccessException_ReturnsEmptyList() {
-      when(redisTemplate.keys("drools:rule:*"))
+      when(redisTemplate.execute(any(RedisCallback.class)))
           .thenThrow(new QueryTimeoutException("Redis timeout"));
 
       List<String> ruleIds = redisRuleCache.getCachedRuleIds();
@@ -527,8 +536,8 @@ class RedisRuleCacheTest extends BaseUnitTest {
     @Test
     @DisplayName("getStatistics returns CacheStatistics with correct local stats")
     void testGetStatistics_ReturnsCorrectStats() {
-      // Setup size mock
-      when(redisTemplate.keys("drools:rule:*")).thenReturn(new HashSet<>());
+      // Setup size mock (SCAN returns empty)
+      mockScanKeys(new HashSet<>());
 
       // Generate some hits and misses
       Rule rule = RuleTestUtils.createSimpleRule("rule.one");
@@ -613,12 +622,13 @@ class RedisRuleCacheTest extends BaseUnitTest {
 
     @Test
     @DisplayName("evictIfNeeded is a no-op for Redis cache")
+    @SuppressWarnings("unchecked")
     void testEvictIfNeeded_IsNoOp() {
       // Should not throw and should not interact with Redis
       assertThatCode(() -> redisRuleCache.evictIfNeeded()).doesNotThrowAnyException();
 
-      // No keys/delete calls should be made
-      verify(redisTemplate, never()).keys(anyString());
+      // No scan/delete calls should be made
+      verify(redisTemplate, never()).execute(any(RedisCallback.class));
       verify(redisTemplate, never()).delete(anyString());
     }
   }
@@ -661,7 +671,7 @@ class RedisRuleCacheTest extends BaseUnitTest {
     @DisplayName("getLocalCacheEfficiency returns hit rate from statistics")
     void testGetLocalCacheEfficiency_ReturnsHitRate() {
       // Setup: no keys for size()
-      when(redisTemplate.keys("drools:rule:*")).thenReturn(new HashSet<>());
+      mockScanKeys(new HashSet<>());
 
       // Generate 3 hits
       Rule rule = RuleTestUtils.createSimpleRule("rule.one");
@@ -682,7 +692,7 @@ class RedisRuleCacheTest extends BaseUnitTest {
     @Test
     @DisplayName("getLocalCacheEfficiency returns 0.0 when no requests have been made")
     void testGetLocalCacheEfficiency_NoRequests_ReturnsZero() {
-      when(redisTemplate.keys("drools:rule:*")).thenReturn(new HashSet<>());
+      mockScanKeys(new HashSet<>());
 
       assertThat(redisRuleCache.getLocalCacheEfficiency()).isEqualTo(0.0);
     }
