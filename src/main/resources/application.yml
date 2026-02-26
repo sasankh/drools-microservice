@@ -110,7 +110,7 @@ drools:
     request:
       max-size-bytes: ${DROOLS_VALIDATION_REQUEST_MAX_SIZE_BYTES:1048576}
   cors:
-    allowed-origins: ${DROOLS_CORS_ALLOWED_ORIGINS:*}
+    allowed-origins: ${DROOLS_CORS_ALLOWED_ORIGINS:}
     allowed-methods: ${DROOLS_CORS_ALLOWED_METHODS:GET,POST,PUT,DELETE,OPTIONS}
     allowed-headers: ${DROOLS_CORS_ALLOWED_HEADERS:*}
     allow-credentials: ${DROOLS_CORS_ALLOW_CREDENTIALS:false}
@@ -171,10 +171,12 @@ spring:
       
 drools:
   rule-source: local
-  
+  cors:
+    allowed-origins: "*"
+
 redis:
   enabled: false
-  
+
 logging:
   level:
     com.company.drools: DEBUG
@@ -188,6 +190,8 @@ spring:
 
 drools:
   rule-source: s3
+  cors:
+    allowed-origins: "*"
   s3:
     endpoint: http://localhost:4566
   timeout:
@@ -295,6 +299,8 @@ spring:
 
 drools:
   rule-source: s3
+  cors:
+    allowed-origins: "*"
   timeout:
     http:
       connection: 8

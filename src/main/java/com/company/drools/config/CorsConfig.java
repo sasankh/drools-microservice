@@ -2,6 +2,8 @@ package com.company.drools.config;
 
 import java.util.Arrays;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,13 +14,15 @@ import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
- * CORS configuration for the Drools Rule Engine API Allows all origins by default but configurable
- * for production environments
+ * CORS configuration for the Drools Rule Engine API. Uses restrictive origins by default; override
+ * via DROOLS_CORS_ALLOWED_ORIGINS for development.
  */
 @Configuration
 public class CorsConfig implements WebMvcConfigurer {
 
-  @Value("${drools.cors.allowed-origins:*}")
+  private static final Logger log = LoggerFactory.getLogger(CorsConfig.class);
+
+  @Value("${drools.cors.allowed-origins:}")
   private String allowedOrigins;
 
   @Value("${drools.cors.allowed-methods:GET,POST,PUT,DELETE,OPTIONS}")
@@ -35,9 +39,15 @@ public class CorsConfig implements WebMvcConfigurer {
 
   @Override
   public void addCorsMappings(CorsRegistry registry) {
+    warnIfWildcardOrigins();
+
     List<String> origins = parseCommaSeparatedValues(allowedOrigins);
     List<String> methods = parseCommaSeparatedValues(allowedMethods);
     List<String> headers = parseCommaSeparatedValues(allowedHeaders);
+
+    if (origins.isEmpty()) {
+      return;
+    }
 
     registry
         .addMapping("/**")
@@ -56,7 +66,9 @@ public class CorsConfig implements WebMvcConfigurer {
     List<String> methods = parseCommaSeparatedValues(allowedMethods);
     List<String> headers = parseCommaSeparatedValues(allowedHeaders);
 
-    configuration.setAllowedOriginPatterns(origins);
+    if (!origins.isEmpty()) {
+      configuration.setAllowedOriginPatterns(origins);
+    }
     configuration.setAllowedMethods(methods);
     configuration.setAllowedHeaders(headers);
     configuration.setAllowCredentials(allowCredentials);
@@ -69,8 +81,20 @@ public class CorsConfig implements WebMvcConfigurer {
 
   private List<String> parseCommaSeparatedValues(String value) {
     if (value == null || value.trim().isEmpty()) {
-      return Arrays.asList("*");
+      return List.of();
     }
     return Arrays.asList(value.split("\\s*,\\s*"));
+  }
+
+  private void warnIfWildcardOrigins() {
+    List<String> origins = parseCommaSeparatedValues(allowedOrigins);
+    if (origins.contains("*")) {
+      log.warn(
+          "CORS allowed-origins is set to wildcard (*). "
+              + "Set DROOLS_CORS_ALLOWED_ORIGINS to restrict origins in production.");
+    }
+    if (origins.isEmpty()) {
+      log.info("CORS allowed-origins is empty — no cross-origin requests will be allowed");
+    }
   }
 }

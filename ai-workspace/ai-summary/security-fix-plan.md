@@ -3,7 +3,7 @@
 **Updated**: 2026-02-26
 **Source**: [security-review-2026-02-26.md](security-review-2026-02-26.md)
 **Total Findings**: 42 (3 Critical, 10 High, 15 Medium, 9 Low, 5 Info)
-**Progress**: 12/42 complete (Phase 1-2 done)
+**Progress**: 15/42 complete (Phase 1-3 done)
 
 ---
 
@@ -56,23 +56,24 @@
 
 ---
 
-## Phase 3: DRL Sandboxing & Security Headers (5-10 hours total)
+## Phase 3: DRL Sandboxing & Security Headers — COMPLETED
 
-- [ ] **13. C-1: Arbitrary code execution via unsanitized DRL rules** — CRITICAL — 4-8h
-  - Files: `RuleCompiler.java:23-67`, `RuleExecutor.java:69-90`
-  - Fix: Implement DRL content scanning before compilation:
-    - Block dangerous classes: `Runtime`, `ProcessBuilder`, `System.exit`
-    - Block dangerous packages: `java.io`, `java.net`, reflection APIs
-    - Allowlist permitted imports
-    - Consider sandboxed execution environment
+- [x] **13. C-1: Arbitrary code execution via unsanitized DRL rules** — CRITICAL
+  - New file: `DrlSanitizer.java` — scans DRL content before compilation
+  - Blocklist: `Runtime`, `ProcessBuilder`, `Thread`, `ClassLoader`, `System.exit`, `Class.forName`, etc.
+  - Import allowlist: only `java.util.*`, `java.math.*`, `java.time.*`, `java.lang` primitives, `java.text` formatters
+  - Blocks `eval()`, static imports, `java.io.*`, `java.net.*`, `java.lang.reflect.*`, `javax.script.*`, `javax.naming.*`
+  - Integrated into `RuleCompiler.compileRules()` — rejects rules before Drools compilation
 
-- [ ] **14. H-5: CORS wildcard origin default** — HIGH — 15 min
-  - Files: `CorsConfig.java:21`, `application.yml:111`
-  - Fix: Set restrictive origins in prod profile (default `*` carried into all profiles)
+- [x] **14. H-5: CORS wildcard origin default** — HIGH
+  - File: `CorsConfig.java` — default changed from `*` to empty (no CORS); logs warning when wildcard configured
+  - File: `application.yml` — `*` set explicitly in local/dev/docker profiles; prod defaults to empty (no cross-origin)
 
-- [ ] **15. M-14: No security headers** — MEDIUM — 1h
-  - Files: New filter or Spring Security config
-  - Fix: Add HSTS, X-Content-Type-Options, X-Frame-Options, CSP headers
+- [x] **15. M-14: No security headers** — MEDIUM
+  - New file: `SecurityHeadersFilter.java` — `@Order(-1)` filter adds 7 security headers to every response
+  - Headers: X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy, Cache-Control, CSP, HSTS
+
+**Verified**: 584 tests passing (24 new tests added), 0 failures
 
 ---
 

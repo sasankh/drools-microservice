@@ -19,11 +19,13 @@ class RuleCompilerTest {
 
   private RuleCompiler ruleCompiler;
   private KieServices kieServices;
+  private DrlSanitizer drlSanitizer;
 
   @BeforeEach
   void setUp() {
     kieServices = KieServices.Factory.get();
-    ruleCompiler = new RuleCompiler(kieServices);
+    drlSanitizer = new DrlSanitizer();
+    ruleCompiler = new RuleCompiler(kieServices, drlSanitizer);
   }
 
   @Nested

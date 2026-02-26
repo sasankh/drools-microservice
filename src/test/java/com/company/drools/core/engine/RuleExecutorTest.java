@@ -31,7 +31,7 @@ class RuleExecutorTest {
 
   /** Helper: compile a single rule and return the KieContainer. */
   private KieContainer compileRule(Rule rule) {
-    RuleCompiler compiler = new RuleCompiler(kieServices);
+    RuleCompiler compiler = new RuleCompiler(kieServices, new DrlSanitizer());
     RuleCompiler.CompilationResult result = compiler.compileRules(List.of(rule));
     assertThat(result.isSuccess())
         .as("Rule compilation should succeed for: " + rule.getRuleId())

@@ -1,6 +1,7 @@
 package com.company.drools.core.engine;
 
 import com.company.drools.core.model.Rule;
+import java.util.ArrayList;
 import java.util.List;
 import org.kie.api.KieServices;
 import org.kie.api.builder.*;
@@ -15,15 +16,32 @@ public class RuleCompiler {
   private static final Logger log = LoggerFactory.getLogger(RuleCompiler.class);
 
   private final KieServices kieServices;
+  private final DrlSanitizer drlSanitizer;
 
-  public RuleCompiler(KieServices kieServices) {
+  public RuleCompiler(KieServices kieServices, DrlSanitizer drlSanitizer) {
     this.kieServices = kieServices;
+    this.drlSanitizer = drlSanitizer;
   }
 
   public CompilationResult compileRules(List<Rule> rules) {
     log.debug("Compiling {} rules", rules.size());
 
     try {
+      // Sanitize all rules before compilation
+      List<String> allViolations = new ArrayList<>();
+      for (Rule rule : rules) {
+        DrlSanitizer.SanitizationResult result =
+            drlSanitizer.sanitize(rule.getRuleId(), rule.getContent());
+        if (!result.isAccepted()) {
+          allViolations.add(rule.getRuleId() + ": " + result.getViolations());
+        }
+      }
+      if (!allViolations.isEmpty()) {
+        log.error("DRL sanitization rejected {} rule(s): {}", allViolations.size(), allViolations);
+        return CompilationResult.failure(
+            "DRL security violations: " + String.join("; ", allViolations));
+      }
+
       KieFileSystem kieFileSystem = kieServices.newKieFileSystem();
 
       // Add each rule to the file system

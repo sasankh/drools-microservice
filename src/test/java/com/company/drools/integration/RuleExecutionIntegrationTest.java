@@ -43,7 +43,7 @@ class RuleExecutionIntegrationTest {
   @BeforeAll
   static void initShared() {
     kieServices = KieServices.Factory.get();
-    ruleCompiler = new RuleCompiler(kieServices);
+    ruleCompiler = new RuleCompiler(kieServices, new com.company.drools.core.engine.DrlSanitizer());
     executorService = Executors.newFixedThreadPool(10);
   }
 
