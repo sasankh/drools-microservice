@@ -82,6 +82,54 @@ After writing, confirm:
 
 ---
 
+## CRITICAL RULES — Read Before Writing
+
+### Rule 1: Archive naming MUST use Unix epoch timestamps ONLY
+```
+CORRECT:   ai-initial-context-1772101857.md
+WRONG:     ai-initial-context-20260219-181912.md   (date format)
+WRONG:     ai-context-latest.md                    (different prefix)
+WRONG:     ai-initial-context-latest-backup.md     (invented name)
+```
+The archive filename format is: `ai-initial-context-{epoch}.md` — no exceptions.
+Use `date +%s` to get the epoch. Do not invent alternative naming schemes.
+
+### Rule 2: The context file MUST be comprehensive (800+ lines)
+The purpose of this file is to give a future AI assistant **complete project context in a single read**. A 200-line summary defeats the purpose.
+
+**Minimum sections required** (all must have meaningful content, not just headers):
+- PROJECT OVERVIEW (what this project is, business value, capabilities)
+- PROJECT STATUS (health score, phase table, coverage table, recent achievements)
+- TECHNOLOGY STACK (all technologies with versions and purpose)
+- REPOSITORY STRUCTURE (full directory tree with file descriptions)
+- PHASE 1-6 details (what was built, key decisions, issues resolved)
+- ARCHITECTURE DECISIONS (numbered list with rationale)
+- CORE CONCEPTS (execution flow, refresh flow, caching behavior, error handling)
+- PERFORMANCE METRICS (targets vs actuals table, memory stability results)
+- SAMPLE RULES & TESTING (all 10 rules, test commands, DRL patterns)
+- DOCKER & DEPLOYMENT (docker-compose setup, production config, endpoints table)
+- ENVIRONMENT VARIABLES (all critical env vars)
+- DEFERRED FEATURES (numbered list with status)
+- GIT STATE (branch, recent commits)
+- DEVELOPMENT WORKFLOW COMMANDS (java setup, build, test, docker, API testing)
+- SESSION HISTORY (summary of all major sessions)
+- AI WORKSPACE (context management, session logs, instructions)
+- NEXT STEPS
+
+**Size guideline**: If your output is under 800 lines, you are compacting too aggressively. The previous version should be used as a baseline — never produce something significantly shorter than the last version.
+
+### Rule 3: "Write as-is" means FULL DETAIL, not a summary
+"Write it as-is — do not compact or summarize" means:
+- Include code snippets for critical sections (memory leak fix, docker-compose healthcheck, etc.)
+- Include full directory trees with per-file descriptions
+- Include tables (coverage, performance, sample rules, endpoints)
+- Include command examples with full syntax
+- Include ASCII flow diagrams where helpful
+
+If in doubt, include more rather than less. A future AI assistant reading this file should understand the project well enough to start contributing immediately.
+
+---
+
 ## Notes
 
 - **Never delete the archived files** — they form a history of how context evolved over time.

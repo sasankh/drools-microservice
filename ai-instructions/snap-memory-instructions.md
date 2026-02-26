@@ -31,6 +31,44 @@ ai-workspace/snap-memory/snap-memory-{epochtime}.md
 
 ---
 
+## CRITICAL RULES — Read Before Writing
+
+### Rule 1: Always use `date +%s` for the epoch — never estimate or calculate manually
+```bash
+# CORRECT — run this command and use the output
+date +%s
+# Example output: 1771577000
+
+# WRONG — do not manually estimate, calculate, or round timestamps
+# WRONG — do not use a future time or session-end prediction
+```
+The epoch in the filename MUST match the actual time the file is created. If the epoch doesn't match real time, snap-memories will sort out of order and confuse future sessions.
+
+### Rule 2: Check existing snap-memories before creating a new one
+Before writing a new snap-memory, list existing files to understand what's already documented:
+```bash
+ls -t ai-workspace/snap-memory/ | head -5
+```
+Then read the most recent one to avoid duplicating content. Each snap-memory should document **new work from this session only** — not re-document work already captured in a previous snap-memory.
+
+### Rule 3: Sections must have real content, not just headers
+At minimum, these sections MUST contain meaningful content (not placeholders or empty bullets):
+- **SESSION OVERVIEW** — What was done, why, how
+- **TECHNICAL CHANGES** — Files modified with descriptions
+- **PROBLEM SOLVING** — Errors encountered and how they were resolved (or "None" if clean session)
+- **PROJECT STATE** — Git branch, build status, uncommitted changes
+- **NEXT SESSION PREP** — What comes next, where to pick up
+
+Sections 3 (CODE ARCHITECTURE), 7 (DECISION LOG), and 8 (KNOWLEDGE CAPTURE) can be brief or omitted if the session didn't involve architectural changes, major decisions, or new learnings.
+
+### Rule 4: One snap-memory per session — do not split or merge
+- Each snap-memory documents ONE continuous working session
+- Do not create multiple snap-memories for the same session
+- Do not combine multiple sessions into one snap-memory
+- If a session is very long, it's fine to have a long snap-memory
+
+---
+
 ## Complete Snap Memory Structure
 
 ### 1. SESSION OVERVIEW
@@ -468,6 +506,6 @@ Focus on: Platform-specific changes, native modules, permissions, app store subm
 
 ---
 
-**Last Updated**: 2026-02-14
-**Version**: 2.0 (Universal/Agnostic)
+**Last Updated**: 2026-02-26
+**Version**: 2.1 (Universal/Agnostic — added Critical Rules section)
 **Applicable To**: All project types, languages, and architectures
