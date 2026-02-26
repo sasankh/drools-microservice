@@ -1,5 +1,5 @@
 # Drools Rule Engine Microservice - Full AI Context Document
-**Last Updated**: 2026-02-26
+**Last Updated**: 2026-02-20
 **Purpose**: Read ONLY this file to get full project context.
 
 ## PROJECT OVERVIEW
@@ -29,7 +29,7 @@ A high-performance Drools Rule Engine Microservice for business rule execution (
 - **Spring Boot**: 3.x
 - **Drools**: 8.44.0.Final
 - **AWS S3**: Rule storage (LocalStack for dev)
-- **Redis**: Optional caching layer (bean created but NOT actively used — see Architecture Decisions)
+- **Redis**: Optional caching layer
 - **Micrometer**: Metrics (vendor-agnostic — CloudWatch, Grafana, Datadog)
 - **Resilience4j**: Circuit breakers for S3 and Redis
 - **Docker**: Multi-stage build, Amazon Corretto 17 Alpine, ~347MB image
@@ -63,17 +63,13 @@ drools-microservice/
 ├── project-plan/               # project.checklist.md, project.progress.md
 ├── ai-workspace/               # AI session context, summaries, snap-memory
 │   ├── ai-initial-context/     # This file + archives
-│   ├── ai-summary/             # Session changelogs (FIXES-SUMMARY, MEMORY-LEAK-ANALYSIS, docker-race-condition-fix, etc.)
+│   ├── ai-summary/             # Session changelogs (FIXES-SUMMARY, MEMORY-LEAK-ANALYSIS, etc.)
 │   ├── snap-memory/            # Session-by-session implementation history
 │   └── compact-logs/           # Context compression logs
-├── ai-instructions/            # AI assistant instructions
-│   ├── ai-start-prompt.md      # AI onboarding — start here
-│   ├── snap-memory-instructions.md  # Session log template
-│   └── ai-initial-context-instructions.md  # Context update instructions
 ├── scripts/                    # start-production.sh, start-development.sh
 ├── CLAUDE.md                   # Primary development guide
 ├── README.md                   # Project README
-├── docker-compose.yml          # LocalStack + Redis + App (with healthchecks)
+├── docker-compose.yml          # LocalStack + Redis + App
 ├── Dockerfile                  # Multi-stage build
 ├── init-localstack.sh          # S3 bucket + rule upload (reads from sample-rules/)
 ├── test-localstack.sh          # LocalStack validation
@@ -142,7 +138,7 @@ drools-microservice/
 ## PHASE 5: DEPLOYMENT & INFRASTRUCTURE (COMPLETED)
 
 - Multi-stage Dockerfile: Maven build → Amazon Corretto 17 Alpine runtime (~347MB)
-- docker-compose.yml: LocalStack S3 + Redis + App with volume mounts and healthchecks
+- docker-compose.yml: LocalStack S3 + Redis + App with volume mounts
 - init-localstack.sh: 126 lines, reads from sample-rules/ (no hardcoded DRL)
 - 10 sample business rules across pricing, shipping, seasonal, validation
 - One-command setup: ./setup-dev-environment.sh
@@ -157,7 +153,6 @@ drools-microservice/
 - **init-localstack.sh Refactor**: 267 → 126 lines, removed hardcoded DRL
 - **Admin Port Fix**: All /admin/* URLs fixed to port 8080 across 30+ files
 - **API Field Naming Fix**: `ruleId` → `rule_id` (snake_case) in all docs
-- **Docker Race Condition Fix**: LocalStack healthcheck + `condition: service_healthy` in docker-compose.yml — app no longer starts before S3 bucket is ready
 
 ## ARCHITECTURE DECISIONS
 
@@ -169,18 +164,13 @@ drools-microservice/
 4. **Thread Safety**: Each rule execution uses a new KieSession (stateless)
 5. **Rule ID Transformation**: `pricing.discount.vip` → `pricing/discount/vip.drl`
 6. **Storage Factory**: Dynamic selection based on `RULE_SOURCE` env var (s3/local/memory)
-7. **Redis Status**: RedisRuleCache bean is created (`@ConditionalOnProperty`, `redis.enabled=true`) but LocalLRUCache is `@Primary` and wins injection. DroolsEngineService does NOT use the RuleCache interface at all — it has its own `ConcurrentHashMap<String, Rule>` and `volatile KieContainer`. Redis is infrastructure-ready but no rule data flows through it. Decision pending on whether to wire it as second-level cache or keep dormant.
 
 ## CORE CONCEPTS
 
-- **Rule Execution Flow**: API request → validate → DroolsEngineService.executeRule() → KieSession from currentKieContainer → return results
-- **Rule Refresh**: POST /admin/refresh-rules → S3 getAllRules → ruleCache.clear() → droolsEngineService.loadRules() → ruleCache.warmUp() (LocalLRUCache only)
+- **Rule Execution Flow**: API request → validate → check cache → compile if needed → execute in KieSession → return results
+- **Rule Refresh**: POST /admin/refresh-rules reloads all rules from S3, disposes old KieContainers
 - **Memory Safety**: Old KieContainers disposed on refresh to prevent OOM
 - **Circuit Breakers**: S3 and Redis protected — fast-fail during external service outages
-- **Three storage mechanisms for rules**:
-  - `DroolsEngineService`: ConcurrentHashMap + compiled KieContainer (actual execution path)
-  - `LocalLRUCache` (@Primary): Thread-safe LinkedHashMap — used by AdminController for rule listing
-  - `RedisRuleCache`: Created when redis.enabled=true but not injected as primary
 
 ## PERFORMANCE METRICS
 
@@ -188,7 +178,6 @@ drools-microservice/
 - **Rule Execution**: 1ms (target: <100ms)
 - **API Response**: <10ms (target: <500ms)
 - **Docker Image**: 347MB (target: <350MB)
-- **Memory Stability**: 3000 refresh load test passed — heap 73MB→437MB peak→424MB final, 0 Old Gen collections, zero failures
 
 ## SAMPLE RULES & TESTING
 
@@ -219,30 +208,27 @@ curl -X POST http://localhost:8080/execute-rule \
 
 # Or manual
 docker-compose up -d
-# LocalStack healthcheck ensures rules are loaded before app starts
+# Wait for LocalStack init, then:
+curl -X POST http://localhost:8080/admin/refresh-rules
 
 # Build image
 docker build -t drools-rule-engine .
 ```
 
-**Docker race condition**: FIXED. LocalStack has a healthcheck that verifies `.drl` files exist in S3 (`awslocal s3 ls --recursive | grep .drl`). App `depends_on` uses `condition: service_healthy` so it waits for LocalStack init to complete. No manual `refresh-rules` needed after startup.
+**Known issue**: Race condition — app may start before LocalStack init creates S3 bucket. Use `POST /admin/refresh-rules` after startup.
 
 ## DEFERRED FEATURES
 
 - **Phase 4.3**: JMeter performance benchmarks
 - **Java 21 upgrade**: User plans to return to this (pom.xml, enforcer, Dockerfile, set-java-env.sh)
 - **Coverage gaps**: config 83.3% branch, core/engine 83.3% branch
-- **Redis integration**: Redis bean exists but is dormant — decision pending on whether to wire into execution path
-- **Project improvement plan** (Week 3 not started): Prometheus/Grafana, Spring Security, CI/CD pipeline, security audit
+- **Docker race condition**: App starts before LocalStack init completes
 
 ## GIT STATE
 
 - **Branch**: `restart-3` (up to date with origin)
 - **Working tree**: Clean
 - **Recent commits**:
-  - `a401744` added compact
-  - `fd87f46` fix race condition
-  - `9184379` added docs
   - `3e0b7a0` organized files
   - `5d2fac4` added doc and script
   - `099ae30` docs
@@ -256,7 +242,7 @@ source ./set-java-env.sh        # Setup Java 17
 mvn test                        # Run all 550 tests
 mvn test jacoco:report          # Generate coverage report
 mvn spotless:apply              # Format code (required before commit)
-docker-compose up -d            # Start full stack (healthchecks handle startup ordering)
+docker-compose up -d            # Start full stack
 curl http://localhost:8080/admin/health          # Health check
 curl http://localhost:8080/admin/memory/info     # Memory diagnostics
 curl http://localhost:8081/actuator/health       # Actuator health (management port)
@@ -264,19 +250,16 @@ curl http://localhost:8081/actuator/health       # Actuator health (management p
 
 ## FILE ORGANIZATION
 
-- **AI workspace files** in organized directories:
-  - `ai-workspace/ai-summary/` — Session changelogs (FIXES-SUMMARY, MEMORY-LEAK-ANALYSIS, docker-race-condition-fix, test-coverage-checklist, etc.)
+- **AI workspace files** moved to organized directories:
+  - `ai-workspace/ai-summary/` — Session changelogs (FIXES-SUMMARY, MEMORY-LEAK-ANALYSIS, test-coverage-checklist, etc.)
   - `ai-workspace/ai-initial-context/` — This context file + archives
   - `ai-workspace/snap-memory/` — Session implementation history
-  - `ai-workspace/compact-logs/` — Context compression logs
-- **AI instructions** in `ai-instructions/` — ai-start-prompt.md, snap-memory-instructions.md, ai-initial-context-instructions.md
 - **Documentation** in `documentations/` — architecture, deployment, troubleshooting, jvm-optimization, etc.
 - **Project planning** in `project-plan/` — checklist, progress tracker
 
 ## NEXT STEPS
 
-1. **Redis decision** — Wire as second-level cache, keep dormant, or remove
-2. **Java 21 upgrade** (user plans to return)
-3. **JMeter performance tests** (Phase 4.3 deferred)
-4. **Week 3 improvement plan** — Prometheus/Grafana, Spring Security, CI/CD (not started)
-5. **Project is production-ready** — all core features complete
+1. **Java 21 upgrade** (user plans to return)
+2. **JMeter performance tests** (Phase 4.3 deferred)
+3. **Docker race condition fix** (add retry/dependency logic)
+4. **Project is production-ready** — all core features complete
