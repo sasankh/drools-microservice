@@ -138,14 +138,15 @@ class LogSanitizerTest extends BaseUnitTest {
     }
 
     @Test
-    @DisplayName("masks SSN without separators")
+    @DisplayName("SSN without separators is NOT masked (avoids false positives on 9-digit numbers)")
     void testSsnNoSeparators() {
       Map<String, Object> data = new HashMap<>();
       data.put("identifier", "123456789");
 
       Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
 
-      assertThat(result.get("identifier")).isEqualTo("***-**-6789");
+      // 9-digit numbers without dashes/spaces should pass through (could be order IDs, etc.)
+      assertThat(result.get("identifier")).isEqualTo("123456789");
     }
 
     @Test
@@ -215,6 +216,114 @@ class LogSanitizerTest extends BaseUnitTest {
       assertThat(result).contains("amount");
       assertThat(result).contains("currency");
       assertThat(result).doesNotContain("more fields");
+    }
+  }
+
+  @Nested
+  @DisplayName("False Positive Prevention")
+  class FalsePositivePrevention {
+
+    @Test
+    @DisplayName("'shipping' key is not redacted (no false positive on 'pin' substring)")
+    void testShippingNotRedacted() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("shipping", "express");
+
+      Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
+
+      assertThat(result.get("shipping")).isEqualTo("express");
+    }
+
+    @Test
+    @DisplayName("'author' key is not redacted (no false positive on 'auth' substring)")
+    void testAuthorNotRedacted() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("author", "Jane Doe");
+
+      Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
+
+      assertThat(result.get("author")).isEqualTo("Jane Doe");
+    }
+
+    @Test
+    @DisplayName("'pin' key is still redacted (exact word boundary)")
+    void testPinStillRedacted() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("pin", "1234");
+
+      Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
+
+      assertThat(result.get("pin")).isEqualTo("[REDACTED]");
+    }
+
+    @Test
+    @DisplayName("'auth' key is still redacted (exact word boundary)")
+    void testAuthStillRedacted() {
+      Map<String, Object> data = new HashMap<>();
+      data.put("auth", "bearer-xyz");
+
+      Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
+
+      assertThat(result.get("auth")).isEqualTo("[REDACTED]");
+    }
+
+    @Test
+    @DisplayName("class names are not redacted in messages")
+    void testClassNameNotRedacted() {
+      String message = "Error in DroolsEngineService during processing";
+
+      String result = LogSanitizer.sanitizeMessage(message);
+
+      assertThat(result).contains("DroolsEngineService");
+    }
+  }
+
+  @Nested
+  @DisplayName("Nested Map Sanitization")
+  class NestedMapSanitization {
+
+    @Test
+    @DisplayName("sanitizes sensitive keys in nested maps")
+    void testNestedMapSensitiveKeys() {
+      Map<String, Object> nested = new HashMap<>();
+      nested.put("password", "secret123");
+      nested.put("name", "John");
+
+      Map<String, Object> data = new HashMap<>();
+      data.put("user", nested);
+
+      Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
+
+      @SuppressWarnings("unchecked")
+      Map<String, Object> resultNested = (Map<String, Object>) result.get("user");
+      assertThat(resultNested.get("password")).isEqualTo("[REDACTED]");
+      assertThat(resultNested.get("name")).isEqualTo("John");
+    }
+
+    @Test
+    @DisplayName("handles deeply nested maps")
+    void testDeeplyNestedMap() {
+      Map<String, Object> level3 = new HashMap<>();
+      level3.put("token", "abc123");
+
+      Map<String, Object> level2 = new HashMap<>();
+      level2.put("config", level3);
+
+      Map<String, Object> level1 = new HashMap<>();
+      level1.put("settings", level2);
+
+      Map<String, Object> data = new HashMap<>();
+      data.put("app", level1);
+
+      Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
+
+      @SuppressWarnings("unchecked")
+      Map<String, Object> r1 = (Map<String, Object>) result.get("app");
+      @SuppressWarnings("unchecked")
+      Map<String, Object> r2 = (Map<String, Object>) r1.get("settings");
+      @SuppressWarnings("unchecked")
+      Map<String, Object> r3 = (Map<String, Object>) r2.get("config");
+      assertThat(r3.get("token")).isEqualTo("[REDACTED]");
     }
   }
 }

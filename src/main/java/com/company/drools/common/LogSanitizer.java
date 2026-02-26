@@ -1,33 +1,35 @@
 package com.company.drools.common;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Utility class for sanitizing log messages to prevent sensitive data exposure */
 public class LogSanitizer {
 
-  // Common patterns for sensitive data
+  // Common patterns for sensitive data (word-boundary aware to avoid false positives)
   private static final Pattern[] SENSITIVE_PATTERNS = {
-    Pattern.compile("(?i)password", Pattern.CASE_INSENSITIVE),
-    Pattern.compile("(?i)secret", Pattern.CASE_INSENSITIVE),
-    Pattern.compile("(?i)token", Pattern.CASE_INSENSITIVE),
-    Pattern.compile("(?i)apikey", Pattern.CASE_INSENSITIVE),
-    Pattern.compile("(?i)api_key", Pattern.CASE_INSENSITIVE),
-    Pattern.compile("(?i)authorization", Pattern.CASE_INSENSITIVE),
-    Pattern.compile("(?i)auth", Pattern.CASE_INSENSITIVE),
-    Pattern.compile("(?i)credential", Pattern.CASE_INSENSITIVE),
-    Pattern.compile("(?i)ssn", Pattern.CASE_INSENSITIVE),
-    Pattern.compile("(?i)social.*security", Pattern.CASE_INSENSITIVE),
-    Pattern.compile("(?i)credit.*card", Pattern.CASE_INSENSITIVE),
-    Pattern.compile("(?i)card.*number", Pattern.CASE_INSENSITIVE),
-    Pattern.compile("(?i)cvv", Pattern.CASE_INSENSITIVE),
-    Pattern.compile("(?i)pin", Pattern.CASE_INSENSITIVE),
-    Pattern.compile("(?i)account.*number", Pattern.CASE_INSENSITIVE),
-    Pattern.compile("(?i)routing.*number", Pattern.CASE_INSENSITIVE),
-    Pattern.compile("(?i)bank.*account", Pattern.CASE_INSENSITIVE)
+    Pattern.compile("(?i)password"),
+    Pattern.compile("(?i)secret"),
+    Pattern.compile("(?i)token"),
+    Pattern.compile("(?i)apikey"),
+    Pattern.compile("(?i)api_key"),
+    Pattern.compile("(?i)authorization"),
+    Pattern.compile("(?i)\\bauth\\b"),
+    Pattern.compile("(?i)credential"),
+    Pattern.compile("(?i)\\bssn\\b"),
+    Pattern.compile("(?i)social.*security"),
+    Pattern.compile("(?i)credit.*card"),
+    Pattern.compile("(?i)card.*number"),
+    Pattern.compile("(?i)\\bcvv\\b"),
+    Pattern.compile("(?i)\\bpin\\b"),
+    Pattern.compile("(?i)account.*number"),
+    Pattern.compile("(?i)routing.*number"),
+    Pattern.compile("(?i)bank.*account")
   };
 
   // Common sensitive field names
@@ -62,6 +64,15 @@ public class LogSanitizer {
               "nonce"));
 
   private static final String REDACTED_VALUE = "[REDACTED]";
+
+  // Pattern for long alphanumeric strings (potential tokens/keys)
+  private static final Pattern LONG_TOKEN_PATTERN = Pattern.compile("\\b[A-Za-z0-9]{20,}\\b");
+
+  // UUID pattern — should NOT be redacted
+  private static final Pattern UUID_PATTERN = Pattern.compile("^[0-9a-fA-F]{32}$");
+
+  // Max recursion depth for nested map sanitization
+  private static final int MAX_SANITIZE_DEPTH = 5;
 
   private LogSanitizer() {
     // Utility class - private constructor
@@ -103,6 +114,11 @@ public class LogSanitizer {
       return REDACTED_VALUE;
     }
 
+    // Recursively sanitize nested maps
+    if (value instanceof Map) {
+      return sanitizeNestedMap(value, 0);
+    }
+
     // Additional checks for string values that might contain sensitive data
     if (value instanceof String) {
       String stringValue = (String) value;
@@ -112,8 +128,9 @@ public class LogSanitizer {
         return maskCreditCard(stringValue);
       }
 
-      // Check for potential SSN (simplified pattern)
-      if (stringValue.matches("\\d{3}[\\s-]?\\d{2}[\\s-]?\\d{4}")) {
+      // Check for potential SSN (require XXX-XX-XXXX or XXX XX XXXX format to reduce false
+      // positives)
+      if (stringValue.matches("\\d{3}[\\s-]\\d{2}[\\s-]\\d{4}")) {
         return maskSSN(stringValue);
       }
 
@@ -144,11 +161,11 @@ public class LogSanitizer {
         sanitized.replaceAll(
             "\\b\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}\\b", "[CC-REDACTED]");
 
-    // Replace potential SSNs
-    sanitized = sanitized.replaceAll("\\b\\d{3}[\\s-]?\\d{2}[\\s-]?\\d{4}\\b", "[SSN-REDACTED]");
+    // Replace potential SSNs (require separator to avoid matching arbitrary 9-digit numbers)
+    sanitized = sanitized.replaceAll("\\b\\d{3}[\\s-]\\d{2}[\\s-]\\d{4}\\b", "[SSN-REDACTED]");
 
-    // Replace potential tokens/keys (long alphanumeric strings)
-    sanitized = sanitized.replaceAll("\\b[A-Za-z0-9]{20,}\\b", "[TOKEN-REDACTED]");
+    // Replace potential tokens/keys (long alphanumeric strings, but not UUIDs or class names)
+    sanitized = redactLongTokens(sanitized);
 
     return sanitized;
   }
@@ -213,5 +230,59 @@ public class LogSanitizer {
       return email.charAt(0) + "***" + email.substring(atIndex);
     }
     return REDACTED_VALUE;
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Object sanitizeNestedMap(Object value, int depth) {
+    if (depth >= MAX_SANITIZE_DEPTH) {
+      return REDACTED_VALUE;
+    }
+    Map<String, Object> nestedMap;
+    try {
+      nestedMap = (Map<String, Object>) value;
+    } catch (ClassCastException e) {
+      return value;
+    }
+    Map<String, Object> result = new HashMap<>();
+    for (Map.Entry<String, Object> entry : nestedMap.entrySet()) {
+      String key = entry.getKey();
+      Object val = entry.getValue();
+      String keyLower = key.toLowerCase();
+      if (SENSITIVE_KEYS.contains(keyLower) || containsSensitivePattern(keyLower)) {
+        result.put(key, REDACTED_VALUE);
+      } else if (val instanceof Map) {
+        result.put(key, sanitizeNestedMap(val, depth + 1));
+      } else {
+        result.put(key, sanitizeValue(key, val));
+      }
+    }
+    return result;
+  }
+
+  private static String redactLongTokens(String input) {
+    Matcher matcher = LONG_TOKEN_PATTERN.matcher(input);
+    StringBuilder sb = new StringBuilder();
+    while (matcher.find()) {
+      String match = matcher.group();
+      // Skip UUIDs (32 hex chars without dashes)
+      if (UUID_PATTERN.matcher(match).matches()) {
+        matcher.appendReplacement(sb, Matcher.quoteReplacement(match));
+      } else if (match.contains(".") || looksLikeClassName(match)) {
+        // Skip Java class/package names
+        matcher.appendReplacement(sb, Matcher.quoteReplacement(match));
+      } else {
+        matcher.appendReplacement(sb, "[TOKEN-REDACTED]");
+      }
+    }
+    matcher.appendTail(sb);
+    return sb.toString();
+  }
+
+  private static boolean looksLikeClassName(String value) {
+    // Class names typically start with uppercase and use camelCase
+    // e.g., "DroolsEngineService", "ConcurrentHashMap"
+    return Character.isUpperCase(value.charAt(0))
+        && value.chars().anyMatch(Character::isLowerCase)
+        && value.chars().anyMatch(Character::isUpperCase);
   }
 }
