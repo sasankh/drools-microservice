@@ -2,6 +2,8 @@ package com.company.drools.config;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -25,6 +27,9 @@ public class RateLimitingConfig {
   @Value("${drools.rate-limiting.cleanup-interval-minutes:5}")
   private int cleanupIntervalMinutes;
 
+  @Value("${drools.rate-limiting.max-clients:10000}")
+  private int maxClients;
+
   public boolean isRateLimitingEnabled() {
     return rateLimitingEnabled;
   }
@@ -45,6 +50,10 @@ public class RateLimitingConfig {
     return cleanupIntervalMinutes;
   }
 
+  public int getMaxClients() {
+    return maxClients;
+  }
+
   @Bean
   public InMemoryRateLimitingService rateLimitingService() {
     return new InMemoryRateLimitingService(this);
@@ -52,6 +61,9 @@ public class RateLimitingConfig {
 
   /** Simple in-memory rate limiting service */
   public static class InMemoryRateLimitingService {
+
+    private static final Logger log = LoggerFactory.getLogger(InMemoryRateLimitingService.class);
+
     private final RateLimitingConfig config;
     private final ConcurrentHashMap<String, ClientRateData> clientData;
     private volatile long lastCleanup;
@@ -69,6 +81,14 @@ public class RateLimitingConfig {
 
       long now = System.currentTimeMillis();
       cleanupOldEntries(now);
+
+      // Reject new clients when at capacity to prevent memory exhaustion
+      if (!clientData.containsKey(clientId) && clientData.size() >= config.getMaxClients()) {
+        log.warn(
+            "Rate limiter client map at capacity ({}), rejecting new client",
+            config.getMaxClients());
+        return false;
+      }
 
       ClientRateData data = clientData.computeIfAbsent(clientId, k -> new ClientRateData());
       return data.isAllowed(now, config);
@@ -121,21 +141,15 @@ public class RateLimitingConfig {
           requestCountHour.set(0);
         }
 
-        long currentMinuteCount = requestCountMinute.get();
-        long currentHourCount = requestCountHour.get();
+        // Increment first, then check — atomic to prevent race condition
+        long minuteCount = requestCountMinute.incrementAndGet();
+        long hourCount = requestCountHour.incrementAndGet();
 
-        // Check limits
-        if (currentMinuteCount >= config.getRequestsPerMinute()) {
+        if (minuteCount > config.getRequestsPerMinute()
+            || hourCount > config.getRequestsPerHour()) {
           return false;
         }
 
-        if (currentHourCount >= config.getRequestsPerHour()) {
-          return false;
-        }
-
-        // Increment counters
-        requestCountMinute.incrementAndGet();
-        requestCountHour.incrementAndGet();
         return true;
       }
 

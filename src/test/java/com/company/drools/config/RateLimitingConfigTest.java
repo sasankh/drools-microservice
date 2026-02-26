@@ -21,6 +21,7 @@ class RateLimitingConfigTest {
     ReflectionTestUtils.setField(config, "requestsPerHour", 500);
     ReflectionTestUtils.setField(config, "burstSize", 20);
     ReflectionTestUtils.setField(config, "cleanupIntervalMinutes", 3);
+    ReflectionTestUtils.setField(config, "maxClients", 10000);
   }
 
   @Nested
@@ -195,7 +196,7 @@ class RateLimitingConfigTest {
 
     @Test
     @DisplayName("cleanupOldEntries does not run before interval expires")
-    void testCleanupOldEntries_DoesNotRunBeforeInterval() {
+    void testCleanupOldEntries_DoesNotRunBeforeInterval() throws Exception {
       // Make a request
       service.isAllowed("persistent-client");
 
@@ -207,8 +208,12 @@ class RateLimitingConfigTest {
           (java.util.concurrent.ConcurrentHashMap<String, Object>) clientDataMap;
 
       Object clientRateData = map.get("persistent-client");
-      ReflectionTestUtils.setField(
-          clientRateData, "lastAccess", System.currentTimeMillis() - 2 * 60 * 60 * 1000L);
+      // Use direct field access since ReflectionTestUtils doesn't resolve private inner class
+      // fields
+      java.lang.reflect.Field lastAccessField =
+          clientRateData.getClass().getDeclaredField("lastAccess");
+      lastAccessField.setAccessible(true);
+      lastAccessField.set(clientRateData, System.currentTimeMillis() - 2 * 60 * 60 * 1000L);
 
       // Trigger another request but cleanup interval has not passed
       service.isAllowed("another-client");

@@ -40,6 +40,7 @@ class RateLimitingFilterTest extends BaseUnitTest {
     setField(config, "requestsPerHour", 100);
     setField(config, "burstSize", 10);
     setField(config, "cleanupIntervalMinutes", 5);
+    setField(config, "maxClients", 10000);
 
     rateLimitingService = new RateLimitingConfig.InMemoryRateLimitingService(config);
     filter = new RateLimitingFilter(rateLimitingService, new ObjectMapper());
@@ -183,7 +184,7 @@ class RateLimitingFilterTest extends BaseUnitTest {
     }
 
     @Test
-    @DisplayName("falls back to IP address when no auth headers present")
+    @DisplayName("falls back to remote address when no auth headers present")
     void testFilter_IPAddress_FallbackIdentifier() throws Exception {
       when(request.getRequestURI()).thenReturn("/execute-rule");
       when(request.getRemoteAddr()).thenReturn("203.0.113.50");
@@ -192,34 +193,28 @@ class RateLimitingFilterTest extends BaseUnitTest {
       filter.doFilter(request, response, filterChain);
 
       verify(filterChain).doFilter(request, response);
+    }
 
-      // Verify X-Forwarded-For takes precedence over remote addr
-      HttpServletRequest forwardedRequest = org.mockito.Mockito.mock(HttpServletRequest.class);
-      HttpServletResponse forwardedResponse = org.mockito.Mockito.mock(HttpServletResponse.class);
-      when(forwardedRequest.getRequestURI()).thenReturn("/execute-rule");
-      when(forwardedRequest.getHeader("X-Forwarded-For")).thenReturn("198.51.100.1, 10.0.0.1");
-      when(forwardedRequest.getRemoteAddr()).thenReturn("203.0.113.50");
+    @Test
+    @DisplayName("ignores X-Forwarded-For header to prevent spoofing")
+    void testFilter_XForwardedFor_Ignored() throws Exception {
+      // Both requests come from the same remote address but different X-Forwarded-For
+      // They should share the same rate limit bucket (remote addr)
+      when(request.getRequestURI()).thenReturn("/execute-rule");
+      when(request.getRemoteAddr()).thenReturn("10.0.0.1");
+      when(request.getHeader("X-Forwarded-For")).thenReturn("198.51.100.1");
 
       StringWriter stringWriter = new StringWriter();
       PrintWriter printWriter = new PrintWriter(stringWriter);
-      when(forwardedResponse.getWriter()).thenReturn(printWriter);
+      when(response.getWriter()).thenReturn(printWriter);
 
-      // Exhaust limit for forwarded IP
+      // Exhaust limit — should use remote addr (10.0.0.1), not X-Forwarded-For
       for (int i = 0; i < 6; i++) {
-        filter.doFilter(forwardedRequest, forwardedResponse, filterChain);
+        filter.doFilter(request, response, filterChain);
       }
 
-      // Original IP (203.0.113.50) should still have requests left since the
-      // forwarded request used 198.51.100.1 as the client identifier
-      HttpServletRequest directRequest = org.mockito.Mockito.mock(HttpServletRequest.class);
-      HttpServletResponse directResponse = org.mockito.Mockito.mock(HttpServletResponse.class);
-      when(directRequest.getRequestURI()).thenReturn("/execute-rule");
-      when(directRequest.getRemoteAddr()).thenReturn("203.0.113.50");
-
-      filter.doFilter(directRequest, directResponse, filterChain);
-
-      // directRequest should still pass because it had only 1 request used earlier
-      verify(filterChain).doFilter(directRequest, directResponse);
+      // Should be rate-limited based on remote addr
+      verify(response).setStatus(429);
     }
   }
 
@@ -331,8 +326,8 @@ class RateLimitingFilterTest extends BaseUnitTest {
     }
 
     @Test
-    @DisplayName("uses first IP from X-Forwarded-For with single value")
-    void testFilter_SingleForwardedFor_UsesIt() throws Exception {
+    @DisplayName("uses remote address even when X-Forwarded-For is set")
+    void testFilter_ForwardedFor_UsesRemoteAddr() throws Exception {
       when(request.getRequestURI()).thenReturn("/execute-rule");
       when(request.getHeader("X-Forwarded-For")).thenReturn("198.51.100.5");
       when(request.getRemoteAddr()).thenReturn("10.0.0.1");

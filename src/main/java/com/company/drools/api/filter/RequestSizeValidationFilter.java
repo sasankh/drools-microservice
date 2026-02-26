@@ -3,8 +3,11 @@ package com.company.drools.api.filter;
 import com.company.drools.config.ValidationConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
+import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.HashMap;
@@ -58,9 +61,15 @@ public class RequestSizeValidationFilter extends OncePerRequestFilter {
         return;
       }
 
-      // Also check if Content-Length is missing but the request might be large
+      // When Content-Length is missing (chunked transfer), wrap the stream to enforce the limit
       if (contentLength == -1) {
-        log.debug("Content-Length header is missing for request to {}", request.getRequestURI());
+        log.debug(
+            "Content-Length header missing for request to {}, wrapping with size limit",
+            request.getRequestURI());
+        HttpServletRequest wrappedRequest =
+            new SizeLimitedRequestWrapper(request, validationConfig.getRequestMaxSizeBytes());
+        filterChain.doFilter(wrappedRequest, response);
+        return;
       }
     }
 
@@ -88,5 +97,74 @@ public class RequestSizeValidationFilter extends OncePerRequestFilter {
     String jsonResponse = objectMapper.writeValueAsString(errorResponse);
     response.getWriter().write(jsonResponse);
     response.getWriter().flush();
+  }
+
+  /** Wraps a request to enforce a size limit on the input stream when Content-Length is absent. */
+  private static class SizeLimitedRequestWrapper extends HttpServletRequestWrapper {
+    private final long maxBytes;
+
+    SizeLimitedRequestWrapper(HttpServletRequest request, long maxBytes) {
+      super(request);
+      this.maxBytes = maxBytes;
+    }
+
+    @Override
+    public ServletInputStream getInputStream() throws IOException {
+      ServletInputStream original = super.getInputStream();
+      return new SizeLimitedInputStream(original, maxBytes);
+    }
+  }
+
+  /** ServletInputStream that throws IOException when the size limit is exceeded. */
+  private static class SizeLimitedInputStream extends ServletInputStream {
+    private final ServletInputStream delegate;
+    private final long maxBytes;
+    private long bytesRead = 0;
+
+    SizeLimitedInputStream(ServletInputStream delegate, long maxBytes) {
+      this.delegate = delegate;
+      this.maxBytes = maxBytes;
+    }
+
+    @Override
+    public int read() throws IOException {
+      int b = delegate.read();
+      if (b != -1) {
+        bytesRead++;
+        checkLimit();
+      }
+      return b;
+    }
+
+    @Override
+    public int read(byte[] b, int off, int len) throws IOException {
+      int count = delegate.read(b, off, len);
+      if (count > 0) {
+        bytesRead += count;
+        checkLimit();
+      }
+      return count;
+    }
+
+    private void checkLimit() throws IOException {
+      if (bytesRead > maxBytes) {
+        throw new IOException("Request body exceeds maximum size of " + maxBytes + " bytes");
+      }
+    }
+
+    @Override
+    public boolean isFinished() {
+      return delegate.isFinished();
+    }
+
+    @Override
+    public boolean isReady() {
+      return delegate.isReady();
+    }
+
+    @Override
+    public void setReadListener(ReadListener readListener) {
+      delegate.setReadListener(readListener);
+    }
   }
 }

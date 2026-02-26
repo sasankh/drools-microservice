@@ -194,15 +194,22 @@ class RequestSizeValidationFilterTest extends BaseUnitTest {
   class MissingContentLength {
 
     @Test
-    @DisplayName("allows request when Content-Length is missing (-1)")
-    void testAllowsMissingContentLength() throws Exception {
+    @DisplayName("wraps request with size-limited stream when Content-Length is missing (-1)")
+    void testWrapsRequestWhenContentLengthMissing() throws Exception {
       when(request.getMethod()).thenReturn("POST");
       when(request.getRequestURI()).thenReturn("/execute-rule");
       when(request.getContentLengthLong()).thenReturn(-1L);
 
       filter.doFilterInternal(request, response, filterChain);
 
-      verify(filterChain).doFilter(request, response);
+      // Should still pass through but with a wrapped request (not the original)
+      org.mockito.ArgumentCaptor<jakarta.servlet.ServletRequest> requestCaptor =
+          org.mockito.ArgumentCaptor.forClass(jakarta.servlet.ServletRequest.class);
+      verify(filterChain)
+          .doFilter(requestCaptor.capture(), org.mockito.ArgumentMatchers.eq(response));
+
+      // The captured request should be a wrapped version, not the original mock
+      assertThat(requestCaptor.getValue()).isNotSameAs(request);
     }
 
     @Test

@@ -89,16 +89,8 @@ public class RateLimitingFilter extends OncePerRequestFilter {
       return "client-id:" + clientId;
     }
 
-    // 4. Fall back to IP address (with X-Forwarded-For support)
-    String forwardedFor = request.getHeader("X-Forwarded-For");
-    if (forwardedFor != null && !forwardedFor.isEmpty()) {
-      // Take the first IP in the chain
-      clientId = forwardedFor.split(",")[0].trim();
-    } else {
-      clientId = request.getRemoteAddr();
-    }
-
-    return "ip:" + clientId;
+    // 4. Fall back to remote address (don't trust X-Forwarded-For — it's spoofable)
+    return "ip:" + request.getRemoteAddr();
   }
 
   private void addRateLimitHeaders(HttpServletResponse response, String clientId) {
