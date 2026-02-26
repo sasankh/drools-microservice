@@ -89,9 +89,10 @@ echo -e "${YELLOW}📋 Listing all rules in S3...${NC}"
 TOTAL_RULES=$($AWS_CMD s3 ls s3://${BUCKET_NAME}/ --recursive | grep '\.drl$' | wc -l)
 $AWS_CMD s3 ls s3://${BUCKET_NAME}/ --recursive | grep '\.drl$'
 
-# Set bucket policy for development (optional - for easier access)
-echo -e "${YELLOW}🔓 Setting development-friendly bucket policy...${NC}"
-cat << EOF > /tmp/bucket-policy.json
+# Set bucket policy for development (only for LocalStack — never apply Principal:* to real S3)
+if echo "${AWS_ENDPOINT}" | grep -qE '(localhost|127\.0\.0\.1|localstack)'; then
+    echo -e "${YELLOW}🔓 Setting development-friendly bucket policy (LocalStack only)...${NC}"
+    cat << EOF > /tmp/bucket-policy.json
 {
     "Version": "2012-10-17",
     "Statement": [
@@ -113,12 +114,15 @@ cat << EOF > /tmp/bucket-policy.json
 }
 EOF
 
-$AWS_CMD s3api put-bucket-policy \
-    --bucket ${BUCKET_NAME} \
-    --policy file:///tmp/bucket-policy.json > /dev/null 2>&1 || echo -e "${YELLOW}⚠️  Could not set bucket policy (may not be supported)${NC}"
-rm -f /tmp/bucket-policy.json
+    $AWS_CMD s3api put-bucket-policy \
+        --bucket ${BUCKET_NAME} \
+        --policy file:///tmp/bucket-policy.json > /dev/null 2>&1 || echo -e "${YELLOW}⚠️  Could not set bucket policy (may not be supported)${NC}"
+    rm -f /tmp/bucket-policy.json
 
-echo -e "${GREEN}✅ Development bucket policy applied${NC}"
+    echo -e "${GREEN}✅ Development bucket policy applied (LocalStack)${NC}"
+else
+    echo -e "${YELLOW}⚠️  Skipping Principal:* bucket policy — not targeting LocalStack (endpoint: ${AWS_ENDPOINT})${NC}"
+fi
 
 # Final verification
 echo -e "${YELLOW}🔍 Final verification...${NC}"
