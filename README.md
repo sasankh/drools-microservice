@@ -11,7 +11,7 @@ A high-performance business rule execution microservice built with Spring Boot a
 - **Production Ready**: Health checks, metrics, monitoring, and comprehensive security
 - **Memory Stable**: Proper resource disposal prevents memory leaks and OOM errors
 - **Real-time Monitoring**: Memory diagnostics endpoint with automatic warnings
-- **Security Hardened**: Input validation, rate limiting, CORS, and sensitive data protection
+- **Security Hardened**: Admin authentication, DRL sandboxing, security headers, input validation, rate limiting, CORS, and sensitive data protection
 - **Performance Optimized**: Connection pooling, thread pools, circuit breakers, and JVM tuning
 - **Development Friendly**: LocalStack integration for offline S3 testing, one-command setup
 
@@ -283,7 +283,8 @@ The application supports multiple configuration methods (in priority order):
 | `DROOLS_VALIDATION_RULE_ID_MAX_LENGTH` | Maximum rule ID length | `255` |
 | `DROOLS_VALIDATION_DATA_MAX_FIELDS` | Maximum data fields per request | `100` |
 | `DROOLS_VALIDATION_DATA_MAX_STRING_LENGTH` | Maximum string field length | `10000` |
-| `DROOLS_CORS_ALLOWED_ORIGINS` | CORS allowed origins | `*` |
+| `DROOLS_CORS_ALLOWED_ORIGINS` | CORS allowed origins | *(empty)* |
+| `ADMIN_API_KEY` | API key for admin endpoint auth | *(empty/disabled)* |
 | `DROOLS_RATE_LIMITING_ENABLED` | Enable rate limiting | `true` |
 | `DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE` | Rate limit per minute | `1000` |
 | `MAX_HTTP_REQUEST_SIZE` | Maximum HTTP request size | `10MB` |
@@ -625,13 +626,17 @@ end
 
 ### Security Features
 
-The API includes comprehensive security features:
+The API includes comprehensive security features (39/42 security findings addressed):
 
+- **Admin Authentication**: API key protection for `/admin/*` endpoints via `X-Admin-API-Key` header
+- **DRL Sandboxing**: Blocklist-based rule content scanning prevents arbitrary code execution
+- **Security Headers**: 7 security headers on all responses (CSP, HSTS, X-Frame-Options, etc.)
 - **Input Validation**: All requests are validated for proper format, size limits, and security patterns
-- **Rate Limiting**: Configurable per-client rate limits with standard HTTP headers
-- **CORS Protection**: Configurable cross-origin request policies
-- **Request Size Limits**: Multi-layer protection against large payloads
-- **Log Sanitization**: Automatic removal of sensitive data from logs
+- **Rate Limiting**: Configurable per-client rate limits with standard HTTP headers (per remote IP)
+- **CORS Protection**: Configurable cross-origin request policies (empty default, restrictive in production)
+- **Request Size Limits**: Multi-layer protection against large payloads (including chunked transfer)
+- **Path Traversal Protection**: Defense-in-depth in storage layers
+- **Log Sanitization**: Automatic removal of sensitive data from logs (word-boundary patterns)
 
 ### Error Responses
 

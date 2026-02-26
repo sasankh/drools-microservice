@@ -22,7 +22,7 @@ This guide covers deployment options for the Drools Rule Engine Microservice, fr
 - **High Performance**: 100-1000 RPS capability
 - **Multi-tier Caching**: Local LRU → Redis → S3
 - **Production Ready**: Health checks, metrics, circuit breakers
-- **Security Hardened**: Input validation, rate limiting, CORS
+- **Security Hardened**: Admin authentication, input validation, rate limiting, CORS, DRL sandboxing, security headers
 
 ### Architecture
 ```
@@ -89,7 +89,8 @@ DROOLS_VALIDATION_RULE_ID_MAX_LENGTH=255          # Rule ID validation
 DROOLS_VALIDATION_DATA_MAX_FIELDS=100             # Data field limit
 DROOLS_VALIDATION_REQUEST_MAX_SIZE_MB=10          # Request size limit
 DROOLS_RATE_LIMITING_PER_MINUTE_LIMIT=1000        # Rate limit per minute
-DROOLS_CORS_ALLOWED_ORIGINS=*                     # CORS origins
+DROOLS_CORS_ALLOWED_ORIGINS=                         # CORS origins (empty = no CORS; set origins for production)
+ADMIN_API_KEY=                                       # Admin endpoint API key (empty = auth disabled)
 
 # === Circuit Breaker Configuration ===
 RESILIENCE4J_CIRCUITBREAKER_S3_FAILURE_RATE_THRESHOLD=50
@@ -119,7 +120,7 @@ management:
         include: health,info,metrics,thread-pools
   endpoint:
     health:
-      show-details: always
+      show-details: when-authorized
 
 spring:
   application:
@@ -158,7 +159,7 @@ drools:
     request:
       max-size-mb: ${DROOLS_VALIDATION_REQUEST_MAX_SIZE_MB:10}
   cors:
-    allowed-origins: ${DROOLS_CORS_ALLOWED_ORIGINS:*}
+    allowed-origins: ${DROOLS_CORS_ALLOWED_ORIGINS:}
   rate-limiting:
     per-minute-limit: ${DROOLS_RATE_LIMITING_PER_MINUTE_LIMIT:1000}
 
@@ -314,6 +315,7 @@ THREAD_POOL_RULE_EXECUTION_MAX_SIZE=100
 # Security
 DROOLS_RATE_LIMITING_PER_MINUTE_LIMIT=5000
 DROOLS_CORS_ALLOWED_ORIGINS=https://app.company.com,https://admin.company.com
+ADMIN_API_KEY=your-secure-production-api-key
 
 # Logging
 LOGGING_LEVEL_ROOT=WARN
@@ -860,5 +862,5 @@ curl http://localhost:8080/admin/rules
 
 ---
 
-**Last Updated**: 2025-07-22  
-**Version**: 1.0.0
+**Last Updated**: 2026-02-26
+**Version**: 1.1.0

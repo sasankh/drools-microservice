@@ -787,6 +787,81 @@ systemctl restart drools-rule-engine
 
 ---
 
+## 🔐 Security-Related Issues
+
+### Admin Endpoints Returning 401 Unauthorized
+
+**Symptom**: All `/admin/*` requests return `401 Unauthorized` with:
+```json
+{"error": "Unauthorized", "message": "Missing or invalid API key"}
+```
+
+**Cause**: The `ADMIN_API_KEY` environment variable is set, requiring authentication.
+
+**Solution**:
+```bash
+# Include the X-Admin-API-Key header in all admin requests
+curl -H "X-Admin-API-Key: your-configured-key" http://localhost:8080/admin/health
+
+# Or disable admin auth by unsetting the environment variable
+export ADMIN_API_KEY=
+```
+
+**Note**: When `ADMIN_API_KEY` is empty or not set, admin authentication is disabled (backward compatible for development).
+
+### DRL Rules Failing Compilation (Sandboxing Rejections)
+
+**Symptom**: Rule refresh fails with errors like:
+```
+DRL content contains blocked import: java.lang.Runtime
+```
+or
+```
+DRL content contains blocked class reference: ProcessBuilder
+```
+
+**Cause**: The `DrlSanitizer` scans all DRL content before compilation and rejects rules that reference dangerous classes, methods, or imports.
+
+**Blocked items include**:
+- **Imports**: `java.lang.Runtime`, `java.lang.ProcessBuilder`, `java.io.*`, `java.net.*`, `java.lang.reflect.*`, `javax.script.*`
+- **Classes**: `Runtime`, `ProcessBuilder`, `Thread`, `ClassLoader`, `System.exit`
+- **Methods**: `exec()`, `getRuntime()`, `loadClass()`, `forName()`, `invoke()`
+- **Statements**: `eval()` (use Drools pattern matching instead)
+
+**Solution**:
+```bash
+# Check which imports are allowed
+# Allowed: java.util.*, java.math.*, java.time.*, com.company.*
+
+# Fix your rule to use allowed imports only
+# Instead of java.io.File, pass file data through the API input
+
+# Refresh the rule after fixing
+curl -X POST http://localhost:8080/admin/refresh-rules/your.rule.id
+```
+
+### CORS Errors in Browser
+
+**Symptom**: Browser console shows `Access-Control-Allow-Origin` errors when calling the API from a web application.
+
+**Cause**: The default CORS configuration is now empty (no origins allowed). In previous versions, the default was `*` (allow all).
+
+**Solution**:
+```bash
+# Set allowed origins for your application
+export DROOLS_CORS_ALLOWED_ORIGINS=https://your-app.company.com
+
+# For local development, use wildcard (only in local/dev/docker profiles)
+export DROOLS_CORS_ALLOWED_ORIGINS=*
+
+# Multiple origins
+export DROOLS_CORS_ALLOWED_ORIGINS=https://app.company.com,https://admin.company.com
+```
+
+**Note**: In local, dev, and docker profiles, the application automatically allows wildcard CORS. Only production deployments need explicit origin configuration.
+
+---
+
 ## 📞 Support Resources
 
 ### Self-Service Tools
@@ -855,5 +930,5 @@ Configuration: [relevant env vars/config]
 
 ---
 
-**Last Updated**: 2025-07-22  
-**Version**: 1.0.0
+**Last Updated**: 2026-02-26
+**Version**: 1.1.0

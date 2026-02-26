@@ -749,6 +749,80 @@ tail -f /var/log/drools-rule-engine/application.log | grep "rule_id"
 
 ---
 
+## 🔒 Security Restrictions (DRL Sandboxing)
+
+All DRL rule files are scanned by `DrlSanitizer` before compilation. Rules that reference dangerous classes, methods, or imports will be rejected.
+
+### Allowed Imports
+
+Only the following import packages are permitted in DRL files:
+
+| Package | Purpose |
+|---------|---------|
+| `java.util.*` | Collections, Maps, Lists, etc. |
+| `java.math.*` | BigDecimal, BigInteger |
+| `java.time.*` | Date/time classes (LocalDate, etc.) |
+| `com.company.*` | Application domain classes |
+
+### Blocked Content
+
+The following are **blocked** and will cause compilation to fail:
+
+**Blocked Imports**:
+- `java.lang.Runtime`, `java.lang.ProcessBuilder`
+- `java.io.*` (file system access)
+- `java.net.*` (network access)
+- `java.lang.reflect.*` (reflection)
+- `javax.script.*` (script engine)
+- `org.drools.core.spi.*` (Drools internals)
+
+**Blocked Class References**:
+- `Runtime`, `ProcessBuilder`, `Thread`, `ClassLoader`
+- `SecurityManager`, `System.exit`
+
+**Blocked Method Calls**:
+- `exec()`, `getRuntime()`, `loadClass()`, `forName()`, `invoke()`
+
+**Blocked Statements**:
+- `eval()` — Use Drools pattern matching instead of `eval()` expressions
+
+### Writing Sandbox-Compatible Rules
+
+```drools
+// GOOD: Uses allowed imports and pattern matching
+package com.company.rules.pricing
+
+import java.util.Map
+import java.math.BigDecimal
+
+rule "Calculate Discount"
+when
+    $data : Map(this["amount"] != null)
+then
+    BigDecimal amount = new BigDecimal($data.get("amount").toString());
+    BigDecimal discount = amount.multiply(new BigDecimal("0.10"));
+    $data.put("discount", discount);
+end
+```
+
+```drools
+// BAD: Will be rejected by DRL sandboxing
+package com.company.rules.dangerous
+
+import java.io.File           // BLOCKED: file system access
+import java.lang.Runtime      // BLOCKED: process execution
+
+rule "Dangerous Rule"
+when
+    $data : Map()
+    eval($data.get("x") != null)  // BLOCKED: eval() not allowed
+then
+    Runtime.getRuntime().exec("ls");  // BLOCKED: exec() not allowed
+end
+```
+
+---
+
 ## 🚀 Advanced Topics
 
 ### 1. Rule Templates
@@ -855,5 +929,5 @@ S3 Structure:
 
 ---
 
-**Last Updated**: 2025-07-22  
-**Version**: 1.0.0
+**Last Updated**: 2026-02-26
+**Version**: 1.1.0

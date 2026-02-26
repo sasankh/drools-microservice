@@ -924,41 +924,69 @@ Request 1 (Thread 1)          Request 2 (Thread 2)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
+│                    LAYER 0: SECURITY HEADERS                 │
+│  - SecurityHeadersFilter (@Order(-1))                        │
+│  - X-Content-Type-Options, X-Frame-Options, CSP, HSTS       │
+│  - X-XSS-Protection, Referrer-Policy, Cache-Control          │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
 │                    LAYER 1: NETWORK                          │
-│  - CORS configuration (configurable origins)                 │
+│  - CORS configuration (empty default; wildcard in dev only)  │
 │  - HTTPS termination (load balancer)                         │
 │  - IP whitelisting (infrastructure level)                    │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                    LAYER 2: RATE LIMITING                    │
+│                    LAYER 2: ADMIN AUTHENTICATION             │
+│  - AdminAuthFilter (@Order(0)) for /admin/* endpoints        │
+│  - API key via X-Admin-API-Key header                        │
+│  - Disabled when ADMIN_API_KEY is empty (dev mode)           │
+│  - Returns 401 Unauthorized on failure                       │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│                    LAYER 3: RATE LIMITING                    │
 │  - Per-client rate limiting (1000 req/min default)           │
-│  - In-memory sliding window                                  │
+│  - Client ID: request.getRemoteAddr() (X-Forwarded-For      │
+│    ignored to prevent spoofing)                              │
+│  - Max clients cap (10000) to prevent memory exhaustion      │
 │  - HTTP 429 with Retry-After header                          │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                    LAYER 3: REQUEST VALIDATION               │
-│  - Size limits (max 10MB)                                    │
+│                    LAYER 4: REQUEST VALIDATION               │
+│  - Size limits (max 10MB, including chunked transfer)        │
 │  - Field count limits (max 100 fields)                       │
-│  - Timeout limits (30s default)                              │
+│  - Timeout limits (30s default) with future.cancel(true)     │
+│  - Max rule firings cap (10000) to prevent infinite loops    │
 │  - Content-Type validation                                   │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                    LAYER 4: INPUT SANITIZATION               │
+│                    LAYER 5: INPUT SANITIZATION               │
 │  - Custom @ValidRuleId annotation                            │
 │  - Custom @ValidData annotation                              │
 │  - Spring Boot @Valid framework                              │
-│  - SQL injection prevention (no SQL in system)               │
+│  - Path traversal prevention in storage layers               │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                    LAYER 5: LOG SANITIZATION                 │
-│  - Regex-based sensitive data detection                      │
+│                    LAYER 6: DRL SANDBOXING                   │
+│  - DrlSanitizer scans rule content before compilation        │
+│  - Blocklist: dangerous classes, methods, imports            │
+│  - Import allowlist: java.util, java.math, java.time,        │
+│    com.company                                               │
+│  - Blocks eval(), exec(), Runtime, ProcessBuilder, etc.      │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│                    LAYER 7: LOG SANITIZATION                 │
+│  - Word-boundary regex patterns for sensitive data           │
 │  - Credit card masking (•••• •••• •••• 1234)                │
 │  - SSN masking (•••-••-1234)                                 │
 │  - API key removal                                           │
+│  - Nested map sanitization                                   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -1492,7 +1520,7 @@ This Drools Rule Engine Microservice is architected for:
 ✅ **Scalability**: Stateless design, horizontal scaling, shared caching
 ✅ **Reliability**: Circuit breakers, health checks, graceful degradation
 ✅ **Maintainability**: Clean architecture, separation of concerns, comprehensive monitoring
-✅ **Security**: Multi-layer validation, rate limiting, log sanitization
+✅ **Security**: Admin auth, DRL sandboxing, security headers, multi-layer validation, rate limiting, log sanitization
 ✅ **Memory Stability**: Proper resource disposal (KieContainer lifecycle)
 
 **Key Architectural Achievements**:
@@ -1506,6 +1534,6 @@ This Drools Rule Engine Microservice is architected for:
 
 ---
 
-**Last Updated**: 2026-02-19
-**Architecture Version**: 1.0.0
+**Last Updated**: 2026-02-26
+**Architecture Version**: 1.1.0
 **Related Docs**: deployment.md, configuration.md, memory-monitoring-guide.md

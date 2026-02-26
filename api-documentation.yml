@@ -8,7 +8,7 @@ info:
     - **High Performance**: Support for 100-1000 requests per second
     - **Memory Stable**: Proper resource disposal prevents memory leaks and OOM errors
     - **Real-time Monitoring**: Memory diagnostics with automatic warnings (NEW)
-    - **Security Hardened**: Input validation, rate limiting, CORS protection
+    - **Security Hardened**: Admin auth, DRL sandboxing, security headers, input validation, rate limiting, CORS
     - **Production Ready**: Health monitoring, metrics, circuit breakers
     - **Scalable**: Multi-tier caching with S3 storage backend
 
@@ -17,13 +17,22 @@ info:
     - **Admin API**: Management and monitoring on port 8080 (same as main API)
 
     ## Security Features
+    - **Admin Authentication**: API key (`X-Admin-API-Key` header) for `/admin/*` endpoints
+    - **DRL Sandboxing**: Blocklist-based rule content scanning before compilation
+    - **Security Headers**: 7 security headers on all responses (CSP, HSTS, X-Frame-Options, etc.)
     - Input validation with configurable limits
-    - Rate limiting with HTTP headers
-    - Request size protection
-    - CORS configuration
+    - Rate limiting with HTTP headers (per remote IP, X-Forwarded-For ignored)
+    - Request size protection (including chunked transfer encoding)
+    - CORS configuration (empty default; wildcard only in dev profiles)
     - Sensitive data sanitization in logs
 
-    ## Recent Updates (2026-02-19)
+    ## Recent Updates (2026-02-26)
+    - **Security Hardening**: 39/42 security fixes across 9 phases
+    - **Admin Authentication**: API key protection for admin endpoints
+    - **DRL Sandboxing**: Rule content scanning prevents arbitrary code execution
+    - **Security Headers**: CSP, HSTS, X-Frame-Options, X-Content-Type-Options on all responses
+
+    ## Previous Updates (2026-02-19)
     - **Java 17 Enforcement**: Maven Enforcer Plugin ensures correct Java version
     - **Memory Leak Fixed**: Proper KieContainer disposal prevents OOM crashes
     - **Memory Monitoring Added**: New `/admin/memory/*` endpoints for diagnostics
@@ -1046,24 +1055,37 @@ components:
           description: Error message
 
   securitySchemes:
+    AdminApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Admin-API-Key
+      description: |
+        API Key for admin endpoint authentication.
+
+        **Usage:**
+        - Required for all `/admin/*` endpoints when `ADMIN_API_KEY` is configured
+        - Set via `ADMIN_API_KEY` environment variable
+        - When not configured (empty), admin auth is disabled (development mode)
+        - Returns 401 Unauthorized if key is missing or invalid
+
     ApiKeyAuth:
       type: apiKey
       in: header
       name: X-API-Key
       description: |
         API Key for client identification and rate limiting.
-        
+
         **Usage:**
         - Used for client identification in rate limiting
         - Optional but recommended for production
         - Helps with monitoring and analytics
-    
+
     BearerAuth:
       type: http
       scheme: bearer
       description: |
         Bearer token authentication.
-        
+
         **Usage:**
         - Alternative client identification method
         - Used in rate limiting and monitoring
@@ -1193,12 +1215,15 @@ tags:
   - name: Administration
     description: |
       System administration and monitoring.
-      
+
+      **Authentication:** Requires `X-Admin-API-Key` header when `ADMIN_API_KEY` is configured.
+
       **Features:**
       - Health monitoring with component details
       - System information and version details
       - Thread pool performance monitoring
       - Available on main application port (8080)
+      - Protected by API key authentication (configurable)
   
   - name: Rule Management
     description: |

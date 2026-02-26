@@ -2,31 +2,23 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## ⚠️ Important: Recent Critical Fixes (2026-02-19)
+## ⚠️ Important: Security Hardening Complete (2026-02-26)
 
-**CRITICAL**: Two major issues were fixed in this session:
+**39/42 security findings addressed** across 9 phases. Key changes:
 
-1. **Java Version Enforcement** ✅
-   - Maven Enforcer Plugin now enforces Java 17
-   - Build will fail if using wrong Java version
-   - Use `source ./set-java-env.sh` for local development
+1. **Admin Authentication** — `/admin/*` endpoints protected by `X-Admin-API-Key` header (env: `ADMIN_API_KEY`)
+2. **DRL Sandboxing** — `DrlSanitizer` blocks dangerous imports/classes/methods before compilation
+3. **Security Headers** — 7 headers on all responses (CSP, HSTS, X-Frame-Options, etc.)
+4. **CORS Default Changed** — Default is now empty (no CORS); wildcard only in local/dev/docker profiles
+5. **Rate Limiting Hardened** — X-Forwarded-For ignored, uses `request.getRemoteAddr()` only; maxClients cap
+6. **Jackson RCE Fixed** — `activateDefaultTyping()` with strict `BasicPolymorphicTypeValidator`
+7. **Path Traversal Protection** — Defense-in-depth in LocalFileStorage and S3RuleStorage
+8. **Non-blocking Compilation** — Rule compilation outside write lock in DroolsEngineService
 
-2. **Memory Leak Fixed** ✅
-   - KieContainer disposal prevents OOM errors (exit code 137)
-   - Fixed in `DroolsEngineService.java` lines 164-178
-   - Memory now stable, can run indefinitely
-
-3. **Memory Monitoring Added** ✅
-   - New endpoint: `GET /admin/memory/info`
-   - Real-time memory diagnostics with warnings
-   - Heap dumps on OOM: `./heap-dumps/`
-   - GC logs: `./gc-logs/`
-
-**Files Modified**:
-- `pom.xml` - Maven Enforcer Plugin added
-- `docker-compose.yml` - Memory diagnostics configured
-- `DroolsEngineService.java` - KieContainer disposal logic
-- `MemoryController.java` - NEW monitoring endpoint
+### Previous Critical Fixes (2026-02-19)
+- **Java 17 Enforcement**: Maven Enforcer Plugin
+- **Memory Leak Fixed**: KieContainer disposal prevents OOM
+- **Memory Monitoring**: `GET /admin/memory/info` endpoint
 
 See `FIXES-SUMMARY.md` for complete details.
 
@@ -36,7 +28,7 @@ This is a Drools Rule Engine Microservice designed for high-performance business
 
 **Tech Stack**: Java 17 (enforced), Spring Boot 3.x, Drools 8.44.0.Final, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
 
-**Health Status**: 8.5/10 - 550 tests, 96%/90% coverage, all critical fixes complete
+**Health Status**: 9/10 - 589 tests, 96%/90% coverage, 39/42 security fixes complete
 
 ## Common Commands
 
@@ -298,11 +290,13 @@ Check `project.progress.md` and `FIXES-SUMMARY.md` for current status. Project f
 4. ✅ Testing & Documentation (Phase 4.4 only) - COMPLETED
 5. ✅ Deployment & Infrastructure - COMPLETED
 6. ✅ Critical Fixes (Java 17, Memory Leak, Monitoring) - COMPLETED 2026-02-19
+7. ✅ Security Hardening (39/42 fixes, Phases 1-9) - COMPLETED 2026-02-26
 
 **Current Status**:
-- **Health Score**: 8.5/10
-- **Critical Issues**: FIXED ✅ (Java version, memory leak)
-- **Test Coverage**: 96.2% instruction / 89.7% branch (550 tests) ✅
+- **Health Score**: 9/10
+- **Critical Issues**: FIXED ✅ (Java version, memory leak, security hardening)
+- **Test Coverage**: 96.2% instruction / 89.7% branch (589 tests) ✅
+- **Security**: 39/42 findings addressed across 9 phases
 - **Scripts**: `init-localstack.sh` refactored — reads from `sample-rules/` (no hardcoded DRL)
 
 ## Performance Targets

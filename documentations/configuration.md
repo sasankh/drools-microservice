@@ -27,7 +27,7 @@ This guide provides comprehensive documentation for configuring the Drools Rule 
 ### Key Configuration Areas
 - **Rule Storage**: S3, Local, In-Memory backends
 - **Caching**: Local LRU + Redis distributed caching
-- **Security**: Input validation, rate limiting, CORS
+- **Security**: Admin authentication, input validation, rate limiting, CORS, DRL sandboxing, security headers
 - **Performance**: Thread pools, timeouts, circuit breakers
 - **Monitoring**: Health checks, metrics, logging
 
@@ -90,9 +90,11 @@ This guide provides comprehensive documentation for configuring the Drools Rule 
 | `DROOLS_VALIDATION_STRING_MAX_LENGTH` | Max string field length | `10000` | `1000`, `50000` |
 | `DROOLS_VALIDATION_NUMBER_MAX_VALUE` | Max numeric value | `1000000000` | `1000000`, `10000000000` |
 | `DROOLS_VALIDATION_REQUEST_MAX_SIZE_MB` | Max request size (MB) | `10` | `5`, `20`, `50` |
-| `DROOLS_CORS_ALLOWED_ORIGINS` | CORS allowed origins | `*` | `https://app.company.com` |
+| `DROOLS_CORS_ALLOWED_ORIGINS` | CORS allowed origins | *(empty)* | `https://app.company.com` |
 | `DROOLS_RATE_LIMITING_PER_MINUTE_LIMIT` | Requests per minute limit | `1000` | `100`, `5000`, `10000` |
 | `DROOLS_RATE_LIMITING_PER_HOUR_LIMIT` | Requests per hour limit | `50000` | `10000`, `100000` |
+| `DROOLS_RATE_LIMITING_MAX_CLIENTS` | Max tracked rate-limit clients | `10000` | `5000`, `50000` |
+| `ADMIN_API_KEY` | API key for admin endpoint auth | *(empty/disabled)* | `your-secure-api-key` |
 
 ### Circuit Breaker Configuration
 
@@ -135,7 +137,7 @@ management:
         include: health,info,metrics,prometheus,thread-pools
   endpoint:
     health:
-      show-details: always
+      show-details: when-authorized
   metrics:
     export:
       prometheus:
@@ -206,7 +208,7 @@ drools:
     request:
       max-size-mb: ${DROOLS_VALIDATION_REQUEST_MAX_SIZE_MB:10}
   cors:
-    allowed-origins: ${DROOLS_CORS_ALLOWED_ORIGINS:*}
+    allowed-origins: ${DROOLS_CORS_ALLOWED_ORIGINS:}
     allowed-methods: GET,POST,PUT,DELETE,OPTIONS
     allowed-headers: "*"
     allow-credentials: true
@@ -385,7 +387,7 @@ drools:
 drools:
   cors:
     enabled: true
-    allowed-origins: ${DROOLS_CORS_ALLOWED_ORIGINS:*}
+    allowed-origins: ${DROOLS_CORS_ALLOWED_ORIGINS:}
     allowed-methods: GET,POST,PUT,DELETE,OPTIONS
     allowed-headers: "*"
     exposed-headers: X-RateLimit-Limit,X-RateLimit-Remaining,X-RateLimit-Reset
@@ -402,15 +404,56 @@ drools:
     enabled: true
     per-minute-limit: ${DROOLS_RATE_LIMITING_PER_MINUTE_LIMIT:1000}
     per-hour-limit: ${DROOLS_RATE_LIMITING_PER_HOUR_LIMIT:50000}
-    client-identification:
-      # Priority order for client identification
-      - api-key      # X-API-Key header
-      - bearer-token # Authorization: Bearer header
-      - client-id    # X-Client-ID header
-      - ip-address   # Remote IP (fallback)
+    max-clients: ${DROOLS_RATE_LIMITING_MAX_CLIENTS:10000}
+    client-identification: request.getRemoteAddr()  # Always uses remote IP (X-Forwarded-For ignored for security)
     cleanup:
       interval-minutes: 60  # Clean old entries every hour
 ```
+
+### Admin Authentication Configuration
+
+Admin endpoints (`/admin/*`) can be protected with API key authentication:
+
+```yaml
+drools:
+  admin:
+    api-key: ${ADMIN_API_KEY:}  # Empty = auth disabled (backward compatible)
+```
+
+**Usage**: Clients must send the `X-Admin-API-Key` header with every admin request:
+```bash
+curl -H "X-Admin-API-Key: your-secret-key" http://localhost:8080/admin/health
+```
+
+When `ADMIN_API_KEY` is empty or not set, admin authentication is disabled (development mode). In production, always set a strong API key via the `ADMIN_API_KEY` environment variable.
+
+### DRL Sandboxing Configuration
+
+All DRL rule files are scanned before compilation by `DrlSanitizer`. The following restrictions are enforced:
+
+- **Blocked imports**: `java.lang.Runtime`, `java.lang.ProcessBuilder`, `java.io.*`, `java.net.*`, `java.lang.reflect.*`, `javax.script.*`, `org.drools.core.spi.*`
+- **Blocked classes**: `Runtime`, `ProcessBuilder`, `Thread`, `ClassLoader`, `SecurityManager`, `System.exit`
+- **Blocked methods**: `exec()`, `getRuntime()`, `loadClass()`, `forName()`, `invoke()`
+- **`eval()` blocked**: Drools `eval()` expressions are not allowed (use pattern matching instead)
+- **Import allowlist**: Only `java.util.*`, `java.math.*`, `java.time.*`, and `com.company.*` are permitted
+
+Rules that violate these restrictions will fail compilation with a descriptive error message.
+
+### Security Headers Configuration
+
+All HTTP responses include security headers added by `SecurityHeadersFilter` (`@Order(-1)`):
+
+| Header | Value |
+|--------|-------|
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `DENY` |
+| `X-XSS-Protection` | `1; mode=block` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Cache-Control` | `no-cache, no-store, must-revalidate` |
+| `Content-Security-Policy` | `default-src 'self'` |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` |
+
+These headers are always applied and are not configurable.
 
 ---
 
@@ -518,7 +561,7 @@ management:
         include: health,info,metrics,prometheus,thread-pools
   endpoint:
     health:
-      show-details: always
+      show-details: when-authorized
       show-components: always
     metrics:
       enabled: true
@@ -686,6 +729,8 @@ export LRU_CACHE_MAX_SIZE=500
 export THREAD_POOL_RULE_EXECUTION_CORE_SIZE=20
 export THREAD_POOL_RULE_EXECUTION_MAX_SIZE=100
 export DROOLS_RATE_LIMITING_PER_MINUTE_LIMIT=10000
+export DROOLS_CORS_ALLOWED_ORIGINS=https://app.company.com,https://admin.company.com
+export ADMIN_API_KEY=your-secure-api-key
 export LOGGING_LEVEL_ROOT=WARN
 ```
 
@@ -699,5 +744,5 @@ export LOGGING_LEVEL_COM_COMPANY_DROOLS=DEBUG
 
 ---
 
-**Last Updated**: 2025-07-22  
-**Version**: 1.0.0
+**Last Updated**: 2026-02-26
+**Version**: 1.1.0
