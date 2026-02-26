@@ -23,20 +23,20 @@ The Drools Rule Engine Microservice is a **high-performance, production-ready bu
 - Complete observability with structured logging and metrics
 - Docker containerization with 347MB optimized images
 - 10 sample business rules for immediate testing and learning
-- **Comprehensive security hardening**: DRL sandboxing, admin auth, rate limiting, security headers, path traversal protection, CORS, info leakage prevention, log sanitization
+- Security hardening: DRL sandboxing, admin auth, rate limiting, security headers
 
 ---
 
 ## PROJECT STATUS
 
-### Overall Status: PRODUCTION READY + SECURITY HARDENING COMPLETE
+### Overall Status: PRODUCTION READY + SECURITY HARDENING IN PROGRESS
 
-**Health Score**: 9/10
+**Health Score**: 8.5/10 → improving with security fixes
 **Branch**: `restart-4-security` (security fixes work branch)
 **Base Branch**: `main`
-**Git State**: Clean (security phases complete)
+**Git State**: Uncommitted changes (ai-context-update in progress)
 
-All 6 original phases + 9 security phases are **COMPLETED**:
+All 6 original phases are **COMPLETED**. Security hardening is **in progress** (Phase 3 of 9 done):
 
 | Phase | Status | Details |
 |-------|--------|---------|
@@ -52,14 +52,9 @@ All 6 original phases + 9 security phases are **COMPLETED**:
 | **Security Phase 1** | **COMPLETED** | 7 quick-win fixes (Jackson RCE, timeouts, Docker socket) |
 | **Security Phase 2** | **COMPLETED** | 5 auth & rate limiting fixes |
 | **Security Phase 3** | **COMPLETED** | 3 DRL sandboxing & security headers fixes |
-| **Security Phase 4** | **COMPLETED** | 4 storage & path traversal fixes |
-| **Security Phase 5** | **COMPLETED** | 6 info leakage & logging fixes |
-| **Security Phase 6** | **COMPLETED** | 2 concurrency & performance fixes |
-| **Security Phase 7** | **COMPLETED** | 1 of 3 (2 skipped per user: Redis auth, dependency updates) |
-| **Security Phase 8** | **COMPLETED** | 4 log sanitizer improvements |
-| **Security Phase 9** | **COMPLETED** | 8 remaining low/info items |
+| Security Phases 4-9 | PENDING | 27 remaining fixes (path traversal, info leakage, etc.) |
 
-**Test Coverage**: 96.2% instruction / 89.7% branch (589 tests, 100% pass rate)
+**Test Coverage**: 96.2% instruction / 89.7% branch (584 tests, 100% pass rate)
 
 ### Coverage by Package (JaCoCo)
 | Package | Instruction | Branch |
@@ -75,17 +70,13 @@ All 6 original phases + 9 security phases are **COMPLETED**:
 | storage | 94.1% | 89.5% |
 | config | 93.1% | 83.3% |
 
-### Security Fix Progress: 39/42 Complete (ALL PHASES DONE)
+### Security Fix Progress: 15/42 Complete
 **Master plan**: `ai-workspace/ai-summary/security-fix-plan.md`
 - **3 Critical**: ALL RESOLVED (Jackson RCE, admin auth, DRL sandboxing)
-- **10 High**: 9 resolved, 1 skipped per user (Redis auth/TLS)
-- **15 Medium**: 14 resolved, 1 skipped per user (dependency updates)
-- **9 Low**: ALL RESOLVED
-- **5 Info**: ALL RESOLVED
-
-### Docker Integration Test: ALL 30 CHECKS PASS
-Full test plan: `full-docker-test-plan.md` — validated 2026-02-26
-- Steps 1-9 all pass (Docker stack, health endpoints, rules loading, rule execution, error handling, memory stability, GC, logs, cleanup)
+- **10 High**: 7 resolved, 3 remaining (Redis auth, outdated deps)
+- **15 Medium**: 1 resolved, 14 remaining
+- **9 Low**: 1 resolved, 8 remaining
+- **5 Info**: 0 resolved, 5 remaining
 
 ---
 
@@ -113,7 +104,6 @@ Full test plan: `full-docker-test-plan.md` — validated 2026-02-26
 - **Metrics**: Micrometer (vendor-agnostic — CloudWatch, Prometheus, Datadog, Grafana)
 - **Logging**: Logback with Logstash JSON encoder
 - **Structured Logging**: MDC context with correlation IDs (X-Correlation-ID header)
-- **Log Injection Prevention**: Correlation/request IDs validated against `^[a-zA-Z0-9\\-]{1,128}$`
 - **Memory Monitoring**: GET /admin/memory/info (heap, GC stats, warnings)
 
 ### Security & Performance
@@ -122,15 +112,10 @@ Full test plan: `full-docker-test-plan.md` — validated 2026-02-26
 - **Security Headers**: 7 headers on every response (SecurityHeadersFilter)
 - **Input Validation**: Custom Spring Boot annotations (@ValidRuleId, @ValidRuleData)
 - **Rate Limiting**: In-memory with configurable per-client limits, maxClients cap
-- **Request Size Protection**: Multi-layer (Spring Boot + custom filter + chunked stream limiter)
-- **Path Traversal Protection**: Normalized path validation in LocalFileStorage and S3RuleStorage
-- **SSRF Protection**: S3 endpoint validation with scheme and host allowlist
-- **CORS**: Empty by default (restrictive), wildcard in dev/local/docker profiles only
 - **Circuit Breakers**: Resilience4j for S3 and Redis
 - **Connection Pooling**: AWS SDK S3 client with Apache HTTP client
 - **Thread Pools**: Custom pools for rule execution and storage operations
-- **Metrics Cardinality**: Unknown rule IDs tagged as "unknown" to prevent explosion
-- **Exception Sanitization**: Generic client messages, details logged server-side only
+- **CORS**: Empty by default (restrictive), wildcard in dev/local/docker profiles only
 
 ### Development Tools
 - **Code Quality**: Spotless (Google Java Style), SpotBugs, JaCoCo
@@ -144,9 +129,9 @@ Full test plan: `full-docker-test-plan.md` — validated 2026-02-26
 ### Root Directory
 ```
 drools-microservice/
-├── src/main/java/com/company/drools/     # Java source code (60+ files)
+├── src/main/java/com/company/drools/     # Java source code (57+ files)
 ├── src/main/resources/                   # Configuration and resources
-├── src/test/java/                        # 44+ test files, 589 tests
+├── src/test/java/                        # 44+ test files, 584 tests
 ├── documentations/                       # Complete documentation suite (~5,100 lines)
 ├── sample-rules/                         # 10 business rule examples
 ├── ai-workspace/                         # AI context management
@@ -165,9 +150,8 @@ drools-microservice/
 ├── pom.xml                              # Maven build configuration
 ├── README.md                            # Primary user documentation
 ├── CLAUDE.md                            # Development workflow guide
-├── full-docker-test-plan.md             # Comprehensive Docker integration test plan (30 checks)
 ├── set-java-env.sh                      # Java 17 environment setup
-├── init-localstack.sh                   # LocalStack S3 initialization (with endpoint guard)
+├── init-localstack.sh                   # LocalStack S3 initialization (126 lines)
 ├── test-localstack.sh                   # LocalStack validation
 ├── setup-dev-environment.sh             # One-command dev setup
 └── docker-build-test.sh                 # Docker build validation
@@ -178,28 +162,26 @@ drools-microservice/
 com.company.drools/
 ├── api/                                  # REST endpoints, DTOs, validation, filters
 │   ├── controller/
-│   │   ├── RuleExecutionController.java  # POST /execute-rule (generic client error messages)
+│   │   ├── RuleExecutionController.java  # POST /execute-rule
 │   │   ├── AdminController.java          # /admin/* endpoints (health, rules, refresh, thread-pools)
-│   │   │                                 # Redis connection closed in finally block (leak fix)
 │   │   └── MemoryController.java         # /admin/memory/* endpoints
 │   ├── dto/
 │   │   ├── RuleExecutionRequest.java     # Uses @JsonProperty("rule_id") for snake_case
-│   │   │                                 # toString() shows field count, not full data map
 │   │   ├── RuleExecutionResponse.java
 │   │   ├── ErrorResponse.java
 │   │   ├── RuleListResponse.java
 │   │   ├── RefreshRulesResponse.java
 │   │   └── HealthCheckResponse.java
 │   ├── exception/
-│   │   ├── GlobalExceptionHandler.java   # Handles 8+ exception types; generic client messages
+│   │   ├── GlobalExceptionHandler.java   # Handles 8+ exception types
 │   │   ├── RuleNotFoundException.java
 │   │   ├── RuleExecutionException.java
 │   │   ├── TimeoutException.java
 │   │   └── CircuitBreakerException.java
 │   ├── filter/
-│   │   ├── AdminAuthFilter.java          # API key auth for /admin/** (@Order(0))
-│   │   ├── SecurityHeadersFilter.java    # 7 security headers (@Order(-1))
-│   │   ├── RateLimitingFilter.java       # Per-client rate limiting, uses remoteAddr only
+│   │   ├── AdminAuthFilter.java          # NEW: API key auth for /admin/** (@Order(0))
+│   │   ├── SecurityHeadersFilter.java    # NEW: 7 security headers (@Order(-1))
+│   │   ├── RateLimitingFilter.java       # Per-client rate limiting with HTTP headers
 │   │   └── RequestSizeValidationFilter.java # Multi-layer size protection + chunked stream limiting
 │   └── validation/
 │       ├── ValidRuleId.java / RuleIdValidator.java   # Rule ID format validation
@@ -207,24 +189,16 @@ com.company.drools/
 ├── core/                                 # Business logic and rule engine
 │   ├── engine/
 │   │   ├── DroolsEngineService.java      # Central service: rule loading, execution, KieContainer lifecycle
-│   │   │                                 # Compile outside lock, write lock only for atomic swap
-│   │   │                                 # TOCTOU fixed: direct get() + null check
-│   │   │                                 # Metrics: "unknown" tag for rule-not-found
-│   │   ├── RuleExecutor.java             # Thread-safe async execution with CompletableFuture
-│   │   │                                 # timeout + future.cancel(true) + maxRuleFirings=10000
-│   │   ├── RuleCompiler.java             # DRL compilation — integrates DrlSanitizer before compiling
-│   │   └── DrlSanitizer.java             # DRL content scanning — blocklist + import allowlist
+│   │   ├── RuleExecutor.java             # Thread-safe async execution with CompletableFuture + timeout + maxRuleFirings
+│   │   ├── RuleCompiler.java             # DRL compilation — now integrates DrlSanitizer before compiling
+│   │   └── DrlSanitizer.java             # NEW: DRL content scanning — blocklist + import allowlist
 │   └── model/
-│       ├── Rule.java                     # Rule entity (protected no-arg constructor for Redis/Jackson)
+│       ├── Rule.java                     # Rule entity
 │       └── RuleMetadata.java             # Timestamps, status, execution stats
-│                                         # Incremental averaging to prevent overflow
-│                                         # Protected no-arg constructor for Redis/Jackson
 ├── storage/                              # Storage abstraction and implementations
 │   ├── RuleStorage.java                  # Storage interface (9 methods)
-│   ├── S3RuleStorage.java                # AWS S3 with retry, pagination, circuit breaker on getAllRules()
-│   │                                     # Path traversal validation (blocks ../ and leading /)
-│   │                                     # Redis KEYS * replaced with SCAN cursor-based iteration
-│   ├── LocalFileStorage.java             # File system implementation with path normalization
+│   ├── S3RuleStorage.java                # AWS S3 with retry logic, pagination
+│   ├── LocalFileStorage.java             # File system implementation
 │   ├── InMemoryRuleStorage.java          # In-memory with sample rules
 │   ├── InMemoryRuleStorageAdapter.java   # Adapter to RuleStorage interface
 │   └── StorageFactory.java               # Factory pattern for storage selection
@@ -232,38 +206,29 @@ com.company.drools/
 │   ├── RuleCache.java                    # Cache interface (get, put, warmUp, statistics, etc.)
 │   ├── LocalLRUCache.java                # @Component @Primary — LRU with ReadWriteLock (get() uses write lock)
 │   └── RedisRuleCache.java               # @ConditionalOnProperty — Redis with circuit breaker
-│                                         # KEYS * replaced with SCAN cursor-based iteration
 ├── common/
-│   └── LogSanitizer.java                 # Credit card, SSN (separator-required), email, token masking
-│                                         # Word-boundary patterns for pin/auth/ssn/cvv
-│                                         # UUID and class name exclusions for long token redaction
-│                                         # Recursive nested map sanitization (up to 5 levels)
-│                                         # safeDataRepresentation shows key names only
+│   └── LogSanitizer.java                 # Credit card, SSN, email, token masking
 └── config/                               # 12+ Spring configuration classes
     ├── DroolsConfig.java                 # KieServices/KieContainer beans
     ├── S3Config.java                     # S3 client with Apache HTTP connection pooling
-    │                                     # SSRF endpoint validation (scheme + host allowlist)
-    │                                     # Credential getters REMOVED (security fix)
-    ├── RedisConfig.java                  # activateDefaultTyping with strict validator (RCE fix)
+    ├── RedisConfig.java                  # Redis template — activateDefaultTyping with strict validator (RCE fix)
     ├── CacheConfig.java                  # Cache factory
     ├── MetricsConfig.java                # Micrometer metrics beans
-    ├── LoggingConfig.java                # Correlation ID filter with ID validation
+    ├── LoggingConfig.java                # Correlation ID filter
     ├── ThreadPoolConfig.java             # Custom thread pools (ruleExecution, storage)
-    │                                     # CallerRunsPolicy documented (Tomcat blocking risk)
     ├── CircuitBreakerConfig.java         # Resilience4j for S3/Redis
     ├── TimeoutConfig.java                # Central timeout configuration
     ├── RequestTimeoutConfig.java         # HTTP request timeout filter
     ├── RuleLoadingConfig.java            # Startup rule loading
     ├── StorageConfig.java                # Storage properties
     ├── RuleStorageConfig.java            # Storage bean wiring
-    ├── CorsConfig.java                   # CORS — empty by default, wildcard in dev profiles
-    │                                     # Logs warning when wildcard configured
-    ├── RateLimitingConfig.java           # maxClients cap, incrementAndGet race fix
+    ├── CorsConfig.java                   # CORS — restrictive by default, wildcard in dev profiles
+    ├── RateLimitingConfig.java           # Rate limiting — maxClients cap, incrementAndGet race fix
     ├── ValidationConfig.java             # Input validation limits
-    └── DotenvConfig.java                 # .env file loading (addLast, not addFirst)
+    └── DotenvConfig.java                 # .env file loading
 ```
 
-### Test File Structure (44+ files, 589 tests)
+### Test File Structure (44+ files, 584 tests)
 ```
 src/test/java/com/company/drools/
 ├── BaseUnitTest.java                     # Base class with mocked MeterRegistry
@@ -281,33 +246,33 @@ src/test/java/com/company/drools/
 │   ├── GlobalExceptionHandlerTest.java   # 10 tests
 │   └── ExceptionTest.java               # 9 tests
 ├── api/filter/
-│   ├── AdminAuthFilterTest.java          # 8 tests (API key auth)
-│   ├── SecurityHeadersFilterTest.java    # 1 test (7 header verifications)
-│   ├── RateLimitingFilterTest.java       # 17 tests (X-Forwarded-For ignored)
-│   └── RequestSizeValidationFilterTest.java  # 13 tests (chunked stream wrapping)
+│   ├── AdminAuthFilterTest.java          # NEW: 8 tests (API key auth)
+│   ├── SecurityHeadersFilterTest.java    # NEW: 1 test (7 header verifications)
+│   ├── RateLimitingFilterTest.java       # 17 tests (updated: X-Forwarded-For ignored)
+│   └── RequestSizeValidationFilterTest.java  # 13 tests (updated: chunked stream wrapping)
 ├── api/validation/RuleDataValidatorTest.java  # 10 tests
 ├── cache/
 │   ├── LocalLRUCacheTest.java            # 40 tests
 │   ├── RedisRuleCacheTest.java           # 28 tests
 │   └── CacheStatisticsTest.java          # 15 tests
-├── common/LogSanitizerTest.java          # 27+ tests (updated: false positive prevention, nested maps)
+├── common/LogSanitizerTest.java          # 20+ tests
 ├── config/
 │   ├── MetricsConfigTest.java            # 13 tests (uses real SimpleMeterRegistry)
 │   ├── ThreadPoolConfigTest.java         # 4 tests
 │   ├── CircuitBreakerConfigTest.java     # 5 tests
-│   ├── S3ConfigTest.java                 # 8 tests (credential getter tests removed)
+│   ├── S3ConfigTest.java                 # 10 tests
 │   ├── LoggingConfigTest.java            # 9 tests
 │   ├── RequestTimeoutConfigTest.java     # 4 tests
 │   ├── DroolsConfigTest.java            # 4 tests
-│   ├── RateLimitingConfigTest.java       # 19 tests (maxClients field)
+│   ├── RateLimitingConfigTest.java       # 19 tests (updated: maxClients field)
 │   ├── RedisConfigTest.java              # 9 tests
 │   ├── RuleLoadingConfigTest.java        # 6 tests
 │   └── StorageConfigTest.java            # 17 tests
 ├── core/engine/
-│   ├── DroolsEngineServiceTest.java      # 18 tests (updated: non-blocking compilation)
-│   ├── RuleExecutorTest.java             # 10 tests (fireAllRules(int))
-│   ├── RuleCompilerTest.java             # 8 tests (DrlSanitizer param)
-│   └── DrlSanitizerTest.java             # 19 tests (imports, classes, methods, eval)
+│   ├── DroolsEngineServiceTest.java      # 18 tests
+│   ├── RuleExecutorTest.java             # 10 tests (updated: fireAllRules(int))
+│   ├── RuleCompilerTest.java             # 8 tests (updated: DrlSanitizer param)
+│   └── DrlSanitizerTest.java             # NEW: 19 tests (imports, classes, methods, eval)
 ├── core/model/
 │   ├── RuleTest.java                     # 12 tests
 │   └── RuleMetadataTest.java             # 25 tests
@@ -450,13 +415,13 @@ sample-rules/
 - **Rate Limiting**: In-memory per-client (1000/min default)
 - **Request Size Protection**: Spring Boot 10MB + custom filter validation
 - **CORS**: Configurable (was wildcard default — now fixed in Security Phase 3)
-- **Log Sanitization**: Comprehensive sensitive data detection and masking
+- **Log Sanitization**: Credit card, SSN, email, phone, API key masking
 
 ---
 
 ## PHASE 4-6: TESTING, DOCUMENTATION, DEPLOYMENT, FIXES (COMPLETED)
 
-### Testing (589 tests, 96.2% / 89.7%)
+### Testing (584 tests, 96.2% / 89.7%)
 - 44+ test files covering all packages
 - Integration tests: Testcontainers LocalStack for real S3 operations
 - JMeter performance tests: DEFERRED
@@ -473,7 +438,7 @@ sample-rules/
 
 ---
 
-## SECURITY HARDENING (COMPLETED — 39/42 fixes, 2 skipped, 1 doc-only)
+## SECURITY HARDENING (IN PROGRESS — 15/42 fixes)
 
 ### Security Phase 1: Quick Wins — COMPLETED (7 fixes)
 1. **C-3: Jackson `enableDefaultTyping` RCE** → `activateDefaultTyping()` with strict `BasicPolymorphicTypeValidator` (RedisConfig.java)
@@ -502,97 +467,14 @@ sample-rules/
 15. **M-14: No security headers** → SecurityHeadersFilter (NEW file) at @Order(-1)
     - Headers: X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy, Cache-Control, CSP, HSTS
 
-### Security Phase 4: Storage & Path Traversal — COMPLETED (4 fixes)
-16. **M-4: Path traversal defense-in-depth (LocalFileStorage)** → `.normalize().startsWith(rulesRoot)` check in `getRuleFilePath()`
-17. **M-5: Path traversal defense-in-depth (S3RuleStorage)** → `../` and leading `/` validation in `ruleIdToS3Key()`
-18. **M-6: SSRF via configurable S3 endpoint** → `validateEndpoint()` with scheme (`https`, `http`) and host allowlist in S3Config
-19. **M-7: Redis `KEYS *` in production code** → replaced with SCAN cursor-based iteration via `RedisCallback` in RedisRuleCache
-
-### Security Phase 5: Information Leakage & Logging — COMPLETED (6 fixes)
-20. **M-1: Metrics cardinality explosion** → use `"unknown"` tag for rule-not-found error path in DroolsEngineService
-21. **M-8: Correlation ID log injection** → validate correlation/request IDs against `^[a-zA-Z0-9\\-]{1,128}$` in LoggingConfig
-22. **M-9: Exception messages leak internal details** → generic client messages in GlobalExceptionHandler and RuleExecutionController; log details server-side
-23. **M-11: Hardcoded AWS credentials in dev profile** → moved to env var references `${AWS_ACCESS_KEY_ID_DEV:test}` in application.yml
-24. **M-12: DotenvConfig loads .env with highest priority** → changed `addFirst` to `addLast` so real env vars take priority
-25. **L-5: `toString()` dumps full data map** → shows field count instead of full data map in RuleExecutionRequest
-
-### Security Phase 6: Concurrency & Performance — COMPLETED (2 fixes)
-26. **M-2: Write lock held during rule compilation (blocks all execution)** → compile outside lock, acquire write lock only for atomic swap in DroolsEngineService
-    ```java
-    // Before (BLOCKING): Lock → Compile → Swap → Unlock
-    // After (NON-BLOCKING): Compile → Lock → Swap → Unlock
-    KieContainer newContainer = ruleCompiler.compileRules(rules); // outside lock
-    writeLock.lock();
-    try {
-        KieContainer old = currentKieContainer;
-        currentKieContainer = newContainer;
-        if (old != null) old.dispose();
-    } finally {
-        writeLock.unlock();
-    }
-    ```
-27. **M-3: TOCTOU race in DroolsEngineService** → direct `get()` + null check instead of `containsKey()` + `get()`
-
-### Security Phase 7: Infrastructure & Dependencies — COMPLETED (1 of 3; 2 skipped)
-28. ~~**H-6: Redis without authentication or TLS**~~ — SKIPPED (per user request)
-29. **M-13: S3 bucket policy allows all principals** → added guard checking for LocalStack endpoint before applying `Principal: *` policy in init-localstack.sh
-    ```bash
-    if echo "${AWS_ENDPOINT}" | grep -qE '(localhost|127\.0\.0\.1|localstack)'; then
-        # apply bucket policy
-    else
-        echo "Skipping Principal:* bucket policy — not targeting LocalStack"
-    fi
-    ```
-30. ~~**M-15: Outdated dependencies**~~ — SKIPPED (per user request)
-
-### Security Phase 8: Log Sanitizer Improvements — COMPLETED (4 fixes)
-31. **L-1: `pin`/`auth` patterns false positives** → word-boundary regex (`\bpin\b`, `\bauth\b`, `\bssn\b`, `\bcvv\b`) in LogSanitizer
-    - Before: "shipping" matched "pin", "author" matched "auth"
-    - After: Only standalone words match
-32. **L-2: 20+ char alphanumeric redaction too aggressive** → exclude UUIDs (32 hex chars) and Java class names (CamelCase detection) from token redaction
-    ```java
-    private static boolean looksLikeClassName(String value) {
-        return Character.isUpperCase(value.charAt(0))
-            && value.chars().anyMatch(Character::isLowerCase)
-            && value.chars().anyMatch(Character::isUpperCase);
-    }
-    ```
-33. **L-3: SSN regex matches any 9-digit number** → require XXX-XX-XXXX format (separator required, not optional)
-    - Changed from `\d{3}\s?-?\d{2}\s?-?\d{4}` to `\d{3}[\s-]\d{2}[\s-]\d{4}`
-34. **L-4: No recursive sanitization of nested maps** → recursive handling up to `MAX_SANITIZE_DEPTH = 5` levels in LogSanitizer
-    ```java
-    private static Object sanitizeNestedMap(Object value, int depth) {
-        if (depth >= MAX_SANITIZE_DEPTH) return REDACTED_VALUE;
-        // ... recursive sanitization of nested maps
-    }
-    ```
-
-### Security Phase 9: Remaining Low & Info Items — COMPLETED (8 fixes)
-35. **L-7: Redis connection leak in health check** → close connection in finally block in AdminController
-    ```java
-    var connection = redisConnectionFactory.getConnection();
-    try { connection.ping(); }
-    finally { connection.close(); }
-    ```
-36. **L-8: Numerical overflow in execution average** → incremental averaging formula in RuleMetadata
-    ```java
-    // Welford's method: newAvg = oldAvg + (newValue - oldAvg) / newCount
-    double newAverage = averageExecutionTimeMs + (executionTimeMs - averageExecutionTimeMs) / newCount;
-    ```
-37. **L-9: Credential getters expose secrets to other beans** → removed `getAccessKeyId()` and `getSecretAccessKey()` from S3Config
-38. **I-1: KieContainer disposal safety** → already well-documented with lock discipline comments (no code change)
-39. **I-2: No default constructors for Redis serialization** → added `protected` no-arg constructors to Rule.java and RuleMetadata.java
-    - Fields changed from `final` to non-final to allow Jackson/Redis deserialization
-40. **I-3: `getAllRules()` lacks circuit breaker** → wrapped with `CircuitBreaker.decorateSupplier()` in S3RuleStorage
-    ```java
-    public List<Rule> getAllRules() {
-        Supplier<List<Rule>> s3Operation =
-            CircuitBreaker.decorateSupplier(s3CircuitBreaker, this::loadAllRulesFromS3);
-        return s3Operation.get();
-    }
-    ```
-41. **I-4: CallerRunsPolicy can block Tomcat threads** → documented risk with warning comment in ThreadPoolConfig
-42. **I-5: `safeDataRepresentation` sanitizes then discards** → removed wasteful sanitization; shows key names only in LogSanitizer
+### Remaining Security Phases (27 fixes)
+- **Phase 4**: Storage & Path Traversal (4 items: M-4, M-5, M-6, M-7)
+- **Phase 5**: Information Leakage & Logging (6 items: M-1, M-8, M-9, M-11, M-12, L-5)
+- **Phase 6**: Concurrency & Performance (2 items: M-2, M-3)
+- **Phase 7**: Infrastructure & Dependencies (3 items: H-6, M-13, M-15)
+- **Phase 8**: Log Sanitizer Improvements (4 items: L-1, L-2, L-3, L-4)
+- **Phase 9**: Remaining Low/Info (8 items)
+- **Full plan**: `ai-workspace/ai-summary/security-fix-plan.md`
 
 ---
 
@@ -613,22 +495,17 @@ sample-rules/
 - Each rule execution uses a new KieSession (stateless)
 - DroolsEngineService uses ReentrantReadWriteLock for rule loading
 - LocalLRUCache uses WriteLock for get() (access-ordered LinkedHashMap mutates on get)
-- Rule compilation happens OUTSIDE the write lock (non-blocking for readers)
 
 ### 5. Rule ID Transformation
 - `pricing.discount.vip` → `pricing/discount/vip.drl`
 - Package: `com.company.rules.pricing.discount`
 
-### 6. Security Architecture
+### 6. Security Architecture (NEW)
 - **Filter chain order**: SecurityHeadersFilter(@Order(-1)) → AdminAuthFilter(@Order(0)) → RateLimitingFilter(@Order(1)) → RequestSizeValidationFilter(@Order(2))
 - **Admin auth**: API key via `X-Admin-API-Key` header, configured via `ADMIN_API_KEY` env var
 - **DRL sandboxing**: Blocklist + import allowlist approach, scans before Drools compilation
 - **CORS**: Empty by default (restrictive), wildcard only in local/dev/docker profiles
 - **Rate limiting**: Uses `request.getRemoteAddr()` only (X-Forwarded-For ignored to prevent spoofing)
-- **Path traversal**: Defense-in-depth in both LocalFileStorage and S3RuleStorage
-- **SSRF protection**: S3 endpoint validated against scheme + host allowlist
-- **Error messages**: Generic for clients, detailed for server-side logs
-- **Log sanitization**: Word-boundary patterns, nested map recursion, UUID/classname exclusions
 
 ### 7. API Key Filter vs Spring Security
 - Chose lightweight AdminAuthFilter instead of spring-boot-starter-security
@@ -650,26 +527,23 @@ sample-rules/
 ### Rule Execution Flow
 ```
 1. Client Request → POST /execute-rule {"rule_id": "pricing.discount.simple", "data": {"amount": 100}}
-2. SecurityHeadersFilter → adds 7 security headers
-3. RateLimitingFilter → checks per-client limits (uses remoteAddr only)
-4. RequestSizeValidationFilter → validates request size (Content-Length + chunked stream)
+2. SecurityHeadersFilter → adds security headers
+3. RateLimitingFilter → checks per-client limits
+4. RequestSizeValidationFilter → validates request size
 5. RuleExecutionController validates input (@ValidRuleId, @ValidRuleData)
 6. DroolsEngineService.executeRule():
-   a. Look up rule in ConcurrentHashMap<String, Rule> loadedRules (direct get + null check)
-   b. If not found → tag metric as "unknown" to prevent cardinality explosion
-   c. Get currentKieContainer (compiled KieBase)
-   d. Create new KieSession
-   e. Insert data into session
-   f. Fire all rules (async with timeout, maxRuleFirings=10000, future.cancel on timeout)
-   g. Extract results from modified data
-7. Return RuleExecutionResponse (generic error messages for client)
+   a. Look up rule in ConcurrentHashMap<String, Rule> loadedRules
+   b. Get currentKieContainer (compiled KieBase)
+   c. Create new KieSession
+   d. Insert data into session
+   e. Fire all rules (async with timeout, maxRuleFirings=10000)
+   f. Extract results from modified data
+7. Return RuleExecutionResponse
 ```
 
 ### Rule Compilation Flow (with DRL Sandboxing)
 ```
 1. Rules loaded from S3/Local/Memory storage
-   - S3: Path traversal validation (blocks ../ and leading /)
-   - S3: getAllRules() wrapped with circuit breaker
 2. RuleCompiler.compileRules(rules):
    a. DrlSanitizer.sanitize() — for EACH rule:
       - Check imports against allowlist (java.util, java.math, java.time, java.lang primitives)
@@ -679,16 +553,15 @@ sample-rules/
       - If ANY violation → reject rule, return failure
    b. If all rules pass sanitization → compile with Drools KieBuilder
    c. Return compiled KieContainer or error
-3. Write lock acquired ONLY for atomic KieContainer swap (compilation is non-blocking)
 ```
 
 ### Rule Refresh Flow
 ```
 1. POST /admin/refresh-rules (requires X-Admin-API-Key if configured)
 2. AdminController.refreshRules():
-   a. storage.getAllRules() — fetch from S3 (with circuit breaker)
+   a. storage.getAllRules() — fetch from S3
    b. ruleCache.clear() — clear LocalLRUCache
-   c. droolsEngineService.loadRules() — sanitize + compile outside lock, dispose old KieContainer
+   c. droolsEngineService.loadRules() — sanitize + compile, dispose old KieContainer
    d. ruleCache.warmUp(rules) — populate LocalLRUCache
 3. Return RefreshRulesResponse
 ```
@@ -697,10 +570,10 @@ sample-rules/
 ```
 Level 1: Input Validation — @ValidRuleId, @ValidRuleData → HTTP 400
 Level 2: DRL Sanitization — DrlSanitizer rejects dangerous rules → compilation failure
-Level 3: Business Errors — RuleNotFoundException → 404 (generic message), RuleExecutionException → 400
-Level 4: Timeouts — TimeoutException → HTTP 408 (future.cancel(true) on timeout)
+Level 3: Business Errors — RuleNotFoundException → 404, RuleExecutionException → 400
+Level 4: Timeouts — TimeoutException → HTTP 408
 Level 5: External Failures — Circuit breakers (Resilience4j) → HTTP 503
-Level 6: Unexpected — GlobalExceptionHandler → HTTP 500 with correlation ID (generic message to client)
+Level 6: Unexpected — GlobalExceptionHandler → HTTP 500 with correlation ID
 ```
 
 ---
@@ -721,7 +594,6 @@ Level 6: Unexpected — GlobalExceptionHandler → HTTP 500 with correlation ID 
 - **3000 refresh load test**: All 200 OK, 73MB→437MB peak→424MB final, 0 Old Gen GC
 - **2000 refresh extreme test**: 32.6MB total growth, stable from refresh 900-2000
 - **500 concurrent requests**: 45 RPS, 8.3MB growth, GC stabilized
-- **Docker integration test**: 204MB heap after 3 refreshes, GC freed 164MB → stable
 
 ---
 
@@ -762,9 +634,6 @@ curl http://localhost:8080/admin/memory/info
 
 # Actuator (management port)
 curl http://localhost:8081/actuator/health
-
-# Full Docker integration test (30 checks)
-# See full-docker-test-plan.md for complete steps
 ```
 
 ### DRL Important Pattern
@@ -793,28 +662,12 @@ docker-compose down -v           # Stop and clean
 |----------|------|------|-------------|
 | POST /execute-rule | 8080 | None | Execute business rule |
 | GET /admin/health | 8080 | API key (if configured) | Component health status |
-| GET /admin/info | 8080 | API key (if configured) | Application info |
 | GET /admin/rules | 8080 | API key (if configured) | List loaded rules |
 | POST /admin/refresh-rules | 8080 | API key (if configured) | Reload all rules from S3 |
-| POST /admin/refresh-rules/{id} | 8080 | API key (if configured) | Reload single rule |
 | GET /admin/thread-pools | 8080 | API key (if configured) | Thread pool statistics |
 | GET /admin/memory/info | 8080 | API key (if configured) | Memory diagnostics |
-| GET /admin/memory/snapshot | 8080 | API key (if configured) | Memory snapshot |
-| POST /admin/memory/gc | 8080 | API key (if configured) | Trigger GC |
 | GET /actuator/health | 8081 | None | Spring Boot actuator health |
 | GET /actuator/metrics | 8081 | None | Micrometer metrics |
-
-### Docker Integration Test Plan
-Full plan in `full-docker-test-plan.md` — 30 checks across 9 steps:
-1. Docker stack starts (3 services healthy)
-2. Health & admin endpoints (7 checks)
-3. Rules loading & listing (4 checks)
-4. Rule execution (all 10 sample rules)
-5. Error handling & edge cases (5 checks)
-6. Memory stability (heap < 500MB after 3 refreshes)
-7. GC trigger
-8. No errors in Docker logs
-9. Clean shutdown
 
 ---
 
@@ -837,7 +690,7 @@ RULE_EXECUTION_TIMEOUT_SECONDS=30
 DROOLS_THREAD_POOL_MAX_SIZE=50
 AWS_S3_MAX_CONNECTIONS=50
 
-# Security
+# Security (NEW)
 ADMIN_API_KEY=                    # Set to protect /admin/* endpoints (empty = disabled)
 DROOLS_RATE_LIMITING_MAX_CLIENTS=10000  # Max tracked rate-limit clients
 DROOLS_CORS_ALLOWED_ORIGINS=     # Empty by default; set to * for dev
@@ -862,9 +715,8 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 2. **Java 21 Upgrade**: User plans to return (pom.xml, enforcer, Dockerfile, set-java-env.sh)
 3. **Coverage Gaps**: config 83.3% branch, core/engine 83.3% branch
 4. **Redis Integration Decision**: Wire as second-level cache, keep dormant, or remove
-5. **Redis Auth/TLS** (#28): Skipped per user — add requirepass, TLS config when needed
-6. **Dependency Updates** (#30): Skipped per user — update outdated dependencies when ready
-7. **Future Features**: Rule versioning, A/B testing, rule analytics dashboard, GraphQL/gRPC API
+5. **Security Phases 4-9**: 27 remaining fixes (path traversal, info leakage, concurrency, infrastructure, log sanitizer)
+6. **Future Features**: Rule versioning, A/B testing, rule analytics dashboard, GraphQL/gRPC API
 
 ---
 
@@ -872,22 +724,17 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 - **Branch**: `restart-4-security`
 - **Base Branch**: `main`
-- **Working tree**: Clean (security phases complete)
+- **Working tree**: ai-context-update in progress
 - **Recent commits**:
-  - `be99b65` Update security fix plan: all 42 findings addressed (39 fixed, 2 skipped, 1 doc-only)
-  - `38067f2` Phase 9: Remaining low & info security fixes (#35-#42)
-  - `6dafe9a` Phase 8: Log sanitizer improvements (#31-#34)
-  - `1bddc98` Phase 7: Guard S3 bucket policy for LocalStack only (#29)
-  - `d29d559` Phase 6: Concurrency & performance security fixes (#26, #27)
-  - `3fc1e21` security phase 5: info leakage & logging fixes
-  - `e17e02b` security phase 4: storage & path traversal fixes
-  - `fa3e5ac` updated docs
   - `b1152f5` updated security (Phase 3: DrlSanitizer, SecurityHeadersFilter, CORS fix)
   - `ef0b32f` phase 2 test complete
   - `8e594f0` update security plan
+  - `a48fe40` added compact
+  - `2993ef0` added test and plan
   - `6b49597` phase 1 security update
   - `d62d7c4` added security update plan
   - `692a96b` security findings
+  - `4bdc2bb` updated instructions
 
 ---
 
@@ -903,7 +750,7 @@ mvn -version    # Should show Java version: 17.x.x
 ### Build & Test
 ```bash
 mvn clean package                    # Build
-mvn test                             # Run all 589 tests
+mvn test                             # Run all 584 tests
 mvn test jacoco:report               # Generate coverage report
 mvn test -Dtest=DroolsEngineServiceTest  # Run specific test
 mvn spotless:apply                   # Format code (required before commit)
@@ -952,25 +799,13 @@ curl -X POST http://localhost:8080/admin/refresh-rules -H "X-Admin-API-Key: your
 - Docker race condition fix, init-localstack.sh refactor
 - Admin port fix (8080), API field naming fix (rule_id), DRL casting bug fix
 
-### Session 13 (Feb 2026)
+### Session 13 (Feb 2026) — CURRENT
 - Full security review: 42 findings (3 Critical, 10 High, 15 Medium, 9 Low, 5 Info)
 - Created 9-phase security fix plan
 - **Security Phase 1** (7 fixes): Jackson RCE, timeout handling, LRU lock, Docker socket, actuator exposure, port binding
 - **Security Phase 2** (5 fixes): Admin auth filter, rate limiting bypass, unbounded memory, chunked transfer, race condition
 - **Security Phase 3** (3 fixes): DRL sandboxing, CORS wildcard, security headers
 - Total: 15/42 fixes, 584 tests (+34), all 3 Critical findings resolved
-
-### Session 14 (Feb 2026)
-- Completed ALL remaining security phases (4-9)
-- **Security Phase 4** (4 fixes): Path traversal in LocalFileStorage + S3RuleStorage, SSRF endpoint validation, Redis KEYS→SCAN
-- **Security Phase 5** (6 fixes): Metrics cardinality, log injection prevention, exception message sanitization, hardcoded credentials, DotenvConfig priority, toString data exposure
-- **Security Phase 6** (2 fixes): Non-blocking rule compilation (compile outside lock), TOCTOU race fix
-- **Security Phase 7** (1 fix, 2 skipped): S3 bucket policy LocalStack guard; skipped Redis auth/TLS and dependency updates
-- **Security Phase 8** (4 fixes): Word-boundary regex for false positives, UUID/classname exclusion from token redaction, SSN separator requirement, recursive nested map sanitization
-- **Security Phase 9** (8 fixes): Redis connection leak, incremental averaging, credential getter removal, no-arg constructors, circuit breaker on getAllRules, CallerRunsPolicy documentation, safeDataRepresentation optimization
-- Total: 39/42 fixes, 589 tests, 0 failures
-- Full Docker integration test: all 30 checks pass
-- Git commits: d29d559, 1bddc98, 6dafe9a, 38067f2, be99b65
 
 ---
 
@@ -986,7 +821,7 @@ curl -X POST http://localhost:8080/admin/refresh-rules -H "X-Admin-API-Key: your
 - Command: `snap-memory` — creates 10-section session log
 
 ### Security Fix Plan
-- `ai-workspace/ai-summary/security-fix-plan.md` — 42-item checklist, 39/42 complete (2 skipped, 1 doc-only)
+- `ai-workspace/ai-summary/security-fix-plan.md` — 42-item checklist, 15/42 complete
 
 ### Instructions
 - `ai-instructions/ai-start-prompt.md` — AI onboarding (start here)
@@ -997,22 +832,20 @@ curl -X POST http://localhost:8080/admin/refresh-rules -H "X-Admin-API-Key: your
 
 ## NEXT STEPS
 
-1. **Redis decision** — Wire as second-level cache, keep dormant, or remove
-2. **Java 21 upgrade** (user plans to return)
-3. **JMeter performance tests** (Phase 4.3 deferred)
-4. **Coverage gaps** — config 83.3% branch, core/engine 83.3% branch
-5. **Redis auth/TLS** (#28) — Enable when deploying to production
-6. **Dependency updates** (#30) — Review and update outdated dependencies
-7. **Merge `restart-4-security` into `main`** — All security work is complete
-8. **Future Features**: Rule versioning, A/B testing, rule analytics dashboard, GraphQL/gRPC API
+1. **Security Phase 4**: Storage & Path Traversal — 4 items (path canonicalization, SSRF validation, Redis KEYS→SCAN)
+2. **Security Phases 5-9**: 23 remaining fixes (info leakage, concurrency, infrastructure, log sanitizer, low/info items)
+3. **Redis decision** — Wire as second-level cache, keep dormant, or remove
+4. **Java 21 upgrade** (user plans to return)
+5. **JMeter performance tests** (Phase 4.3 deferred)
+6. **Coverage gaps** — config 83.3% branch, core/engine 83.3% branch
 
 ---
 
 **END OF CONTEXT DOCUMENT**
 
-**Project Status**: PRODUCTION READY + SECURITY HARDENING COMPLETE
-**Health Score**: 9/10
-**Tests**: 589 tests, 96.2% instruction / 89.7% branch coverage
-**Security**: 39/42 fixes complete (all 3 Critical, 9/10 High, 14/15 Medium, 9/9 Low, 5/5 Info)
+**Project Status**: PRODUCTION READY + SECURITY HARDENING IN PROGRESS
+**Health Score**: 8.5/10
+**Tests**: 584 tests, 96.2% instruction / 89.7% branch coverage
+**Security**: 15/42 fixes complete (all 3 Critical resolved)
 **Performance**: 2-100x better than targets
-**Docker**: 347MB, all 30 integration checks pass, one-command setup
+**Docker**: 347MB, race condition fixed, one-command setup
