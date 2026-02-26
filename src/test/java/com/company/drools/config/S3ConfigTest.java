@@ -56,29 +56,17 @@ class S3ConfigTest {
     }
 
     @Test
-    @DisplayName("getAccessKeyId returns configured key")
-    void testGetAccessKeyId() {
-      assertThat(s3Config.getAccessKeyId()).isEqualTo("test-key");
-    }
-
-    @Test
-    @DisplayName("setAccessKeyId updates key")
+    @DisplayName("setAccessKeyId does not throw")
     void testSetAccessKeyId() {
       s3Config.setAccessKeyId("new-key");
-      assertThat(s3Config.getAccessKeyId()).isEqualTo("new-key");
+      // No public getter — credential getters removed to prevent secret exposure
     }
 
     @Test
-    @DisplayName("getSecretAccessKey returns configured secret")
-    void testGetSecretAccessKey() {
-      assertThat(s3Config.getSecretAccessKey()).isEqualTo("test-secret");
-    }
-
-    @Test
-    @DisplayName("setSecretAccessKey updates secret")
+    @DisplayName("setSecretAccessKey does not throw")
     void testSetSecretAccessKey() {
       s3Config.setSecretAccessKey("new-secret");
-      assertThat(s3Config.getSecretAccessKey()).isEqualTo("new-secret");
+      // No public getter — credential getters removed to prevent secret exposure
     }
   }
 

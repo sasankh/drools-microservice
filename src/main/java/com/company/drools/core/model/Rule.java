@@ -4,9 +4,12 @@ import java.util.Objects;
 
 public class Rule {
 
-  private final String ruleId;
-  private final String content;
-  private final RuleMetadata metadata;
+  private String ruleId;
+  private String content;
+  private RuleMetadata metadata;
+
+  /** No-arg constructor required for Redis/Jackson deserialization. */
+  protected Rule() {}
 
   public Rule(String ruleId, String content, RuleMetadata metadata) {
     this.ruleId = Objects.requireNonNull(ruleId, "Rule ID cannot be null");

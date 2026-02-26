@@ -185,18 +185,16 @@ public class LogSanitizer {
       return "{}";
     }
 
-    // Limit the number of fields shown in logs
+    // Show only key names (no values) to avoid leaking sensitive data
     int maxFields = 10;
-    Map<String, Object> sanitizedData = sanitizeDataMap(data);
+    int totalFields = data.size();
 
-    if (sanitizedData.size() <= maxFields) {
-      return sanitizedData.keySet().toString();
+    if (totalFields <= maxFields) {
+      return data.keySet().toString();
     } else {
-      return sanitizedData.keySet().stream()
-              .limit(maxFields)
-              .collect(java.util.stream.Collectors.toSet())
+      return data.keySet().stream().limit(maxFields).collect(java.util.stream.Collectors.toSet())
           + " (+"
-          + (sanitizedData.size() - maxFields)
+          + (totalFields - maxFields)
           + " more fields)";
     }
   }

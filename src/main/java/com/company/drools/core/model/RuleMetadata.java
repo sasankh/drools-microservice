@@ -6,13 +6,16 @@ import java.util.Objects;
 
 public class RuleMetadata {
 
-  private final String version;
-  private final LocalDateTime loadedAt;
-  private final LocalDateTime lastModified;
-  private final RuleStatus status;
-  private final String errorMessage;
-  private final long executionCount;
-  private final double averageExecutionTimeMs;
+  private String version;
+  private LocalDateTime loadedAt;
+  private LocalDateTime lastModified;
+  private RuleStatus status;
+  private String errorMessage;
+  private long executionCount;
+  private double averageExecutionTimeMs;
+
+  /** No-arg constructor required for Redis/Jackson deserialization. */
+  protected RuleMetadata() {}
 
   public RuleMetadata(
       String version,
@@ -59,7 +62,9 @@ public class RuleMetadata {
 
   public RuleMetadata withExecution(double executionTimeMs) {
     long newCount = executionCount + 1;
-    double newAverage = (averageExecutionTimeMs * executionCount + executionTimeMs) / newCount;
+    // Incremental average avoids overflow for large execution counts
+    double newAverage =
+        averageExecutionTimeMs + (executionTimeMs - averageExecutionTimeMs) / newCount;
     return new RuleMetadata(
         version, loadedAt, lastModified, status, errorMessage, newCount, newAverage);
   }

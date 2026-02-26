@@ -241,8 +241,13 @@ public class AdminController {
         return new ComponentHealth("UP", details);
       }
 
-      // Try to ping Redis
-      redisConnectionFactory.getConnection().ping();
+      // Try to ping Redis (close connection to prevent leak)
+      var connection = redisConnectionFactory.getConnection();
+      try {
+        connection.ping();
+      } finally {
+        connection.close();
+      }
       details.put("connected", true);
 
       // Get Redis info if it's RedisRuleCache

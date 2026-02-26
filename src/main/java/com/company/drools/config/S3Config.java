@@ -149,7 +149,7 @@ public class S3Config {
     }
   }
 
-  // Configuration properties for external access
+  // Setters required by @ConfigurationProperties binding — no public getters for credentials
   public String getRegion() {
     return region;
   }
@@ -166,16 +166,8 @@ public class S3Config {
     this.endpoint = endpoint;
   }
 
-  public String getAccessKeyId() {
-    return accessKeyId;
-  }
-
   public void setAccessKeyId(String accessKeyId) {
     this.accessKeyId = accessKeyId;
-  }
-
-  public String getSecretAccessKey() {
-    return secretAccessKey;
   }
 
   public void setSecretAccessKey(String secretAccessKey) {

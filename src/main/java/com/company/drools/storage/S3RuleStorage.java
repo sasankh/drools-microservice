@@ -131,6 +131,18 @@ public class S3RuleStorage implements RuleStorage {
   public List<Rule> getAllRules() {
     log.debug("Loading all rules from S3 bucket: {}", bucketName);
 
+    try {
+      Supplier<List<Rule>> s3Operation =
+          CircuitBreaker.decorateSupplier(s3CircuitBreaker, this::loadAllRulesFromS3);
+      return s3Operation.get();
+
+    } catch (CallNotPermittedException e) {
+      log.warn("S3 circuit breaker is open — cannot load all rules");
+      throw new CircuitBreakerException("s3", "OPEN");
+    }
+  }
+
+  private List<Rule> loadAllRulesFromS3() {
     List<Rule> rules = new ArrayList<>();
 
     try {
