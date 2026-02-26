@@ -64,8 +64,11 @@ public class DroolsEngineService {
 
     rulesLock.readLock().lock();
     try {
-      // Check if rule exists
-      if (!loadedRules.containsKey(ruleId)) {
+      // Atomic lookup (avoids TOCTOU race between containsKey and get)
+      Rule rule = loadedRules.get(ruleId);
+      RuleMetadata metadata = ruleMetadata.get(ruleId);
+
+      if (rule == null || metadata == null) {
         log.warn("Rule not found: {}", ruleId);
         meterRegistry
             .counter("drools.rule.execution.error", "rule_id", "unknown", "error", "rule_not_found")
@@ -77,9 +80,6 @@ public class DroolsEngineService {
                 .register(meterRegistry));
         return RuleExecutor.ExecutionResult.failure("Rule not found: " + ruleId);
       }
-
-      Rule rule = loadedRules.get(ruleId);
-      RuleMetadata metadata = ruleMetadata.get(ruleId);
 
       // Check if rule is active
       if (metadata.getStatus() != RuleMetadata.RuleStatus.ACTIVE) {
@@ -137,30 +137,33 @@ public class DroolsEngineService {
   public boolean loadRules(List<Rule> rules) {
     log.info("Loading {} rules", rules.size());
 
+    // Mark all rules as loading (ConcurrentHashMap — no lock needed)
+    for (Rule rule : rules) {
+      RuleMetadata metadata = RuleMetadata.createNew();
+      ruleMetadata.put(rule.getRuleId(), metadata);
+    }
+
+    // Compile rules OUTSIDE the write lock so reads are not blocked
+    RuleCompiler.CompilationResult compilationResult = ruleCompiler.compileRules(rules);
+
+    if (!compilationResult.isSuccess()) {
+      log.error("Failed to compile rules: {}", compilationResult.getErrorMessage());
+
+      // Mark all rules as error
+      for (Rule rule : rules) {
+        RuleMetadata current = ruleMetadata.get(rule.getRuleId());
+        if (current != null) {
+          ruleMetadata.put(
+              rule.getRuleId(), current.withError(compilationResult.getErrorMessage()));
+        }
+      }
+
+      return false;
+    }
+
+    // Acquire write lock only for the atomic swap of KieContainer and rule maps
     rulesLock.writeLock().lock();
     try {
-      // Mark all rules as loading
-      for (Rule rule : rules) {
-        RuleMetadata metadata = RuleMetadata.createNew();
-        ruleMetadata.put(rule.getRuleId(), metadata);
-      }
-
-      // Compile rules
-      RuleCompiler.CompilationResult compilationResult = ruleCompiler.compileRules(rules);
-
-      if (!compilationResult.isSuccess()) {
-        log.error("Failed to compile rules: {}", compilationResult.getErrorMessage());
-
-        // Mark all rules as error
-        for (Rule rule : rules) {
-          RuleMetadata errorMetadata =
-              ruleMetadata.get(rule.getRuleId()).withError(compilationResult.getErrorMessage());
-          ruleMetadata.put(rule.getRuleId(), errorMetadata);
-        }
-
-        return false;
-      }
-
       // Dispose old KieContainer to prevent memory leak
       // This is critical to avoid OOM errors (exit code 137)
       KieContainer oldContainer = currentKieContainer;

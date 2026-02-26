@@ -229,18 +229,12 @@ class DroolsEngineServiceTest {
     }
 
     @Test
-    @DisplayName("loadRules acquires write lock exclusively")
+    @DisplayName("loadRules allows concurrent compilation but serialized swap")
     void testLoadRules_ConcurrentAccess_WriteLockBehavior() throws Exception {
-      AtomicInteger concurrentLoads = new AtomicInteger(0);
-      AtomicInteger maxConcurrentLoads = new AtomicInteger(0);
-
       when(ruleCompiler.compileRules(anyList()))
           .thenAnswer(
               invocation -> {
-                int current = concurrentLoads.incrementAndGet();
-                maxConcurrentLoads.updateAndGet(max -> Math.max(max, current));
-                Thread.sleep(50); // simulate work
-                concurrentLoads.decrementAndGet();
+                Thread.sleep(50); // simulate compilation work
                 KieContainer container = mock(KieContainer.class);
                 return RuleCompiler.CompilationResult.success(container);
               });
@@ -271,8 +265,8 @@ class DroolsEngineServiceTest {
       executor.shutdown();
 
       assertThat(completed).isTrue();
-      // Write lock is exclusive, so max concurrent loads should be 1
-      assertThat(maxConcurrentLoads.get()).isEqualTo(1);
+      // All 5 rules should be loaded (compilation is concurrent, swap is serialized)
+      assertThat(service.getLoadedRulesCount()).isEqualTo(threadCount);
     }
 
     @Test
