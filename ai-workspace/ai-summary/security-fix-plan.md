@@ -1,39 +1,36 @@
 # Security Fix Plan — Drools Rule Engine Microservice
 **Created**: 2026-02-26
+**Updated**: 2026-02-26
 **Source**: [security-review-2026-02-26.md](security-review-2026-02-26.md)
 **Total Findings**: 42 (3 Critical, 10 High, 15 Medium, 9 Low, 5 Info)
+**Progress**: 7/42 complete (Phase 1 done)
 
 ---
 
-## Phase 1: Quick Wins & Critical Fixes (< 1 hour total)
+## Phase 1: Quick Wins & Critical Fixes (< 1 hour total) — COMPLETED
 
-- [ ] **1. C-3: Jackson `enableDefaultTyping` RCE** — CRITICAL — 5 min
-  - File: `RedisConfig.java:58`
-  - Fix: Replace `enableDefaultTyping(NON_FINAL)` with `activateDefaultTyping()` using strict `BasicPolymorphicTypeValidator` that whitelists only `com.company.drools.core.model`
+- [x] **1. C-3: Jackson `enableDefaultTyping` RCE** — CRITICAL
+  - File: `RedisConfig.java` — replaced with `activateDefaultTyping()` + strict `BasicPolymorphicTypeValidator`
 
-- [ ] **2. H-2: Thread leak on timeout (future never cancelled)** — HIGH — 5 min
-  - File: `RuleExecutor.java:45-60`
-  - Fix: Add `future.cancel(true)` in the `TimeoutException` catch block
+- [x] **2. H-2: Thread leak on timeout (future never cancelled)** — HIGH
+  - File: `RuleExecutor.java` — added `future.cancel(true)` in timeout catch block
 
-- [ ] **3. H-1: No `fireAllRules` limit (infinite loops)** — HIGH — 5 min
-  - File: `RuleExecutor.java:79`
-  - Fix: Use `fireAllRules(maxRuleFirings)` with configurable max (e.g., 1000)
+- [x] **3. H-1: No `fireAllRules` limit (infinite loops)** — HIGH
+  - File: `RuleExecutor.java` — added `fireAllRules(maxRuleFirings)` with default 10000, configurable via constructor
 
-- [ ] **4. H-8: LinkedHashMap read lock on mutating `get()`** — HIGH — 5 min
-  - File: `LocalLRUCache.java:66-91`
-  - Fix: Change `get()` to use write lock instead of read lock (access-ordered LinkedHashMap mutates on get)
+- [x] **4. H-8: LinkedHashMap read lock on mutating `get()`** — HIGH
+  - File: `LocalLRUCache.java` — changed `get()` from read lock to write lock
 
-- [ ] **5. H-7: Docker socket mount (container escape)** — HIGH — 1 min
-  - File: `docker-compose.yml:96`
-  - Fix: Remove `/var/run/docker.sock` mount from LocalStack service
+- [x] **5. H-7: Docker socket mount (container escape)** — HIGH
+  - File: `docker-compose.yml` — removed `/var/run/docker.sock` mount and `DOCKER_HOST` env var
 
-- [ ] **6. H-10: Actuator exposes detailed component info** — HIGH — 5 min
-  - File: `application.yml:22-24`
-  - Fix: Change `show-details: always` to `show-details: when-authorized`
+- [x] **6. H-10: Actuator exposes detailed component info** — HIGH
+  - File: `application.yml` — changed `show-details`/`show-components` to `when-authorized`
 
-- [ ] **7. L-6: Docker ports bound to all interfaces** — LOW — 5 min
-  - File: `docker-compose.yml:9-10,85,109`
-  - Fix: Bind ports to `127.0.0.1:` (e.g., `127.0.0.1:4566:4566`)
+- [x] **7. L-6: Docker ports bound to all interfaces** — LOW
+  - File: `docker-compose.yml` — bound LocalStack and Redis to `127.0.0.1`
+
+**Verified**: 550 unit tests passing, full Docker integration test passed (all 21 categories)
 
 ---
 
