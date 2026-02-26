@@ -9,6 +9,7 @@ import org.kie.api.runtime.KieContainer;
 import org.kie.api.runtime.KieSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
@@ -23,6 +24,7 @@ public class RuleExecutor {
   private final Executor ruleExecutionExecutor;
   private final int maxRuleFirings;
 
+  @Autowired
   public RuleExecutor(@Qualifier("ruleExecutionExecutor") Executor ruleExecutionExecutor) {
     this(ruleExecutionExecutor, DEFAULT_MAX_RULE_FIRINGS);
   }
