@@ -217,8 +217,8 @@ drools:
 
 aws:
   endpoint: http://localhost:4566
-  access-key-id: test
-  secret-access-key: test
+  access-key-id: ${AWS_ACCESS_KEY_ID_DEV:test}
+  secret-access-key: ${AWS_SECRET_ACCESS_KEY_DEV:test}
   s3:
     connection-pool:
       max-connections: 25

@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.slf4j.MDC;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,6 +21,7 @@ public class LoggingConfig {
 
   private static final String CORRELATION_ID_HEADER = "X-Correlation-ID";
   private static final String REQUEST_ID_HEADER = "X-Request-ID";
+  private static final Pattern SAFE_ID_PATTERN = Pattern.compile("^[a-zA-Z0-9\\-]{1,128}$");
   private static final String CORRELATION_ID_KEY = "correlationId";
   private static final String REQUEST_ID_KEY = "requestId";
   private static final String REQUEST_URI_KEY = "requestUri";
@@ -36,17 +38,11 @@ public class LoggingConfig {
           throws ServletException, IOException {
 
         try {
-          // Get or generate correlation ID
-          String correlationId = request.getHeader(CORRELATION_ID_HEADER);
-          if (correlationId == null || correlationId.isEmpty()) {
-            correlationId = UUID.randomUUID().toString();
-          }
+          // Get or generate correlation ID (validate to prevent log injection)
+          String correlationId = sanitizeHeaderId(request.getHeader(CORRELATION_ID_HEADER));
 
           // Get or generate request ID
-          String requestId = request.getHeader(REQUEST_ID_HEADER);
-          if (requestId == null || requestId.isEmpty()) {
-            requestId = UUID.randomUUID().toString();
-          }
+          String requestId = sanitizeHeaderId(request.getHeader(REQUEST_ID_HEADER));
 
           // Add to MDC for structured logging
           MDC.put(CORRELATION_ID_KEY, correlationId);
@@ -72,6 +68,17 @@ public class LoggingConfig {
         }
       }
     };
+  }
+
+  private static String sanitizeHeaderId(String headerValue) {
+    if (headerValue == null || headerValue.isEmpty()) {
+      return UUID.randomUUID().toString();
+    }
+    if (SAFE_ID_PATTERN.matcher(headerValue).matches()) {
+      return headerValue;
+    }
+    // Header contains invalid characters — generate a fresh ID instead
+    return UUID.randomUUID().toString();
   }
 
   /** Utility class for adding structured logging fields. */

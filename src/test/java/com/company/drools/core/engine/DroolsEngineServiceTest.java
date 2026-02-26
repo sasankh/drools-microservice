@@ -615,17 +615,17 @@ class DroolsEngineServiceTest {
                   .counter(
                       "drools.rule.execution.error",
                       "rule_id",
-                      "missing.rule",
+                      "unknown",
                       "error",
                       "rule_not_found")
                   .count())
           .isEqualTo(1.0);
 
-      // Verify error timer was recorded
+      // Verify error timer was recorded with "unknown" tag (prevents cardinality explosion)
       assertThat(
               meterRegistry
                   .find("drools.rule.execution.time")
-                  .tag("rule_id", "missing.rule")
+                  .tag("rule_id", "unknown")
                   .tag("status", "error")
                   .timer())
           .isNotNull();

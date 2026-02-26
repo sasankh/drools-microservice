@@ -57,6 +57,13 @@ public class RuleExecutionRequest {
 
   @Override
   public String toString() {
-    return "RuleExecutionRequest{" + "ruleId='" + ruleId + '\'' + ", data=" + data + '}';
+    int fieldCount = data != null ? data.size() : 0;
+    return "RuleExecutionRequest{"
+        + "ruleId='"
+        + ruleId
+        + '\''
+        + ", dataFields="
+        + fieldCount
+        + '}';
   }
 }

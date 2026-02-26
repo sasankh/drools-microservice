@@ -24,9 +24,9 @@ public class DotenvConfig implements ApplicationContextInitializer<ConfigurableA
       Map<String, Object> dotenvMap = new HashMap<>();
       dotenv.entries().forEach(entry -> dotenvMap.put(entry.getKey(), entry.getValue()));
 
-      // Add to Spring Environment with high priority
+      // Add to Spring Environment with lowest priority (real env vars and system props override)
       ConfigurableEnvironment environment = applicationContext.getEnvironment();
-      environment.getPropertySources().addFirst(new MapPropertySource("dotenv", dotenvMap));
+      environment.getPropertySources().addLast(new MapPropertySource("dotenv", dotenvMap));
 
     } catch (Exception e) {
       // Silently ignore .env loading errors - it's optional

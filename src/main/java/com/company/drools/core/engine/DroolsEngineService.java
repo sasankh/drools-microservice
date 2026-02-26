@@ -68,11 +68,11 @@ public class DroolsEngineService {
       if (!loadedRules.containsKey(ruleId)) {
         log.warn("Rule not found: {}", ruleId);
         meterRegistry
-            .counter("drools.rule.execution.error", "rule_id", ruleId, "error", "rule_not_found")
+            .counter("drools.rule.execution.error", "rule_id", "unknown", "error", "rule_not_found")
             .increment();
         sample.stop(
             Timer.builder("drools.rule.execution.time")
-                .tag("rule_id", ruleId)
+                .tag("rule_id", "unknown")
                 .tag("status", "error")
                 .register(meterRegistry));
         return RuleExecutor.ExecutionResult.failure("Rule not found: " + ruleId);

@@ -123,7 +123,7 @@ public class RuleExecutionController {
               .tag("status", "error")
               .register(meterRegistry));
       throw new RuleExecutionException(
-          request.getRuleId(), "Unexpected error during rule execution: " + e.getMessage(), e);
+          request.getRuleId(), "Unexpected error during rule execution", e);
     }
   }
 }

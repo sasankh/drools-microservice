@@ -37,7 +37,8 @@ public class GlobalExceptionHandler {
         "Rule execution failed for rule: {}", LogSanitizer.sanitizeMessage(ex.getRuleId()), ex);
 
     RuleExecutionResponse response =
-        RuleExecutionResponse.failure(ex.getRuleId(), "RULE_EXECUTION_ERROR", ex.getMessage());
+        RuleExecutionResponse.failure(
+            ex.getRuleId(), "RULE_EXECUTION_ERROR", "Rule execution failed");
 
     return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
   }
@@ -100,7 +101,7 @@ public class GlobalExceptionHandler {
     log.warn("Invalid argument: {}", ex.getMessage());
 
     RuleExecutionResponse response =
-        RuleExecutionResponse.failure(null, "INVALID_INPUT", ex.getMessage());
+        RuleExecutionResponse.failure(null, "INVALID_INPUT", "Invalid request parameter");
 
     return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
   }
