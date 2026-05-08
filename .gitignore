@@ -77,3 +77,7 @@ jacoco.exec
 *.zip
 *.tar.gz
 *.rar
+
+# Others
+heap-dumps/
+gc-logs/
