@@ -1,0 +1,44 @@
+UNIVERSAL PROJECT DOCUMENTATION PROMPT
+=====================================
+
+Copy-paste this into any project:
+
+---
+
+I need comprehensive documentation for this entire project that allows anyone to understand everything without reading the source code.
+
+Create a documentation plan and checklist covering:
+0. Visual Overview: System architecture diagram with navigation to all docs
+1. Foundation: Project overview, structure, architecture, environments
+2. Infrastructure & IaC: ALL cloud resources, Terraform/CloudFormation/IaC configs, deployment architecture
+3. APIs & Integration: All endpoints, external integrations, auth mechanisms
+4. Data & Security: Data models, encryption, security, data lifecycle
+5. Development: Coding patterns, testing, build & deployment
+6. Advanced Topics: Complex workflows, async processing, performance
+7. Operational: Getting started guide, runbooks, monitoring & observability
+8. Reference: Diagrams (Mermaid), integration guide, error catalog, glossary, config reference
+9. Onboarding: Prerequisites, quick start, common tasks, troubleshooting, FAQ
+10. Advanced Deep Dives: Provisioning architecture, API implementation patterns, webhook implementation, infrastructure deep dives, ADRs
+
+Process:
+1. Analyze the entire codebase thoroughly
+2. Create .ai-workspace/ directory (AI workspace for planning) with DOCUMENTATION_PLAN.md, CHECKLIST.md, and SUMMARY.md
+3. After plan approval, create project-documentation/ directory with all documentation files
+4. Include code examples, diagrams, cross-references
+5. Create project-documentation/README.md as navigation index
+6. Update root README.md
+
+Success criteria:
+✅ New developer can onboard without help
+✅ Operator can deploy/monitor/troubleshoot independently
+✅ Architect can understand design without reading code
+✅ Partners can integrate using only docs
+✅ All errors debuggable via docs
+✅ All terms defined, all configs documented
+✅ Ready for NotebookLM interactive Q&A
+
+DO NOT start writing yet - create the plan first, then wait for approval.
+
+---
+
+That's it! Paste this into Claude Code in any project directory.

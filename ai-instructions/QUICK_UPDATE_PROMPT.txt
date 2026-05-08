@@ -1,0 +1,70 @@
+UNIVERSAL DOCUMENTATION UPDATE PROMPT
+======================================
+
+Copy-paste this into any project with existing documentation:
+
+---
+
+Update the existing documentation to reflect current code changes.
+
+Phase 1 - Discovery:
+1. Find all docs in project-documentation/ directory
+2. Check git log for changes since last doc update (last 30-90 days)
+3. Compare current code against existing documentation
+4. Identify gaps:
+   - New features not documented
+   - Removed features still documented
+   - Changed APIs with outdated schemas
+   - New config options not listed
+   - Updated architecture not in diagrams
+   - Infrastructure/Terraform changes not reflected
+   - New deep-dive subsystems needing documentation
+   - New errors not cataloged
+   - Changed workflows
+
+Phase 2 - Planning:
+Create .ai-workspace/UPDATE_PLAN.md (in AI workspace) with:
+- List of all changes detected (from git)
+- Documentation gaps (Critical/Important/Minor)
+- Update tasks per document with time estimates
+- Source files to reference for each update
+- Validation checklist
+
+Create .ai-workspace/PROJECT_UPDATE_PROMPT.md (custom for this project):
+- Custom prompt for THIS project
+- Quick update version (routine changes)
+- Full sync version (major updates)
+- Project-specific focus areas
+
+Phase 3 - Implementation:
+- Update documents per the plan
+- Preserve existing style and structure
+- Use actual code snippets from current source
+- Update diagrams if needed
+- Fix broken cross-references
+- Update "Last Updated" dates
+
+Phase 4 - Validation:
+✅ All gaps addressed
+✅ No references to removed features
+✅ All APIs current
+✅ All configs documented
+✅ Diagrams current
+✅ Code examples work
+✅ Cross-references valid
+
+Create .ai-workspace/UPDATE_SUMMARY.md (in AI workspace) with what changed and next review date.
+
+DO NOT start updating yet - create the UPDATE_PLAN first, then wait for approval.
+
+Note: .ai-workspace/ is your AI workspace for plans, checklists, and analysis artifacts. The actual documentation lives in project-documentation/ directory.
+
+---
+
+That's it! Paste this into Claude Code in any project with existing docs.
+
+WHEN TO USE:
+- After sprint/release (routine updates)
+- After major changes (full sync)
+- Quarterly documentation audits
+- Before major releases
