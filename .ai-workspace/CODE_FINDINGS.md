@@ -210,4 +210,12 @@ The script-bug noted in F-025 (using `ruleId` instead of `rule_id` in setup/test
 
 ## Findings discovered during Phase 1+ (appended as work proceeds)
 
-*(empty until Phase 1 begins)*
+### F-031 🟢 — `@Value` default mismatch with `application.yml` for max-number-value
+- **Severity**: Low (cosmetic; YAML wins at runtime)
+- **Discovered during**: Phase 2 writing of `09-environment-variables-reference.md`
+- **Where**: validation config
+- **What's inconsistent**:
+  - `@Value("${drools.validation.data.max-number-value:1000000}")` in code → default 1,000,000 (1M)
+  - [`application.yml:109`](../src/main/resources/application.yml#L109) sets `max-number-value: ${DROOLS_VALIDATION_DATA_MAX_NUMBER_VALUE:1000000000}` → default 1,000,000,000 (1B)
+- **What runs**: YAML wins because it's loaded into the property source list before `@Value` resolution. The `@Value` default is unreachable unless YAML is removed.
+- **Action**: Doc-level note added to `09-environment-variables-reference.md`. **No code fix recommended** — make sure people reading code know YAML is authoritative; consider aligning the `@Value` default to 1B as a tidy-up in a future commit.

@@ -26,16 +26,21 @@ This guide covers deployment options for the Drools Rule Engine Microservice, fr
 
 ### Architecture
 ```
-┌─────────────────┐    ┌──────────────┐    ┌─────────────┐
-│   Load Balancer │───▶│ Application  │───▶│   AWS S3    │
-│    (Optional)   │    │  (Port 8080) │    │   Rules     │
-└─────────────────┘    └──────────────┘    └─────────────┘
-                              │                     │
-                       ┌──────────────┐    ┌─────────────┐
-                       │ Admin Portal │    │   Redis     │
-                       │ (Port 8080)  │    │   Cache     │
-                       └──────────────┘    └─────────────┘
+┌─────────────────┐    ┌────────────────────────────┐    ┌─────────────┐
+│  Load Balancer  │───▶│      Application           │───▶│   AWS S3    │
+│   (Optional)    │    │  Port 8080: /execute-rule  │    │   Rules     │
+└─────────────────┘    │              /admin/*      │    └─────────────┘
+                       │  Port 8081: /actuator/*    │            │
+                       │              (mgmt only)   │    ┌─────────────┐
+                       └────────────────┬───────────┘    │   Redis     │
+                                        │                │   Cache     │
+                                        └───────────────▶│  (optional) │
+                                                         └─────────────┘
 ```
+
+**Port architecture** (verified [application.yml:1-24](../src/main/resources/application.yml)):
+- **Port 8080** — Main API (`POST /execute-rule`) **and** custom admin endpoints (`/admin/health`, `/admin/rules`, `/admin/refresh-rules`, `/admin/memory/*`, `/admin/thread-pools`, `/admin/info`). All on the same port.
+- **Port 8081** — Spring Boot Actuator (`/actuator/health`, `/actuator/metrics`, `/actuator/prometheus`). Management port — typically firewalled off externally.
 
 ---
 
@@ -64,8 +69,8 @@ This guide covers deployment options for the Drools Rule Engine Microservice, fr
 
 ```bash
 # === Rule Storage Configuration ===
-RULE_SOURCE=s3                           # Options: s3, local, memory
-RULE_BUCKET_NAME=my-drools-rules          # S3 bucket name
+RULE_SOURCE=s3                           # Options: s3, local, file. Default = local. (StorageFactory.java)
+RULE_BUCKET_NAME=my-drools-rules          # S3 bucket name (used when RULE_SOURCE=s3)
 
 # === AWS Configuration ===
 AWS_REGION=us-east-1                      # AWS region
@@ -570,39 +575,49 @@ EOF
 
 ### 1. Build Docker Image
 
-Create `Dockerfile`:
+The repository ships an actual `Dockerfile` at the repo root. It is **multi-stage** (Maven build → Amazon Corretto Alpine runtime) and produces a ~347 MB image. The full file is at [`Dockerfile`](../Dockerfile); the structure below documents it.
 
 ```dockerfile
-FROM openjdk:17-jre-slim
-
-# Create app user
-RUN groupadd -r drools && useradd -r -g drools drools
-
-# Set working directory
+# ── Stage 1: Build ───────────────────────────────────────────
+FROM maven:3.9-eclipse-temurin-17 AS build
 WORKDIR /app
+COPY pom.xml .
+RUN mvn dependency:go-offline -B          # dependency caching layer
+COPY src ./src
+RUN mvn clean package -DskipTests
+# Output: /app/target/drools-rule-engine-*.jar
 
-# Copy JAR file
-COPY target/drools-rule-engine-*.jar app.jar
+# ── Stage 2: Runtime ─────────────────────────────────────────
+FROM amazoncorretto:17-alpine-jdk
+RUN addgroup -g 1000 appgroup && adduser -D -u 1000 -G appgroup appuser
+WORKDIR /app
+COPY --from=build /app/target/drools-rule-engine-*.jar app.jar
 
-# Change ownership
-RUN chown drools:drools app.jar
+# JVM tuning — applied even if docker-compose overrides JAVA_OPTS
+ENV JAVA_OPTS="-XX:+UseContainerSupport \
+    -XX:InitialRAMPercentage=50.0 -XX:MaxRAMPercentage=75.0 -XX:MinRAMPercentage=50.0 \
+    -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -XX:G1HeapRegionSize=16m \
+    -XX:InitiatingHeapOccupancyPercent=30 -XX:+UseStringDeduplication \
+    -XX:+OptimizeStringConcat -XX:+UseCompressedOops -XX:+UseCompressedClassPointers \
+    -XX:ThreadStackSize=1024 -XX:TieredStopAtLevel=4 -XX:+ExitOnOutOfMemoryError \
+    -Ddrools.dateformat=yyyy-MM-dd -Ddrools.timezone=UTC \
+    -Ddrools.multithreadEvaluation=true"
 
-# Switch to app user
-USER drools
+USER appuser
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:8080/admin/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/admin/health
 
-# JVM optimization for containers
-ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
-
-# Expose ports
 EXPOSE 8080 8081
-
-# Run application
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
 ```
+
+**Why these choices**:
+- **Amazon Corretto Alpine** (~180 MB base) over `openjdk:17-jre-slim` — smaller, AWS-tuned JVM, security patches via Amazon.
+- **Multi-stage** — build artifacts (Maven cache, source) excluded from the runtime image.
+- **Non-root user** — `appuser` (uid 1000), required by many container security policies.
+- **`wget --spider`** — Alpine ships with `wget` but not `curl`; `--spider` does an HTTP HEAD without downloading.
+- **`-XX:ExitOnOutOfMemoryError`** — fast crash on OOM rather than degraded service. The orchestrator restarts.
 
 ### 2. Build and Run
 
@@ -854,11 +869,10 @@ curl http://localhost:8080/admin/rules
 
 ## 📚 Additional Resources
 
-- [Configuration Guide](configuration.md)
-- [Rule Development Guide](rule-development.md)
-- [API Documentation](../api-documentation.yml)
-- [Troubleshooting Guide](troubleshooting.md)
-- [Project Documentation](../project.documentation.md)
+- [Configuration Guide](08-configuration.md)
+- [Rule Development Guide](17-rule-development.md)
+- [API Documentation](api-reference/openapi.yml)
+- [Troubleshooting Guide](31-troubleshooting.md)
 
 ---
 

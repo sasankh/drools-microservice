@@ -1,5 +1,11 @@
 # 📋 Drools Rule Development Guide
 
+> ⚠️ **This project uses traditional DRL syntax only.** All rules in this codebase use `Map()`-based pattern matching with plain Java in `then` blocks. **Do NOT use** Drools 8 features like rule units, OOPath (`/persons[...]`), `DataStream`, `DataStore`, or `RuleUnitData` — they are not used here, will not work in this configuration, and will be rejected during deployment review.
+>
+> The full Drools 8 language reference (which includes those unused features for upstream completeness) lives in [23-rule-language-reference.md](23-rule-language-reference.md). For this project, follow the patterns in **this** doc and verify against the working examples in [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md).
+>
+> Every rule is also scanned by `DrlSanitizer` before compilation. The sandbox blocks `eval()`, dangerous classes, and unauthorized imports — see [16-drl-sandboxing.md](16-drl-sandboxing.md) for the full allowlist/blocklist.
+
 ## 📋 Table of Contents
 
 - [Overview](#overview)
@@ -913,19 +919,19 @@ S3 Structure:
 ## 📚 Additional Resources
 
 ### Documentation
-- [Drools Documentation](https://docs.drools.org/)
-- [Rule Language Reference](https://docs.drools.org/7.74.1.Final/drools-docs/html_single/#drl-rules-con_drl-rules)
-- [Pattern Matching Guide](https://docs.drools.org/7.74.1.Final/drools-docs/html_single/#drl-patterns-con_drl-rules)
+- [Drools Documentation (8.x)](https://docs.drools.org/8.44.0.Final/drools-docs/docs-website/)
+- [DRL Rules Reference (8.44)](https://docs.drools.org/8.44.0.Final/drools-docs/docs-website/drools/language/index.html) — note: this project uses only the *traditional* subset of DRL described there.
+- Local copy: [23-rule-language-reference.md](23-rule-language-reference.md) (with project-applicability annotations)
 
-### Tools
-- [Drools Workbench](https://docs.drools.org/7.74.1.Final/drools-docs/html_single/#_droolsworkbench)
-- [Rule Testing Framework](https://docs.drools.org/7.74.1.Final/drools-docs/html_single/#_testing_rules)
-- [Visual Rule Builder](https://docs.drools.org/7.74.1.Final/drools-docs/html_single/#_visual_rule_builder)
+### Project-specific guides
+- [16-drl-sandboxing.md](16-drl-sandboxing.md) — full sandbox allowlist/blocklist (must read before authoring)
+- [18-rule-id-and-storage-layout.md](18-rule-id-and-storage-layout.md) — rule ID format and S3 path mapping
+- [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) — all 10 sample rules with verified curl examples
+- [20-rule-generation-prompt.md](20-rule-generation-prompt.md) / [21](21-rule-generation-prompt-enhanced.md) / [22](22-rule-generation-prompt-concise.md) — AI rule generation prompts
 
-### Examples Repository
-- [Sample Rules](../rules/)
-- [Test Cases](../src/test/resources/rules/)
-- [Performance Benchmarks](../performance/)
+### Examples in repo
+- [`sample-rules/`](../sample-rules/) — 10 production-ready sample rules
+- [`src/test/java/com/company/drools/`](../src/test/java/com/company/drools/) — 44 test files documenting actual behavior
 
 ---
 

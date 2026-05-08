@@ -871,10 +871,10 @@ export DROOLS_CORS_ALLOWED_ORIGINS=https://app.company.com,https://admin.company
 - **Metrics**: `http://localhost:8081/actuator/metrics`
 
 ### Documentation Links
-- [Configuration Guide](configuration.md)
-- [Deployment Guide](deployment.md)
-- [Rule Development Guide](rule-development.md)
-- [API Documentation](../api-documentation.yml)
+- [Configuration Guide](08-configuration.md)
+- [Deployment Guide](06-deployment.md)
+- [Rule Development Guide](17-rule-development.md)
+- [API Documentation](api-reference/openapi.yml)
 
 ### Log Locations
 - **Application Logs**: `/var/log/drools-rule-engine/application.log`

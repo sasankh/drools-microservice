@@ -142,23 +142,24 @@ The Drools Rule Engine Microservice is a high-performance, cloud-native business
 
 #### Controllers
 
-**RuleExecutionController** (Main API - Port 8080)
+**RuleExecutionController** (Main API - Port 8080) — see [RuleExecutionController.java](../src/main/java/com/company/drools/api/controller/RuleExecutionController.java)
 - **Endpoint**: `POST /execute-rule`
 - **Responsibility**: Execute business rules with provided data
-- **Input**: `{ "ruleId": "pricing.discount.vip", "data": {...} }`
+- **Input**: `{ "rule_id": "pricing.discount.vip", "data": {...} }` — JSON uses **snake_case** (`rule_id`) via `@JsonProperty("rule_id")` on the `ruleId` Java field; see [RuleExecutionRequest.java:12](../src/main/java/com/company/drools/api/dto/RuleExecutionRequest.java#L12)
 - **Output**: Rule execution results or error response
-- **Validation**: Request size, data structure, rule ID format
+- **Validation**: Request size, data structure, rule ID format (custom `@ValidRuleId`, `@ValidRuleData` annotations)
 - **Security**: Rate limiting, input sanitization
 
-**AdminController** (Admin API - Port 8080)
+**AdminController** (Admin API - Port 8080) — see [AdminController.java](../src/main/java/com/company/drools/api/controller/AdminController.java)
 - **Endpoints**:
-  - `GET /admin/health` - Component health checks
-  - `GET /admin/rules` - List all loaded rules with metadata
-  - `GET /admin/rules/{ruleId}` - Get single rule details
-  - `POST /admin/refresh-rules` - Reload all rules from storage
-  - `POST /admin/refresh-rules/{ruleId}` - Reload specific rule
+  - `GET /admin/health` — Component health checks (lines 89-155)
+  - `GET /admin/info` — Application info (lines 316-325)
+  - `GET /admin/thread-pools` — Thread pool stats (lines 328-365)
+  - `GET /admin/rules` — List all loaded rules with metadata (lines 479-520)
+  - `POST /admin/refresh-rules` — Reload all rules from storage (lines 368-414)
+  - `POST /admin/refresh-rules/{ruleId}` — Reload specific rule (lines 417-476)
 - **Responsibility**: System administration and monitoring
-- **Security**: No rate limiting (trusted internal use)
+- **Security**: Admin endpoints are **exempt from rate limiting** but require the `X-Admin-API-Key` header when `ADMIN_API_KEY` env var is set (verified by [AdminAuthFilterTest](../src/test/java/com/company/drools/api/filter/AdminAuthFilterTest.java) and [RateLimitingFilterTest:120-127](../src/test/java/com/company/drools/api/filter/RateLimitingFilterTest.java#L120-L127))
 
 **MemoryController** (Admin API - Port 8080)
 - **Endpoints**:
@@ -175,34 +176,42 @@ The Drools Rule Engine Microservice is a high-performance, cloud-native business
 
 #### DTOs (Data Transfer Objects)
 
-**RuleExecutionRequest**
+> **Note on naming**: Java fields use camelCase (`ruleId`); JSON serialization uses snake_case (`rule_id`) via Jackson's `@JsonProperty` annotation. The mapping is in [RuleExecutionRequest.java:12](../src/main/java/com/company/drools/api/dto/RuleExecutionRequest.java#L12) and similar DTOs.
+
+**RuleExecutionRequest** — Java type / JSON shape
 ```java
+// Java: src/main/java/com/company/drools/api/dto/RuleExecutionRequest.java
+class RuleExecutionRequest {
+  @JsonProperty("rule_id")  String ruleId;     // JSON: "rule_id"
+  @JsonProperty("data")     Map<String,Object> data;
+}
+```
+```json
+// Wire format
+{ "rule_id": "pricing.discount.vip", "data": {...} }
+```
+
+**RuleExecutionResponse** — JSON shape
+```json
 {
-  ruleId: String        // Format: "pricing.discount.vip"
-  data: Map<String, Object>  // Rule input data
+  "rule_id": "pricing.discount.vip",
+  "result": { ... },
+  "error": null,
+  "execution_time_ms": 15
 }
 ```
 
-**RuleExecutionResponse**
-```java
+**RuleInfo** (entry inside `GET /admin/rules` response)
+```json
 {
-  success: boolean
-  ruleId: String
-  executionTimeMs: long
-  results: Map<String, Object>
-  errors: List<String>
-}
-```
-
-**RuleInfo**
-```java
-{
-  ruleId: String
-  status: ACTIVE | ERROR | LOADING
-  loadedAt: Timestamp
-  lastExecutedAt: Timestamp
-  executionCount: long
-  errorMessage: String?
+  "rule_id": "pricing.discount.vip",
+  "status": "ACTIVE",
+  "loaded_at": "2026-05-08T08:57:10Z",
+  "last_modified": "2026-05-08T08:57:10Z",
+  "execution_count": 42,
+  "avg_execution_time_ms": 15.3,
+  "cached": true,
+  "version": "1.0"
 }
 ```
 
@@ -512,58 +521,51 @@ Request for Rule ID
 1. CLIENT REQUEST
    POST /execute-rule
    {
-     "ruleId": "pricing.discount.vip",
+     "rule_id": "pricing.discount.vip",
      "data": {"amount": 100, "customerType": "VIP"}
    }
         ↓
-2. SECURITY FILTERS
-   - Rate Limiting Filter
-   - Request Size Validation (max 10MB)
-   - Request Timeout Filter (30s)
-   - Log Sanitization Filter
+2. SECURITY FILTERS  (in @Order)
+   - SecurityHeadersFilter  @Order(-1)  - adds 7 headers to response
+   - AdminAuthFilter        @Order(0)   - skipped for /execute-rule
+   - RateLimitingFilter     @Order(1)   - per-client check
+   - RequestSizeValidationFilter        - request body size + chunked stream limit
         ↓
 3. CONTROLLER LAYER
    - RuleExecutionController receives request
-   - Input validation (@Valid annotations)
-   - Extract ruleId and data
+   - Input validation (@ValidRuleId, @ValidRuleData)
+   - Extract rule_id and data
         ↓
 4. CORE SERVICE
    - DroolsEngineService.executeRule(ruleId, data)
-   - Check if rule exists in metadata
-   - Retrieve compiled KieBase from cache
+   - Acquire READ lock; atomic loadedRules.get(ruleId) + null check (TOCTOU-safe)
+   - Retrieve currentKieContainer (atomic-swap reference)
+   - Release READ lock
         ↓
-5. CACHING LAYER (if KieBase not cached)
-   - Check LRU cache for rule content
-   - If miss: Check Redis cache
-   - If miss: Fetch from S3 storage
-   - Store result in L1 and L2 caches
-        ↓
-6. RULE COMPILATION (if needed)
-   - RuleCompiler compiles .drl to KieBase
-   - Store compiled KieBase in memory
-   - Update rule metadata (status: ACTIVE)
-        ↓
-7. RULE EXECUTION
-   - Create new KieSession (stateless)
+5. RULE EXECUTION (RuleExecutor)
+   - Submit to ruleExecutionExecutor (CompletableFuture)
+   - Create new KieSession (stateless, thread-isolated)
    - Insert data as Map into session
-   - Fire all rules
-   - Extract results from working memory
+   - kieSession.fireAllRules(maxRuleFirings = 10000)  // cap prevents runaway loops
+   - Extract results from modified data Map
    - Dispose session
+   - future.get(timeoutSeconds, SECONDS); on timeout: future.cancel(true)
         ↓
-8. METRICS & LOGGING
-   - Record execution time
-   - Update execution count
-   - Log result (sanitized)
-   - Emit metrics to Micrometer
+6. METRICS & LOGGING
+   - Record execution time on RuleMetadata (incremental averaging)
+   - Emit metrics to Micrometer; unknown rule IDs tagged "unknown" to prevent cardinality explosion
+   - Log result via LogSanitizer (sensitive data masked)
         ↓
-9. RESPONSE
+7. RESPONSE
    {
-     "success": true,
-     "ruleId": "pricing.discount.vip",
-     "executionTimeMs": 5,
-     "results": {"discountPercent": 20}
+     "rule_id": "pricing.discount.vip",
+     "result": {"amount": 80.0, "discountPercent": 20, ...},
+     "error": null,
+     "execution_time_ms": 5
    }
 ```
+
+**Note**: `RULE_COMPILATION` is **not** in the request path — rules are compiled once at startup and on `POST /admin/refresh-rules`, then held in `currentKieContainer`. Each request creates a new `KieSession` from the cached `KieBase`. See "Atomic-swap Rule Loading Pattern" below.
 
 ### Admin Flow - Rule Refresh
 
@@ -916,6 +918,85 @@ Request 1 (Thread 1)          Request 2 (Thread 2)
 4. **Concurrent Collections**: Thread-safe data structures for caches
 5. **Atomic Updates**: KieContainer replacement is atomic
 
+### Atomic-Swap Rule Loading Pattern
+
+A defining choice in this service: **rule compilation happens *outside* the write lock**, then a brief atomic swap installs the new container. Readers are never blocked during compilation, even though compilation can take seconds for many rules.
+
+```
+                BEFORE (blocking):              AFTER (non-blocking):
+                ──────────────────              ───────────────────
+                writeLock.lock()                newContainer = compile(rules)
+                  ├── compile(rules)            writeLock.lock()
+                  ├── swap container              ├── oldContainer = current
+                  └── dispose old                 ├── current = newContainer
+                writeLock.unlock()                └── oldContainer.dispose()
+                                                writeLock.unlock()
+                Reads BLOCKED for                 Reads BLOCKED only for
+                full compile time.                ~microseconds (the swap).
+```
+
+Implementation: [DroolsEngineService.java:165-194](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java#L165-L194). Old `KieContainer.dispose()` is called inside the lock to prevent OOM on repeated reloads — this fixed a memory-leak incident on 2026-02-19.
+
+### TOCTOU-Safe Rule Lookup
+
+Lookup avoids the classic time-of-check-vs-time-of-use race by using an atomic `get() + null check` instead of `containsKey() + get()`:
+
+```java
+// In DroolsEngineService.executeRule():
+Rule rule = loadedRules.get(ruleId);          // single atomic get
+RuleMetadata meta = ruleMetadata.get(ruleId);
+if (rule == null || !meta.isActive()) { ... } // null check, no race
+```
+
+Even if a concurrent `loadRules()` swaps the container between the check and use, this code is safe because the local references (`rule`, `meta`) are pinned. The new container goes live only after the atomic swap completes.
+
+### Component Dependency Map
+
+Internal dependencies. **What breaks if X fails?**
+
+```
+        ┌──────────────────────────────────┐
+        │  RuleExecutionController         │
+        │  AdminController                 │
+        │  MemoryController                │
+        └────────────┬─────────────────────┘
+                     │
+            ┌────────┴────────┐
+            ▼                 ▼
+   ┌─────────────────┐  ┌─────────────────┐
+   │ DroolsEngine    │  │ Filter Chain    │
+   │   Service       │  │ (4 filters)     │
+   └────────┬────────┘  └─────────────────┘
+            │
+   ┌────────┴────────┐
+   ▼                 ▼
+ ┌──────────┐  ┌──────────────┐
+ │RuleCache │  │RuleStorage   │
+ │@Primary  │  │ (interface)  │
+ │= LocalLRU│  └──────┬───────┘
+ └──────────┘         │
+                ┌─────┴────────┬─────────────┐
+                ▼              ▼             ▼
+         ┌───────────┐  ┌────────────┐  ┌──────────┐
+         │S3RuleStorg│  │LocalFile   │  │InMemory  │
+         │ (+ CB)    │  │  Storage   │  │  Storage │
+         └─────┬─────┘  └────────────┘  └──────────┘
+               │
+               ▼
+         ┌──────────────┐
+         │ AWS S3 / LS  │
+         └──────────────┘
+```
+
+| Component down | What breaks | What still works |
+|---|---|---|
+| Redis (when enabled) | Distributed cache | Everything — circuit breaker opens, falls through to S3 |
+| AWS S3 | Cold rule loads, refresh | Already-cached rule executions (LocalLRUCache hit) |
+| LocalLRUCache | (Cannot fail — in-memory) | n/a |
+| KieContainer disposal failure | Memory leak risk | Logged; old container retained in memory until next swap |
+| `ADMIN_API_KEY` not set | Admin auth (disabled — warning logged) | Everything else; admin endpoints become open |
+| Single thread pool exhausted | New requests queued or rejected (CallerRunsPolicy) | Existing requests; ops endpoints |
+
 ---
 
 ## Security Architecture
@@ -924,71 +1005,108 @@ Request 1 (Thread 1)          Request 2 (Thread 2)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    LAYER 0: SECURITY HEADERS                 │
-│  - SecurityHeadersFilter (@Order(-1))                        │
-│  - X-Content-Type-Options, X-Frame-Options, CSP, HSTS       │
-│  - X-XSS-Protection, Referrer-Policy, Cache-Control          │
+│  LAYER 0: SECURITY HEADERS                                   │
+│  SecurityHeadersFilter @Order(-1) — adds 7 headers to every  │
+│  response. Source: SecurityHeadersFilter.java:21-27          │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                    LAYER 1: NETWORK                          │
-│  - CORS configuration (empty default; wildcard in dev only)  │
-│  - HTTPS termination (load balancer)                         │
-│  - IP whitelisting (infrastructure level)                    │
+│  LAYER 1: NETWORK                                            │
+│  - CORS: empty default; wildcard only in local/dev/docker    │
+│    profiles (CorsConfig.java)                                │
+│  - HTTPS termination at load balancer                        │
+│  - IP whitelisting at infrastructure level                   │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                    LAYER 2: ADMIN AUTHENTICATION             │
-│  - AdminAuthFilter (@Order(0)) for /admin/* endpoints        │
-│  - API key via X-Admin-API-Key header                        │
-│  - Disabled when ADMIN_API_KEY is empty (dev mode)           │
-│  - Returns 401 Unauthorized on failure                       │
+│  LAYER 2: ADMIN AUTHENTICATION                               │
+│  AdminAuthFilter @Order(0). Path match: uri.startsWith       │
+│  ("/admin/"). Header: X-Admin-API-Key. When ADMIN_API_KEY    │
+│  env var is empty/null, **auth is SKIPPED** (warning logged  │
+│  at startup). 401 + JSON error on failure.                   │
+│  Source: AdminAuthFilter.java:36-71                          │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                    LAYER 3: RATE LIMITING                    │
-│  - Per-client rate limiting (1000 req/min default)           │
-│  - Client ID: request.getRemoteAddr() (X-Forwarded-For      │
-│    ignored to prevent spoofing)                              │
-│  - Max clients cap (10000) to prevent memory exhaustion      │
-│  - HTTP 429 with Retry-After header                          │
+│  LAYER 3: RATE LIMITING                                      │
+│  RateLimitingFilter @Order(1). Per-client (NOT global).      │
+│  Defaults: 1000/min, 10000/hr, burst 100, max-clients 10000. │
+│  Client identification — multi-tier (priority order):        │
+│    1. X-API-Key header     → "api-key:{key}"                 │
+│    2. Authorization Bearer → "bearer:{hash}"                 │
+│    3. X-Client-Id header   → "client-id:{id}"                │
+│    4. request.getRemoteAddr() → "ip:{addr}"  (FALLBACK)      │
+│  X-Forwarded-For is **explicitly ignored** (spoofable).      │
+│  /admin/* paths are **exempt** from rate limiting.           │
+│  Source: RateLimitingFilter.java:65-94                       │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                    LAYER 4: REQUEST VALIDATION               │
-│  - Size limits (max 10MB, including chunked transfer)        │
-│  - Field count limits (max 100 fields)                       │
-│  - Timeout limits (30s default) with future.cancel(true)     │
-│  - Max rule firings cap (10000) to prevent infinite loops    │
-│  - Content-Type validation                                   │
+│  LAYER 4: REQUEST VALIDATION                                 │
+│  RequestSizeValidationFilter (no @Order — runs last).        │
+│  - Default body limit 1 MB; configurable via                 │
+│    DROOLS_VALIDATION_REQUEST_MAX_SIZE_BYTES                  │
+│  - Wraps chunked-transfer streams with SizeLimitedInputStream│
+│    to prevent bypass via chunked encoding                    │
+│  - 30s rule execution timeout; future.cancel(true) on fire   │
+│  - maxRuleFirings = 10000 cap (RuleExecutor.java:22)         │
+│  Source: RequestSizeValidationFilter.java                    │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                    LAYER 5: INPUT SANITIZATION               │
-│  - Custom @ValidRuleId annotation                            │
-│  - Custom @ValidData annotation                              │
-│  - Spring Boot @Valid framework                              │
-│  - Path traversal prevention in storage layers               │
+│  LAYER 5: INPUT SANITIZATION                                 │
+│  - @ValidRuleId — pattern ^[a-zA-Z0-9._-]+$, max 255 chars,  │
+│    rejects "..", "/", "\" (RuleIdValidator.java)             │
+│  - @ValidRuleData — max 100 fields, string max 10K chars,    │
+│    number magnitude max 1B, dangerous-pattern checks         │
+│    (RuleDataValidator.java)                                  │
+│  - Path traversal protection in S3RuleStorage.java:339-341   │
+│    and LocalFileStorage.java:161 (normalize + startsWith)    │
+│  - SSRF protection on AWS_ENDPOINT (S3Config.java)           │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                    LAYER 6: DRL SANDBOXING                   │
-│  - DrlSanitizer scans rule content before compilation        │
-│  - Blocklist: dangerous classes, methods, imports            │
-│  - Import allowlist: java.util, java.math, java.time,        │
-│    com.company                                               │
-│  - Blocks eval(), exec(), Runtime, ProcessBuilder, etc.      │
+│  LAYER 6: DRL SANDBOXING                                     │
+│  DrlSanitizer scans every rule before compilation:           │
+│  - Allowed imports (20 prefixes): java.util.*, java.math.*,  │
+│    java.time.*, java.lang primitives, java.text formatters   │
+│  - Blocked imports (19 prefixes): java.io/net/reflect/invoke,│
+│    Runtime, ProcessBuilder, ClassLoader, Thread,             │
+│    SecurityManager, javax.script/naming, sun.*, com.sun.*    │
+│  - Blocked classes (12): Runtime, ProcessBuilder, ClassLoader│
+│    Thread, ScriptEngine, MethodHandle, Unsafe, ...           │
+│  - Blocked methods (19): System.exit, getenv, setProperty,   │
+│    Class.forName, getMethod, getDeclaredField, newInstance...│
+│  - eval() blocked via \beval\s*\( pattern                    │
+│  - Static imports rejected                                   │
+│  Source: DrlSanitizer.java (full)                            │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                    LAYER 7: LOG SANITIZATION                 │
-│  - Word-boundary regex patterns for sensitive data           │
-│  - Credit card masking (•••• •••• •••• 1234)                │
-│  - SSN masking (•••-••-1234)                                 │
-│  - API key removal                                           │
-│  - Nested map sanitization                                   │
+│  LAYER 7: LOG SANITIZATION                                   │
+│  LogSanitizer masks sensitive data before logging:           │
+│  - Credit card → ****-****-****-NNNN (last 4 visible)        │
+│  - SSN → ***-**-NNNN (last 4 visible)                        │
+│  - Email → a***@example.com (first char + domain)            │
+│  - Long tokens (20+ chars): redacted unless UUID/class name  │
+│  - Recursive nested map sanitization (depth limit 5)         │
+│  - Word-boundary regex prevents false positives              │
+│    (e.g., "shipping" no longer matched as "pin")             │
+│  Source: LogSanitizer.java                                   │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+#### Actual security header values (verified in [SecurityHeadersFilter.java:21-27](../src/main/java/com/company/drools/api/filter/SecurityHeadersFilter.java#L21-L27))
+
+| Header | Value |
+|---|---|
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `DENY` |
+| `X-XSS-Protection` | `0` *(modern recommendation; legacy `1; mode=block` is unsafe)* |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Cache-Control` | `no-store` |
+| `Content-Security-Policy` | `default-src 'none'; frame-ancestors 'none'` |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` |
 
 ### Input Validation Architecture
 
@@ -1010,47 +1128,52 @@ public @interface ValidRuleId {
 // - Format: "category.subcategory.rule-name"
 ```
 
-**@ValidData**:
+**@ValidRuleData** (note: actual annotation name is `ValidRuleData`, not `ValidData`):
 ```java
 @Target({FIELD, PARAMETER})
 @Retention(RUNTIME)
-@Constraint(validatedBy = DataValidator.class)
-public @interface ValidData {
-    int maxFields() default 100;
-}
+@Constraint(validatedBy = RuleDataValidator.class)
+public @interface ValidRuleData { ... }
 
-// Validates:
+// Validates ([RuleDataValidator.java:32-62](../src/main/java/com/company/drools/api/validation/RuleDataValidator.java#L32-L62)):
 // - Not null
-// - Max field count (prevents DoS via large objects)
-// - No SQL injection patterns
-// - No script injection patterns
+// - Max field count (default 100, env: DROOLS_VALIDATION_DATA_MAX_FIELDS)
+// - Per-key: not empty, length ≤ 100, no dangerous patterns
+// - String values: length ≤ 10K (default), regex ^[^<>"';&|]*$, no dangerous patterns
+// - Number values: |value| ≤ 1B (default)
+// - Other values: converted to string and re-checked
 ```
 
 ### Rate Limiting Architecture
 
-**Algorithm**: Sliding Window (in-memory)
+**Algorithm**: In-memory bucket per client; minute and hour windows.
+
+**Client identification — multi-tier** (priority order, [RateLimitingFilter.java:69-94](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java#L69-L94) `getClientIdentifier()`):
 
 ```
-Client IP: 192.168.1.100
-Window: 1 minute
-Limit: 1000 requests
-
-Timestamp       Requests    Action
-10:00:00.000    1           Allow
-10:00:00.100    2           Allow
-...
-10:00:59.900    999         Allow
-10:01:00.000    1000        Allow
-10:01:00.100    1001        REJECT (429)
-                            Retry-After: 60 seconds
-
-10:01:01.000    Remove requests older than 10:00:01.000
-                Window slides forward
+Header          Format                       Example
+─────────────── ──────────────────────────── ────────────────────
+X-API-Key       api-key:{value}              api-key:abc123
+Authorization:  bearer:{sha256(token)[0:8]}  bearer:9f4a2b71
+  Bearer
+X-Client-Id     client-id:{value}            client-id:partner-A
+(none)          ip:{getRemoteAddr()}         ip:203.0.113.42
+                                             ↑ FALLBACK only
 ```
 
-**Configuration**:
-- `DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE`: Limit per client
-- `DROOLS_RATE_LIMITING_ENABLED`: Enable/disable
+`X-Forwarded-For` is **explicitly ignored** because it is spoofable from the client side. If the service runs behind a trusted reverse proxy, the proxy must inject `X-API-Key` or `X-Client-Id` based on validated identity.
+
+**Defaults** (`application.yml`, overridable per profile):
+- `DROOLS_RATE_LIMITING_ENABLED=true`
+- `DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE=1000`
+- `DROOLS_RATE_LIMITING_REQUESTS_PER_HOUR=10000`
+- `DROOLS_RATE_LIMITING_BURST_SIZE=100`
+- `DROOLS_RATE_LIMITING_MAX_CLIENTS=10000` (memory protection — when full, new clients use a shared bucket)
+- `DROOLS_RATE_LIMITING_CLEANUP_INTERVAL=5` (minutes)
+
+**Admin exemption**: `/admin/*` paths bypass rate limiting entirely — verified by [RateLimitingFilterTest:120-127](../src/test/java/com/company/drools/api/filter/RateLimitingFilterTest.java#L120-L127).
+
+**Response on limit hit**: HTTP 429 with `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `X-RateLimit-Reset-After` headers and JSON body containing the wait time.
 
 ---
 

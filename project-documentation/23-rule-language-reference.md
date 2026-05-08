@@ -1,5 +1,39 @@
-Rule Language Reference
-Drools Rule Language (DRL)
+# Drools 8 Rule Language Reference (Upstream)
+
+> ## ⚠️ READ THIS BEFORE USING THIS DOCUMENT
+>
+> **This is the upstream Drools 8 reference.** It documents the complete DRL language including features that **this project does NOT use**.
+>
+> **What this project uses** (the *traditional* DRL subset):
+> - `package` declarations
+> - `import` statements (subject to [DrlSanitizer](16-drl-sandboxing.md) allowlist)
+> - `rule "name" ... when ... then ... end` blocks
+> - `Map()` pattern matching with field tests like `this["amount"] != null`
+> - Plain Java in `then` blocks (`if/else`, `Map.put()`, primitive math)
+>
+> **What this project does NOT use** (Drools 8 modern features described below — *do not introduce these into project rules*):
+> - `unit` declarations and `RuleUnitData` interface
+> - OOPath syntax (e.g., `/persons[ age > 18 ]`)
+> - `DataStream`, `DataStore`, `SingletonStore` data sources
+> - `query` blocks
+> - `declare` for new fact types
+> - Decision tables (XLS/XLSX/CSV)
+> - Domain Specific Languages (DSLs / `.dsl` / `.dslr`)
+> - `agenda-group` / `ruleflow-group` (legacy attributes — also superseded upstream)
+>
+> Sections describing those features are tagged **`[Not used in this project]`** as you scroll through. For project-specific patterns and verified examples, see:
+> - [17-rule-development.md](17-rule-development.md) — Project rule-authoring guide
+> - [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) — All 10 working sample rules
+> - [16-drl-sandboxing.md](16-drl-sandboxing.md) — What the sandbox blocks
+>
+> The reference content below is preserved verbatim from the official Drools 8 docs as a comprehensive language overview. Read it for context; do not copy unused-feature syntax into project rules.
+
+---
+
+## Rule Language Reference (upstream)
+
+### Drools Rule Language (DRL)
+
 Drools Rule Language (DRL) is a notation established by the Drools open source business automation project for defining and describing business rules. You define DRL rules in .drl text files. A DRL file can contain one or more rules that define at a minimum the rule conditions (when) and actions (then).
 
 DRL files consist of the following components:
@@ -70,6 +104,9 @@ Note that a package must have a namespace and be declared using standard Java co
 Notice that any rule attribute (as described in the section Rule attributes in DRL) may also be written at package level, superseding the attribute’s default value. The modified default may still be replaced by an attribute setting within a rule.
 
 Rule units in DRL
+
+> **`[Not used in this project]`** — Rule units (`unit MortgageRules;`, `RuleUnitData` interface, `DataStream`/`DataStore`) are a Drools 8 modernization. This project uses traditional `package`-only declarations and `Map()` pattern matching. The section below is for reference only.
+
 Rule Unit API is explained in Rule Unit API. This section focuses on how to use rule units in DRL.
 
 The following example is a rule unit designated in a DRL file in a mortgage application decision service:
@@ -191,6 +228,9 @@ The following example is an import statement for a loan application object in a 
 Example import statement in a DRL file
 import org.mortgages.LoanApplication;
 Type declarations and metadata in DRL
+
+> **`[Not used in this project]`** — `declare` for new fact types and Drools metadata annotations (`@role`, `@timestamp`, `@duration`, `@expires`, etc.) are not used. This project's "fact" is always a `java.util.Map<String,Object>` populated from JSON request data. The section below is reference-only.
+
 type declaration
 Figure 3. Type declaration
 meta data
@@ -453,6 +493,9 @@ You can then create instances of the type based on the key constructors, as show
 Example instance using the key constructor
 Person person = new Person( "John", "Doe" );
 Queries in DRL
+
+> **`[Not used in this project]`** — `query` blocks are not used. This service exposes its own REST endpoints; queries (which would auto-generate endpoints) are not configured. The section below is reference-only.
+
 query
 Figure 5. Query
 Queries in DRL files search the working memory of the Drools rule engine for facts related to the rules in the DRL file. You add the query definitions in DRL files and then obtain the matching results in your application code. Queries search for a set of defined conditions and do not require when or then specifications. Query names are scoped to the rule unit, so each query name must be unique within the same rule unit. In Drools, queries are automatically exposed as REST endpoints.
@@ -739,6 +782,8 @@ EBNF notation for OOPath expressions
 OOPExpr = [ID ( ":" | ":=" )] ( "/" | "?/" ) OOPSegment { ( "/" | "?/" | "." ) OOPSegment } ;
 OOPSegment = ID ["#" ID] ["[" ( Number | Constraints ) "]"]
 OOPath expressions and constraints
+
+> **`[Not used in this project]`** — OOPath syntax (`/persons[ name == "James" ]`) is the modern Drools 8 alternative to traditional pattern matching. This project uses `Map()` traditional patterns instead (e.g., `$data : Map(this["name"] == "James")`). The OOPath section below is reference-only.
 An OOPath expression of a pattern in a DRL rule condition is the segment to be matched by the Drools rule engine. An OOPath expression can potentially match each fact that is inserted into the working memory of the Drools rule engine. It can also contain constraints to further define the facts to be matched.
 
 In the simplest form, with no constraints, an OOPath expression matches a fact in the given data source. In the following example with a DataSource<Person> named persons, the expression matches against all Person objects in the data source of the Drools rule engine:
@@ -2346,6 +2391,9 @@ Example ReteDumper output
 [ AccumulateNode(8) ] : [Collect expensive orders combination]
 ...
 Domain Specific Languages
+
+> **`[Not used in this project]`** — DSLs (`.dsl` and `.dslr` files) are not used. This project authors rules directly in `.drl` form. The section below is reference-only.
+
 Domain Specific Languages (or DSLs) are a way of creating a rule language that is dedicated to your problem domain. A set of DSL definitions consists of transformations from DSL "sentences" to DRL constructs, which lets you use of all the underlying rule language and engine features. Given a DSL, you write rules in DSL rule (or DSLR) files, which will be translated into DRL files.
 
 DSL and DSLR files are plain text files, and you can use any text editor to create and modify them. But there are also DSL and DSLR editors, both in the IDE as well as in the web based BRMS, and you can use those as well, although they may not provide you with the full DSL functionality.
@@ -2579,6 +2627,9 @@ A file containing a DSL definition has to be put under the resources folder or a
 For parsing and expanding a DSLR file the DSL configuration is read and supplied to the parser. Thus, the parser can "recognize" the DSL expressions and transform them into native rule language expressions.
 
 Spreadsheet decision tables
+
+> **`[Not used in this project]`** — Decision tables (`.drl.xls`, `.drl.xlsx`, `.drl.csv`) are not used. All rules are authored as `.drl` text files in `sample-rules/`. The section below is reference-only.
+
 Spreadsheet decision tables are XLS or XLSX spreadsheets that contain business rules defined in a tabular format. Each row in a decision table is a rule, and each column is a condition, an action, or another rule attribute. After you create and upload your spreadsheet decision tables, the rules you defined are compiled into Drools Rule Language (DRL) rules as with all other rule assets.
 
 All data objects related to a spreadsheet decision table must be in the same project package as the spreadsheet decision table. Assets in the same package are imported by default. Existing assets in other packages can be imported with the decision table.
