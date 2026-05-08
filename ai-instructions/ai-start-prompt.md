@@ -11,7 +11,7 @@ These three files are the minimum baseline. Do **not** skip files 1 and 2 even w
 ```
 1. ai-instructions/snap-memory-instructions.md           — how to create session logs
 2. ai-instructions/ai-initial-context-instructions.md    — how to update consolidated context
-3. ai-workspace/ai-initial-context/ai-initial-context-latest.md  — full project state
+3. .ai-workspace/ai-initial-context/ai-initial-context-latest.md  — full project state
 ```
 
 After reading these three you should know: project status, tech stack, architecture, AND how to respond to the `snap-memory` and `ai-context-update` commands.
@@ -105,11 +105,11 @@ Read these to understand the available sample rules:
 
 Check for recent snap-memory files to understand latest work:
 
-19. **[ai-workspace/snap-memory/](../ai-workspace/snap-memory/)** - Session logs (18 files)
+19. **[.ai-workspace/snap-memory/](../.ai-workspace/snap-memory/)** - Session logs (18 files)
 
 **Command to find latest:**
 ```bash
-ls -t ai-workspace/snap-memory/ | head -1
+ls -t .ai-workspace/snap-memory/ | head -1
 ```
 
 **After Phase 5, you should know:**
@@ -149,7 +149,7 @@ Use this checklist to confirm you've loaded the context:
 
 | Information Needed | File to Read |
 |-------------------|--------------|
-| "What is this project?" | `README.md`, `ai-workspace/ai-initial-context/ai-initial-context-latest.md` |
+| "What is this project?" | `README.md`, `.ai-workspace/ai-initial-context/ai-initial-context-latest.md` |
 | "What's the current status?" | `CLAUDE.md`, `project-plan/project.progress.md` |
 | "How does it work?" | `documentations/deployment.md`, `documentations/api-documentation.yml` |
 | "What was built?" | `project-plan/project.progress.md`, `project-plan/project.checklist.md` |
@@ -157,7 +157,7 @@ Use this checklist to confirm you've loaded the context:
 | "How do I create rules?" | `documentations/rule-development.md`, `sample-rules/README.md` |
 | "How do I deploy it?" | `documentations/deployment.md` |
 | "How do I troubleshoot?" | `documentations/troubleshooting.md` |
-| "What happened last session?" | `ai-workspace/snap-memory/snap-memory-{latest}.md` |
+| "What happened last session?" | `.ai-workspace/snap-memory/snap-memory-{latest}.md` |
 | "What are the APIs?" | `documentations/api-documentation.yml` |
 
 ---
@@ -198,7 +198,7 @@ Ready to help! What would you like to work on?
 When user says this:
 1. Read `ai-instructions/snap-memory-instructions.md`
 2. Create comprehensive session log following that template
-3. Save to `ai-workspace/snap-memory/snap-memory-{epoch}.md`
+3. Save to `.ai-workspace/snap-memory/snap-memory-{epoch}.md`
 
 ### "ai-context-update"
 When user says this:
@@ -210,7 +210,7 @@ When user says this:
 
 ### "What's next?"
 When user says this:
-1. Read latest `ai-workspace/snap-memory/` file
+1. Read latest `.ai-workspace/snap-memory/` file
 2. Check `CLAUDE.md` for current development focus
 3. Review any open issues or deferred features in `project.progress.md`
 4. Suggest prioritized next steps
@@ -218,7 +218,7 @@ When user says this:
 ### Context Compaction
 When auto-compact or manual compact (`/compact` command) happens:
 1. The system will provide a compact summary of the conversation
-2. **IMPORTANT**: Save to `ai-workspace/compact-logs/compact-{epoch}.md`
+2. **IMPORTANT**: Save to `.ai-workspace/compact-logs/compact-{epoch}.md`
 3. Use current epoch timestamp: `date +%s`
 4. Include the full compact output in the file
 5. This helps preserve conversation history across sessions
@@ -277,7 +277,7 @@ drools-microservice/
 │   ├── project.documentation.md # Complete specifications
 │   └── project-validation-plan.md # Validation checklist
 │
-├── ai-workspace/              # AI working documents
+├── .ai-workspace/              # AI working documents
 │   ├── ai-initial-context/    # Consolidated context files
 │   │   └── ai-initial-context-latest.md # Main context file
 │   ├── snap-memory/           # Session logs (18 files)
@@ -361,14 +361,14 @@ drools-microservice/
 
 | User Says | You Do |
 |-----------|--------|
-| "Load context" | Read `ai-workspace/ai-initial-context/ai-initial-context-latest.md` (fastest) |
+| "Load context" | Read `.ai-workspace/ai-initial-context/ai-initial-context-latest.md` (fastest) |
 | "Full context" | Follow Phase 0 (AI workflow) + all 5 project phases above |
 | "Quick context" | Read README + CLAUDE.md + ai-initial-context |
 | "What's the status?" | Read CLAUDE.md + project.progress.md + latest snap-memory |
 | "snap-memory" | Follow snap-memory-instructions.md |
 | "ai-context-update" | Follow ai-initial-context-instructions.md |
 | "What's next?" | Check latest snap-memory + CLAUDE.md + suggest next steps |
-| "/compact" (or auto-compact) | Save to `ai-workspace/compact-logs/compact-{epoch}.md` |
+| "/compact" (or auto-compact) | Save to `.ai-workspace/compact-logs/compact-{epoch}.md` |
 | "How do I test rules?" | Explain LocalStack setup and sample rules usage |
 | "How do I deploy?" | Reference deployment.md and Docker setup |
 

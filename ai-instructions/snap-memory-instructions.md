@@ -14,11 +14,11 @@ Create comprehensive session logs that enable future AI assistants to fully reco
 
 ### Naming Convention
 ```
-ai-workspace/snap-memory/snap-memory-{epochtime}.md
+.ai-workspace/snap-memory/snap-memory-{epochtime}.md
 ```
 - Use current Unix epoch timestamp (e.g., `1769668074`)
 - Creates chronological ordering automatically
-- **Location**: `ai-workspace/snap-memory/` directory (inside ai-workspace)
+- **Location**: `.ai-workspace/snap-memory/` directory (inside .ai-workspace)
 
 ### Header Template
 ```markdown
@@ -47,7 +47,7 @@ The epoch in the filename MUST match the actual time the file is created. If the
 ### Rule 2: Check existing snap-memories before creating a new one
 Before writing a new snap-memory, list existing files to understand what's already documented:
 ```bash
-ls -t ai-workspace/snap-memory/ | head -5
+ls -t .ai-workspace/snap-memory/ | head -5
 ```
 Then read the most recent one to avoid duplicating content. Each snap-memory should document **new work from this session only** — not re-document work already captured in a previous snap-memory.
 

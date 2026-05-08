@@ -5,10 +5,10 @@
 
 The current context file is always at:
 ```
-ai-workspace/ai-initial-context/ai-initial-context-latest.md
+.ai-workspace/ai-initial-context/ai-initial-context-latest.md
 ```
 
-**At the start of every session**: read `ai-workspace/ai-initial-context/ai-initial-context-latest.md` to get full project context in a single read. This provides a comprehensive snapshot of the project state.
+**At the start of every session**: read `.ai-workspace/ai-initial-context/ai-initial-context-latest.md` to get full project context in a single read. This provides a comprehensive snapshot of the project state.
 
 ---
 
@@ -19,15 +19,15 @@ When the user types **"ai-context-update"**, execute the following steps in orde
 ### Step 1 — Archive the current context file
 Get the current Unix epoch timestamp and rename the existing latest file:
 ```
-ai-workspace/ai-initial-context/ai-initial-context-latest.md
-→ ai-workspace/ai-initial-context/ai-initial-context-{epoch}.md
+.ai-workspace/ai-initial-context/ai-initial-context-latest.md
+→ .ai-workspace/ai-initial-context/ai-initial-context-{epoch}.md
 ```
 Use a bash command to get the epoch: `date +%s`
 
 ### Step 2 — Write fresh context to the new latest file
 Write all current context you have at that moment to:
 ```
-ai-workspace/ai-initial-context/ai-initial-context-latest.md
+.ai-workspace/ai-initial-context/ai-initial-context-latest.md
 ```
 
 **Write it as-is — do not compact or summarize.** Include everything you currently know:
@@ -76,8 +76,8 @@ ai-workspace/ai-initial-context/ai-initial-context-latest.md
 After writing, confirm:
 ```
 ✅ Context updated.
-   Archived: ai-workspace/ai-initial-context/ai-initial-context-{epoch}.md
-   Updated:  ai-workspace/ai-initial-context/ai-initial-context-latest.md
+   Archived: .ai-workspace/ai-initial-context/ai-initial-context-{epoch}.md
+   Updated:  .ai-workspace/ai-initial-context/ai-initial-context-latest.md
 ```
 
 ---
