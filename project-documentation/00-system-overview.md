@@ -283,9 +283,9 @@ This corpus was produced through a 5-phase, code-grounded rewrite (2026-05-08):
 - **Phase 4**: 7 docs for ops, dev, and advanced topics.
 - **Phase 5**: This entry-point doc + cross-corpus audit + repo integration.
 
-Tracking artifacts: [`.ai-workspace/CHECKLIST.md`](../.ai-workspace/CHECKLIST.md), [`.ai-workspace/CODE_FINDINGS.md`](../.ai-workspace/CODE_FINDINGS.md).
+Tracking artifacts: [`.ai-workspace/documentations/CHECKLIST.md`](../.ai-workspace/documentations/CHECKLIST.md), [`.ai-workspace/documentations/CODE_FINDINGS.md`](../.ai-workspace/documentations/CODE_FINDINGS.md).
 
-Code findings discovered during documentation work (32 items, all severity Low; doc-only fixes applied here, code-side recommendations logged for separate triage): [`.ai-workspace/CODE_FINDINGS.md`](../.ai-workspace/CODE_FINDINGS.md).
+Code findings discovered during documentation work (32 items, all severity Low; doc-only fixes applied here, code-side recommendations logged for separate triage): [`.ai-workspace/documentations/CODE_FINDINGS.md`](../.ai-workspace/documentations/CODE_FINDINGS.md).
 
 Every claim in every doc is backed by a citation to either:
 - A specific Java/YAML/Dockerfile line (`path/file.ext:line` markdown link)

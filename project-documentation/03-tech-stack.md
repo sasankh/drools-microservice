@@ -232,7 +232,7 @@ Triggered via `@Valid` in controller signatures. Validation failures bubble up a
 | **maven-compiler-plugin** | 3.11.0 | Source/target = 17, `parameters: true` (preserves method param names). |
 | **spring-boot-maven-plugin** | 3.2.5 | `repackage` goal — produces fat jar with embedded Tomcat. Excludes Lombok from the runtime jar. |
 | **spotless-maven-plugin** | 2.36.0 | Code formatting via Google Java Format 1.17.0. Run `mvn spotless:apply` before commit; `mvn spotless:check` is recommended in CI. Also: removes unused imports, trims trailing whitespace. |
-| **jacoco-maven-plugin** | 0.8.8 | Coverage instrumentation (`prepare-agent`) and report (`report` in test phase). Output: `target/site/jacoco/`. **No threshold configured** (would be a useful addition — see [`CODE_FINDINGS.md`](../.ai-workspace/CODE_FINDINGS.md) F-029). |
+| **jacoco-maven-plugin** | 0.8.8 | Coverage instrumentation (`prepare-agent`) and report (`report` in test phase). Output: `target/site/jacoco/`. **No threshold configured** (would be a useful addition — see [`CODE_FINDINGS.md`](../.ai-workspace/documentations/CODE_FINDINGS.md) F-029). |
 | **spotbugs-maven-plugin** | 4.7.3.0 | Static analysis at "Max" effort, "High" threshold. Run with `mvn spotbugs:check`. Recommended in CI. |
 | **maven-surefire-plugin** | 3.0.0 | Runs unit tests in the `test` phase. Default include patterns: `**/*Test.java`, `**/*Tests.java`. |
 

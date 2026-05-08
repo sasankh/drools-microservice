@@ -175,10 +175,10 @@ If the docs go more than 2 sprints without an audit, run a verification pass: sp
 This corpus was rebuilt 2026-05-08 from the prior 13-doc set. The rebuild:
 - Verified every claim against actual source code
 - Live-tested every curl example
-- Found and fixed 32+ doc-vs-code inconsistencies (cataloged in `.ai-workspace/CODE_FINDINGS.md`)
+- Found and fixed 32+ doc-vs-code inconsistencies (cataloged in `.ai-workspace/documentations/CODE_FINDINGS.md`)
 - Extended coverage from ~65% of the 11-category framework to 100%
 
-Tracking artifacts (in `.ai-workspace/`):
+Tracking artifacts (in `.ai-workspace/documentations/`):
 - `SUMMARY.md` — high-level overview of the rebuild
 - `DOCUMENTATION_PLAN.md` — per-doc spec
 - `CHECKLIST.md` — phase-by-phase completion log

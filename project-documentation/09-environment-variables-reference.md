@@ -372,4 +372,4 @@ If you find a discrepancy between this doc and observed behavior, **trust the co
 2. `@Value` annotations in `src/main/java/.../config/`
 3. This document
 
-Then file the discrepancy in [`.ai-workspace/CODE_FINDINGS.md`](../.ai-workspace/CODE_FINDINGS.md) for triage.
+Then file the discrepancy in [`.ai-workspace/documentations/CODE_FINDINGS.md`](../.ai-workspace/documentations/CODE_FINDINGS.md) for triage.
