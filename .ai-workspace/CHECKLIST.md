@@ -140,34 +140,45 @@ Goal: external integrators self-sufficient. AI agents can answer API questions.
 
 ---
 
-## Phase 3 — Rule Authoring & Performance (15–20 hrs)
+## Phase 3 — Rule Authoring & Performance (15–20 hrs)  ✅ COMPLETE
 
 Goal: rule authors self-sufficient. Performance issues diagnosable.
 
-### Phase 3a — Rule authoring (7–10 hrs)
-- [ ] **18-rule-id-and-storage-layout.md** — ID format + S3 mapping (~250 lines, 1.5 hr)
-- [ ] **19-sample-rules-cookbook.md** — all 10 rules with live curl tests (~600 lines, 4 hr) — every example produces documented output against running stack
-  - [ ] pricing.discount.simple
-  - [ ] pricing.discount.vip (document the discount-stacking surprise: VIP+simple = $72 not $80)
-  - [ ] pricing.discount.bulk
-  - [ ] pricing.discount.first-time
-  - [ ] pricing.shipping.standard
-  - [ ] pricing.shipping.express
-  - [ ] validation.customer.age
-  - [ ] validation.customer.credit
-  - [ ] seasonal.holiday.discount
-  - [ ] seasonal.holiday.blackfriday
+### Phase 3a — Rule authoring (7–10 hrs)  ✅ COMPLETE
+- [x] **18-rule-id-and-storage-layout.md** — ID format + S3 mapping (417 lines)
+- [x] **19-sample-rules-cookbook.md** — all 10 rules with live curl tests (673 lines) — every example produces documented output against live stack
+  - [x] pricing.discount.simple (over_50 + under_50 cases)
+  - [x] pricing.discount.vip (VIP+simple stacking documented: $100 → $72 final)
+  - [x] pricing.discount.bulk (qualified + under-threshold cases, with stacking)
+  - [x] pricing.discount.first-time (with stacking)
+  - [x] pricing.shipping.standard (light + heavy)
+  - [x] pricing.shipping.express (paid + free)
+  - [x] validation.customer.age (under 18 / adult / senior)
+  - [x] validation.customer.credit (4 tiers: Excellent/Good/Fair/Poor)
+  - [x] seasonal.holiday.discount (with stacking)
+  - [x] seasonal.holiday.blackfriday (qualified + under-min)
 
-### Phase 3b — Performance trio (5–7 hrs)
-- [ ] **26-performance-tuning-runbook.md** — diagnostic decision tree (~500 lines, 3 hr)
-- [ ] **29-circuit-breakers-and-resilience.md** — Resilience4j wiring + state behavior (~400 lines, 2 hr)
-- [ ] (24, 25 already covered in Phase 1 / kept)
+### Phase 3b — Performance trio (5–7 hrs)  ✅ COMPLETE
+- [x] **26-performance-tuning-runbook.md** — diagnostic decision tree (609 lines)
+- [x] **29-circuit-breakers-and-resilience.md** — Resilience4j wiring + state behavior (421 lines)
+- [x] (24, 25 already covered in Phase 1 / kept)
 
-### Phase 3 — Verification gate
-- [ ] Every cookbook example tested against live stack
-- [ ] Discount-stacking behavior documented and verified ($100 VIP order → $72 final)
-- [ ] Performance runbook decision tree complete (each branch leads to action)
-- [ ] CODE_FINDINGS.md updated
+### Phase 3 — Verification gate  ✅ PASSED
+- [x] All 10 cookbook examples tested against live stack — every JSON response captured verbatim
+- [x] Discount-stacking behavior documented and verified — VIP+simple actually produces $72 (NOT $80 as README claims), bulk-15 produces $153 (NOT $170), holiday produces $79.20 (NOT $88), BF qualified produces $135 (NOT $150). All multiplicative due to last-writer-wins `Map.put`.
+- [x] Performance runbook covers 10 diagnostic branches (A-J), each leading to concrete action
+- [x] Circuit breaker doc covers full state machine, slow-call detection (which env vars don't expose), exception classification (S3 ignores `NoSuchKeyException`)
+- [x] 30 docs present (26 from Phase 1+2 + 4 new)
+- [x] Cross-link audit: 7 missing targets remain (down from 11) — all Phase 4-5 docs (expected)
+- [x] CODE_FINDINGS.md reviewed — no new findings during Phase 3
+
+### Phase 3 review (post-completion self-audit)  ✅ COMPLETE
+- [x] Cookbook outputs re-verified: bulk_15 → $153/$17, vip_100 → $72/$8, holiday → $79.2/$8.8 — all match live stack
+- [x] Circuit breaker hardcoded values verified: S3 permitted-half-open=5, slowCallRate=70%, slowDuration=5s; Redis permitted-half-open=3, slowCallRate=80%, slowDuration=2s; S3 ignoreExceptions includes NoSuchKeyException
+- [x] All env vars in 26-performance-tuning cross-referenced against 09 — all documented
+- [x] No wrong-count errors found (unlike Phase 2)
+- [x] **One bug found and fixed**: 18-rule-id-and-storage-layout.md claimed trailing-space rule IDs rejected as "space not in allowlist". Actual: `RuleIdValidator.java:29` calls `trim()` silently, so validation passes but storage lookup fails as 404. Doc updated with ⚠️ caveat; new finding F-032 added to CODE_FINDINGS for separate code triage.
+- [x] No new wrong-count or imprecise-citation patterns from Phase 2 carried into Phase 3
 
 ---
 

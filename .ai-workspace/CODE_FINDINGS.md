@@ -210,6 +210,14 @@ The script-bug noted in F-025 (using `ruleId` instead of `rule_id` in setup/test
 
 ## Findings discovered during Phase 1+ (appended as work proceeds)
 
+### F-032 🟡 — `RuleIdValidator` silently trims whitespace instead of rejecting it
+- **Severity**: Low (cosmetic; user gets the wrong error code but is rejected)
+- **Discovered during**: Phase 3 review of `18-rule-id-and-storage-layout.md`
+- **Where**: [`RuleIdValidator.java:29`](../src/main/java/com/company/drools/api/validation/RuleIdValidator.java#L29)
+- **What's wrong**: `String trimmedRuleId = ruleId.trim();` — the validator trims for its own checks, but the controller still receives the original (untrimmed) value. So `"pricing.discount.simple "` (trailing space) **passes validation** but then fails as `RULE_NOT_FOUND` (404) at storage lookup, because the S3 key `pricing/discount/simple .drl` doesn't exist.
+- **Why it matters**: Users get 404 instead of 400 with a clear validation message. Slight UX paper cut. No security impact (storage layer rejects properly).
+- **Action**: Documented in `18-rule-id-and-storage-layout.md` with a ⚠️ note. **Code fix recommended** (separate from this docs work) — the validator should reject leading/trailing whitespace and return INVALID_INPUT.
+
 ### F-031 🟢 — `@Value` default mismatch with `application.yml` for max-number-value
 - **Severity**: Low (cosmetic; YAML wins at runtime)
 - **Discovered during**: Phase 2 writing of `09-environment-variables-reference.md`
