@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 🛑 Read these three files first (every session, before anything else)
+
+1. `ai-instructions/snap-memory-instructions.md` — how to handle the `snap-memory` command
+2. `ai-instructions/ai-initial-context-instructions.md` — how to handle the `ai-context-update` command
+3. `ai-workspace/ai-initial-context/ai-initial-context-latest.md` — full project state
+
+The consolidated context file (#3) does not substitute for #1 and #2 — those define workflow protocols that don't appear in the context file. See `ai-instructions/ai-start-prompt.md` for the full onboarding flow.
+
 ## ⚠️ Important: Security Hardening Complete (2026-02-26)
 
 **39/42 security findings addressed** across 9 phases. Key changes:

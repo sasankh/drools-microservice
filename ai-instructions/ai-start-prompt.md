@@ -4,35 +4,25 @@
 
 ---
 
-## Quick Start Command
+## Quick Start — REQUIRED, Read All Three In Order
 
-**IMPORTANT**: Instead of reading multiple files, simply read the **single consolidated context file**:
+These three files are the minimum baseline. Do **not** skip files 1 and 2 even when file 3 exists — they cover workflow protocols (`snap-memory`, `ai-context-update`) that the consolidated context file does **not** fully reproduce.
 
 ```
-Read: ai-workspace/ai-initial-context/ai-initial-context-latest.md
+1. ai-instructions/snap-memory-instructions.md           — how to create session logs
+2. ai-instructions/ai-initial-context-instructions.md    — how to update consolidated context
+3. ai-workspace/ai-initial-context/ai-initial-context-latest.md  — full project state
 ```
 
-This file contains complete project context and is the **fastest way to get up to speed**.
+After reading these three you should know: project status, tech stack, architecture, AND how to respond to the `snap-memory` and `ai-context-update` commands.
+
+If file 3 doesn't exist, use the manual loading path below to rebuild project context.
 
 ---
 
-## Alternative: Manual Context Loading
+## Manual Context Loading (only if `ai-initial-context-latest.md` is missing)
 
-If the ai-initial-context file doesn't exist or you need deeper detail, follow this sequence:
-
-### Phase 0: AI Workflow Instructions (REQUIRED FIRST)
-
-Read these files **first** to understand how to work with this project's AI workflow:
-
-1. **[ai-instructions/snap-memory-instructions.md](snap-memory-instructions.md)** - How to create session logs
-2. **[ai-instructions/ai-initial-context-instructions.md](ai-initial-context-instructions.md)** - How to update consolidated context
-
-**After Phase 0, you should know:**
-- How to create comprehensive snap-memory session logs
-- When and how to update the ai-initial-context file
-- The workflow for preserving session knowledge
-
----
+Files 1 and 2 above are still required. Then walk through phases 1–5 below to rebuild project context from primary sources:
 
 ### Phase 1: Core Project Understanding (REQUIRED)
 
