@@ -2,13 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 🛑 Read these three files first (every session, before anything else)
+## 🛑 Read these files first (every session, before anything else)
 
+### AI workflow protocols (required before responding to commands)
 1. `ai-instructions/snap-memory-instructions.md` — how to handle the `snap-memory` command
 2. `ai-instructions/ai-initial-context-instructions.md` — how to handle the `ai-context-update` command
-3. `ai-workspace/ai-initial-context/ai-initial-context-latest.md` — full project state
 
-The consolidated context file (#3) does not substitute for #1 and #2 — those define workflow protocols that don't appear in the context file. See `ai-instructions/ai-start-prompt.md` for the full onboarding flow.
+### Project documentation (the canonical reference)
+3. **`project-documentation/00-system-overview.md`** — entry point for all 38 docs. Has role-based reading paths.
+
+The full documentation corpus is in `project-documentation/`. See [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md) for the index and reading paths by role.
+
+The legacy consolidated context file at `.ai-workspace/ai-initial-context/ai-initial-context-latest.md` is no longer the primary reference — the structured `project-documentation/` corpus supersedes it.
 
 ## ⚠️ Important: Security Hardening Complete (2026-02-26)
 

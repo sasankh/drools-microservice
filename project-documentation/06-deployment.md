@@ -717,7 +717,7 @@ The application exports metrics via Micrometer. Configure your monitoring system
 ```yaml
 # Application Metrics
 - drools.rule.execution.count
-- drools.rule.execution.duration
+- drools.rule.execution.time
 - drools.cache.hits
 - drools.cache.misses
 - drools.storage.operations.count

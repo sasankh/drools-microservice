@@ -52,7 +52,7 @@ drools-microservice/
 
 ### `src/main/java/com/company/drools/`
 
-The Java root. 56 files organized into 5 functional packages plus the `Application.java` entrypoint.
+The Java root. 57 files organized into 5 functional packages plus the `Application.java` entrypoint.
 
 ```
 com/company/drools/
@@ -154,7 +154,7 @@ The `application.yml` is the most-referenced config file in the codebase. See [0
 
 ### `src/test/java/com/company/drools/`
 
-44 test files, ~1,181 tests, **96.2% instruction / 89.7% branch** coverage (JaCoCo).
+44 test files, 589 tests, **96.2% instruction / 89.7% branch** coverage (JaCoCo).
 
 ```
 src/test/java/com/company/drools/
@@ -169,7 +169,7 @@ src/test/java/com/company/drools/
 │   └── validation/                    # RuleIdValidatorTest, RuleDataValidatorTest
 │
 ├── core/
-│   ├── engine/                        # DroolsEngineServiceTest, RuleCompilerTest, RuleExecutorTest, DrlSanitizerTest (66 cases — proves the sandbox)
+│   ├── engine/                        # DroolsEngineServiceTest, RuleCompilerTest, RuleExecutorTest, DrlSanitizerTest (23 cases — proves the sandbox)
 │   └── model/                         # RuleTest, RuleMetadataTest
 │
 ├── storage/                           # S3RuleStorageTest, LocalFileStorageTest, InMemoryRuleStorageTest, StorageFactoryTest
@@ -367,6 +367,6 @@ If you are an AI agent considering whether to read those folders: don't, unless 
 | Sample rules (10) | [`sample-rules/`](../sample-rules/) |
 | Unit test base | [BaseUnitTest.java](../src/test/java/com/company/drools/BaseUnitTest.java) |
 | Integration test base (Testcontainers) | [BaseIntegrationTest.java](../src/test/java/com/company/drools/BaseIntegrationTest.java) |
-| DRL sandbox tests (66 cases) | [DrlSanitizerTest.java](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) |
+| DRL sandbox tests (23 cases) | [DrlSanitizerTest.java](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) |
 | Rate limiter tests | [RateLimitingFilterTest.java](../src/test/java/com/company/drools/api/filter/RateLimitingFilterTest.java) |
 | API spec (OpenAPI 3.0) | [api-reference/openapi.yml](api-reference/openapi.yml) |

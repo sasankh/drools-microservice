@@ -660,7 +660,7 @@ tail -f /var/log/drools-rule-engine/application.log | grep --color=always -E "ER
 ```bash
 # Rule execution metrics
 curl http://localhost:8081/actuator/metrics/drools.rule.execution.count
-curl http://localhost:8081/actuator/metrics/drools.rule.execution.duration
+curl http://localhost:8081/actuator/metrics/drools.rule.execution.time
 
 # Cache performance
 curl http://localhost:8081/actuator/metrics/drools.cache.hits

@@ -378,7 +378,7 @@ If your rule is in `errors[]`, read the violation message.
 mvn test -Dtest=DrlSanitizerTest
 ```
 
-The test class has 66 cases covering every rejection path. Looking at the test cases shows you exactly what's rejected. See [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java).
+The test class has 23 cases covering every rejection path. Looking at the test cases shows you exactly what's rejected. See [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java).
 
 ### Option 3: Write a tiny test in your rule's own test file
 
@@ -430,6 +430,6 @@ To prove the sandbox is what this doc says it is, run:
 mvn test -Dtest=DrlSanitizerTest 2>&1 | grep -E 'Tests run|FAIL'
 ```
 
-Expected: ~66 tests, all pass.
+Expected: ~23 tests, all pass.
 
 Or read [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) directly — every claim in this doc has a corresponding test case.

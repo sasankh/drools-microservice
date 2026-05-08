@@ -177,11 +177,11 @@ That's why the implementation is intentionally simple: it's not trying to be a f
 
 ### Why not Spring Security?
 
-We use a 90-line filter instead of `spring-boot-starter-security`. The trade-off:
+We use a 93-line filter instead of `spring-boot-starter-security`. The trade-off:
 
 | Pro | Con |
 |---|---|
-| Tiny attack surface — 90 lines vs ~50,000 in spring-security | Doesn't get OAuth / JWT / RBAC for free |
+| Tiny attack surface — 93 lines vs ~50,000 in spring-security | Doesn't get OAuth / JWT / RBAC for free |
 | No dependency drift | Have to write our own auth if we ever need more |
 | Easy to audit | Less ergonomic for complex auth flows |
 

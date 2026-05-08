@@ -1316,26 +1316,32 @@ Benefits:
 
 #### Custom Metrics
 
-**Rule Execution Metrics**:
-- `drools.rule.execution.time` (Timer): Execution duration per rule
-- `drools.rule.execution.count` (Counter): Total executions per rule
-- `drools.rule.execution.errors` (Counter): Errors per rule
+**Rule Execution Metrics** (verified from code):
+- `drools.rule.execution.time` (Timer, tagged `rule_id`): Per-rule execution latency. Unknown rule IDs tagged as `unknown` to prevent cardinality explosion.
+- `drools.rule.execution.success` (Counter, tagged `rule_id`): Successful executions
+- `drools.rule.execution.error` (Counter, tagged `rule_id`, `error_type`): Failed executions
+- `drools.rules.loaded` (Gauge): Currently loaded rule count
+
+**API Metrics**:
+- `drools.api.requests` (Counter, tagged `endpoint`): Per-endpoint request count
+- `drools.api.errors` (Counter, tagged `endpoint`, `error_type`): Per-endpoint error count
+- `drools.api.response.time` (Timer, tagged `endpoint`, `status`): Per-endpoint latency
 
 **Cache Metrics**:
-- `drools.cache.hits` (Counter): L1 and L2 cache hits
-- `drools.cache.misses` (Counter): Cache misses
-- `drools.cache.size` (Gauge): Current cache size
+- `drools.cache.hits` (Counter, tagged `cache_type`): Cache hits
+- `drools.cache.misses` (Counter, tagged `cache_type`): Cache misses
 - `drools.cache.evictions` (Counter): LRU evictions
+- `drools.cache.size` (Gauge): Current cache size
 
 **Storage Metrics**:
-- `drools.s3.requests` (Counter): S3 API calls
-- `drools.s3.errors` (Counter): S3 errors
-- `drools.s3.latency` (Timer): S3 request duration
+- `drools.storage.operation.time` (Timer): Storage operation latency (S3 / file / memory)
 
-**Thread Pool Metrics**:
-- `drools.threadpool.active` (Gauge): Active threads
-- `drools.threadpool.queued` (Gauge): Queued tasks
-- `drools.threadpool.completed` (Counter): Completed tasks
+**Thread pool metrics**: Spring Boot auto-instruments executors via Micrometer. Look at metric names starting with `executor.` (e.g., `executor.active`, `executor.queued`, `executor.completed`) — see `/actuator/metrics`.
+
+**Resilience4j metrics** (from `TaggedCircuitBreakerMetrics`):
+- `resilience4j.circuitbreaker.state` (Gauge per state, tagged `name=s3`/`name=redis`)
+- `resilience4j.circuitbreaker.calls` (Counter, tagged `name`, `kind=successful`/`failed`/`not_permitted`/`ignored`)
+- `resilience4j.circuitbreaker.failure.rate`, `slow.call.rate`, `buffered.calls` (Gauges)
 
 #### Health Checks
 

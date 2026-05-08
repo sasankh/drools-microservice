@@ -2,6 +2,14 @@
 
 A high-performance business rule execution microservice built with Spring Boot and Drools. Designed to handle 100-1000 requests per second with sub-100ms latency for cached rules.
 
+> ## 📚 Full documentation
+>
+> The full documentation lives in [`project-documentation/`](project-documentation/) — 38 docs covering architecture, APIs, security, deployment, operations, and rule authoring.
+>
+> **Start here**: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md) — the entry point with role-based reading paths.
+>
+> **Quickstart**: [`project-documentation/32-getting-started.md`](project-documentation/32-getting-started.md) — running locally in under 30 minutes.
+
 ## 🚀 Features
 
 - **High Performance**: Sub-100ms P99 latency for cached rules, supports 100-1000 RPS

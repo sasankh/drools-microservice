@@ -220,7 +220,7 @@ Summary:
 - `eval()` is forbidden.
 - Static imports are forbidden.
 
-Verified by [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) — 66 test cases.
+Verified by [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) — 23 test cases.
 
 This is the single most important security control in the service. Without it, DRL is a Turing-complete code-execution surface inside the JVM.
 
