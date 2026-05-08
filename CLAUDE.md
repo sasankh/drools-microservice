@@ -33,13 +33,13 @@ The legacy consolidated context file at `.ai-workspace/ai-initial-context/ai-ini
 - **Memory Leak Fixed**: KieContainer disposal prevents OOM
 - **Memory Monitoring**: `GET /admin/memory/info` endpoint
 
-See `FIXES-SUMMARY.md` for complete details.
+See [`project-documentation/14-security-architecture.md`](project-documentation/14-security-architecture.md) and [`project-documentation/30-runbooks-and-monitoring.md`](project-documentation/30-runbooks-and-monitoring.md) for full details.
 
 ## Project Overview
 
 This is a Drools Rule Engine Microservice designed for high-performance business rule execution (100-1000 RPS). Rules are stored in AWS S3 and executed via REST API.
 
-**Tech Stack**: Java 17 (enforced), Spring Boot 3.x, Drools 8.44.0.Final, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
+**Tech Stack**: Java 17 (enforced), Spring Boot 3.2.5, Drools 8.44.0.Final, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
 
 **Health Status**: 9/10 - 589 tests, 96%/90% coverage, 39/42 security fixes complete
 
@@ -219,7 +219,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 ## Development Workflow
 
-1. **Current Status**: Phase 5.2 Complete! Full deployment infrastructure with Docker containerization, LocalStack S3 integration, 10 sample rules, and one-command development setup. Ready for project completion or additional phases. See `project.progress.md` for details.
+1. **Current Status**: 39/42 security findings addressed (Phases 1–9 complete, 2026-02-26); 589 tests; 96% instruction / 90% branch coverage; documentation rebuild complete (2026-05-08, 38 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
 
 2. **One-Command Development Environment**: Complete automated setup with validation
    ```bash
@@ -296,183 +296,49 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 ## Implementation Status
 
-Check `project.progress.md` and `FIXES-SUMMARY.md` for current status. Project follows these phases:
-1. ✅ Core Infrastructure (Spring Boot + Drools setup) - COMPLETED
-2. ✅ Storage & Caching (S3 + Redis) - COMPLETED
-3. ✅ Production Readiness (Security, Performance, Monitoring) - COMPLETED
-4. ✅ Testing & Documentation (Phase 4.4 only) - COMPLETED
-5. ✅ Deployment & Infrastructure - COMPLETED
-6. ✅ Critical Fixes (Java 17, Memory Leak, Monitoring) - COMPLETED 2026-02-19
-7. ✅ Security Hardening (39/42 fixes, Phases 1-9) - COMPLETED 2026-02-26
+All seven phases are shipped:
+1. ✅ Core Infrastructure (Spring Boot + Drools)
+2. ✅ Storage & Caching (S3 + Redis)
+3. ✅ Production Readiness (Security, Performance, Monitoring)
+4. ✅ Testing & Documentation
+5. ✅ Deployment & Infrastructure
+6. ✅ Critical Fixes — Java 17 enforcement, memory leak, monitoring (2026-02-19)
+7. ✅ Security Hardening — 39/42 findings, Phases 1–9 (2026-02-26)
 
-**Current Status**:
+Current snapshot:
 - **Health Score**: 9/10
-- **Critical Issues**: FIXED ✅ (Java version, memory leak, security hardening)
-- **Test Coverage**: 96.2% instruction / 89.7% branch (589 tests) ✅
-- **Security**: 39/42 findings addressed across 9 phases
-- **Scripts**: `init-localstack.sh` refactored — reads from `sample-rules/` (no hardcoded DRL)
+- **Test Coverage**: 96.2% instruction / 89.7% branch (589 tests)
+- **Security**: 39/42 findings addressed
+- **Performance**: 100–1000 RPS target, P99 < 100ms cached / < 500ms cache miss
 
-## Performance Targets
-
-- 100-1000 requests/second
-- P99 latency < 100ms (cached rules)
-- P99 latency < 500ms (cache miss)
-- Support 1000+ concurrent rules
-
-## Testing Strategy
-
-- Unit tests: 70% (focus on rule compilation, caching, transformations)
-- Integration tests: 20% (LocalStack for S3, embedded Redis)
-- Performance tests: 10% (JMeter for load testing)
+For the canonical narrative — phase history, ADRs, performance targets, testing strategy, runbooks — see [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md) and the 38 numbered docs it indexes.
 
 ## Important Project Files
 
-**Project Planning**:
-- `project.checklist.md`: Detailed task breakdown (85+ core tasks, 80 completed)
-- `project.progress.md`: Track implementation progress (Phase 5.2 complete)
-- `project.documentation.md`: Comprehensive project specifications
-- `project.prompt.md`: Original implementation requirements
-- `project-improvement-plan.md`: 3-week improvement roadmap (NEW)
+- [`project-documentation/`](project-documentation/) — full 38-doc corpus, the canonical reference
+- [`set-java-env.sh`](set-java-env.sh) — Java 17 environment setup script
+- [`docker-build-test.sh`](docker-build-test.sh) — automated Docker build and validation
+- [`setup-dev-environment.sh`](setup-dev-environment.sh) — one-command local dev setup
+- [`init-localstack.sh`](init-localstack.sh) — LocalStack bootstrap (reads from `sample-rules/`)
+- [`sample-rules/`](sample-rules/) — 10 sample DRL files (single source of truth)
+- `gc-logs/`, `heap-dumps/` — runtime diagnostics output (gitignored content)
+- `snap-memory/` — session memory files for `snap-memory` AI workflow
 
-**Recent Fixes** (2026-02-19):
-- `FIXES-SUMMARY.md`: Summary of critical fixes applied (NEW)
-- `MEMORY-LEAK-ANALYSIS.md`: Deep dive into memory leak issue (NEW)
-- `project-revisit-analysis.md`: Complete project health assessment (NEW)
-- `set-java-env.sh`: Java 17 environment setup script (NEW)
+## Quick development setup
 
-**Session Documentation**:
-- `snap-memory/`: Session memory files documenting implementation progress
-- `snap-memory/snap-memory-1771549384.md`: Latest session (critical fixes)
-
-**Docker & Validation**:
-- `docker-build-test.sh`: Automated Docker build and validation script
-- `docker-validation.md`: Comprehensive Docker validation checklist
-- `heap-dumps/`: OOM heap dumps for analysis
-- `gc-logs/`: GC logs for performance tuning
-
-## Recent Completions 
-
-### Phase 5 - Deployment & Infrastructure (COMPLETED)
-
-#### Phase 5.1 - Docker Setup ✅
-- **Multi-stage Docker Build**: Maven build stage + Amazon Corretto Alpine runtime
-- **Optimized Image**: 347MB final image size with security hardening
-- **Container Security**: Non-root user execution, health checks, resource limits
-- **JVM Optimization**: Container-aware memory settings with G1GC
-- **Docker Compose Stack**: Complete development environment with LocalStack + Redis
-- **Validation Automation**: `docker-build-test.sh` for automated testing and health checks
-- **Docker Configuration**: Enhanced `.dockerignore` with security exclusions
-
-#### Phase 5.2 - Local Development Environment ✅
-- **LocalStack S3 Integration**: Complete S3 emulation with automatic bucket setup
-- **10 Sample Business Rules**: Comprehensive rule suite (pricing, validation, seasonal)
-- **Automation Scripts**: `init-localstack.sh` (reads from `sample-rules/`), `test-localstack.sh`, `setup-dev-environment.sh`
-- **One-Command Setup**: Complete development environment with single script execution
-- **Sample Rule Documentation**: Complete usage guide with API examples
-
-### Phase 4.4 - Documentation (COMPLETED)
-- **Complete Documentation Suite**: ~3,900 lines across 5 comprehensive guides
-- **OpenAPI 3.0 Specification**: All 8 endpoints with schemas and examples
-- **Deployment Guide**: Local, Docker, AWS deployment scenarios
-- **Configuration Reference**: 60+ environment variables documented
-- **Rule Development Guide**: 5 complete rule examples with best practices
-- **Troubleshooting Guide**: 50+ solutions with emergency recovery procedures
-
-### Phase 3 - Production Readiness (COMPLETED)
-
-### Security Hardening (Phase 3.4)
-- **Input Validation Framework**: Custom Spring Boot validation annotations with environment-configurable limits
-- **Rate Limiting System**: In-memory rate limiting with per-client tracking and HTTP headers
-- **Request Size Protection**: Multi-layer size limits (Spring Boot + custom filters)
-- **CORS Configuration**: Flexible cross-origin policy (allow-all default, production configurable)
-- **Log Sanitization**: Comprehensive sensitive data detection and masking (credit cards, SSNs, etc.)
-
-### Performance Optimization (Phase 3.3)
-- **Connection Pooling**: AWS S3 client with Apache HTTP client connection pooling
-- **Thread Pool Management**: Custom thread pools for rule execution and storage operations
-- **JVM Optimization**: G1GC configuration with environment-specific tuning
-- **Request Timeout Handling**: Comprehensive timeout management with monitoring
-- **Circuit Breakers**: Resilience4j integration for S3 and Redis fault tolerance
-
-### Monitoring & Observability (Phase 3.2)
-- **Vendor-agnostic Metrics**: Micrometer integration supporting CloudWatch, Grafana, Datadog
-- **Structured JSON Logging**: Correlation IDs, MDC context, and environment profiles
-- **Enhanced Health Checks**: Component-level monitoring (Drools, S3, Redis, Circuit Breakers)
-- **Thread Pool Monitoring**: Real-time statistics via `/admin/thread-pools` endpoint
-- **Performance Metrics**: Rule execution timing, cache statistics, error tracking
-
-### Development Setup
-
-#### Option 1: One-Command Setup (Recommended)
 ```bash
-# Complete automated setup (build + validate + start)
+# One-command setup (recommended)
 ./setup-dev-environment.sh
 
-# View application logs
+# View logs and test
 docker-compose logs -f app
-
-# Test health and admin endpoints
-curl http://localhost:8080/admin/health           # Enhanced health with components
-curl http://localhost:8080/admin/rules            # Rule list with metadata and 10 sample rules
-curl http://localhost:8080/admin/thread-pools     # Thread pool statistics
-
-# Test main API with sample rules
+curl http://localhost:8080/admin/health
 curl -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
   -d '{"rule_id": "pricing.discount.simple", "data": {"amount": 100}}'
 
-# Test VIP customer rule
-curl -X POST http://localhost:8080/execute-rule \
-  -H "Content-Type: application/json" \
-  -d '{"rule_id": "pricing.discount.vip", "data": {"customerType": "VIP", "amount": 100}}'
-
-# Stop all services
+# Stop
 docker-compose down
 ```
 
-#### Option 2: Manual Docker Compose Setup
-```bash
-# Start infrastructure services first
-docker-compose up -d localstack redis
-
-# Initialize LocalStack with sample rules
-./init-localstack.sh
-
-# Validate LocalStack setup
-./test-localstack.sh
-
-# Start application service
-docker-compose up -d app
-
-# Or run application locally
-mvn compile && mvn spring-boot:run -Dspring.profiles.active=dev
-
-# Same testing commands as above
-```
-
-#### Option 3: Local Java Development
-```bash
-# Start infrastructure services only
-docker-compose up -d localstack redis
-
-# Initialize LocalStack with sample rules
-./init-localstack.sh
-
-# Build and run application locally
-mvn compile && mvn spring-boot:run -Dspring.profiles.active=dev
-
-# Test with sample rules
-curl -X POST http://localhost:8080/execute-rule \
-  -H "Content-Type: application/json" \
-  -d '{"rule_id": "pricing.discount.simple", "data": {"amount": 100}}'
-```
-
-#### Option 4: Docker Build Validation
-```bash
-# Build and validate Docker image
-./docker-build-test.sh
-
-# Manual validation
-docker build -t drools-rule-engine:latest .
-docker images drools-rule-engine:latest  # Check size (~347MB)
-```
+For full deployment scenarios, configuration reference, troubleshooting, and runbooks, see [`project-documentation/`](project-documentation/) — start at [`00-system-overview.md`](project-documentation/00-system-overview.md).

@@ -658,17 +658,20 @@ The API includes comprehensive security features (39/42 security findings addres
 }
 ```
 
-Common error codes:
-- `RULE_NOT_FOUND`: Rule ID does not exist
-- `RULE_EXECUTION_ERROR`: Runtime error during rule execution
-- `RULE_COMPILATION_ERROR`: Rule compilation failed
-- `STORAGE_ERROR`: Storage backend unavailable
-- `CACHE_ERROR`: Cache operation failed
-- `INVALID_INPUT`: Request validation failed
-- `REQUEST_TOO_LARGE`: Request size exceeds limits
-- `RATE_LIMIT_EXCEEDED`: Too many requests from client
-- `TIMEOUT_ERROR`: Operation exceeded timeout
-- `SERVICE_UNAVAILABLE`: External service temporarily unavailable
+The 10 distinct error codes (full catalog in [`12-error-code-catalog.md`](project-documentation/12-error-code-catalog.md)):
+
+| HTTP | Code | When |
+|---:|---|---|
+| 400 | `RULE_EXECUTION_ERROR` | Rule fired but threw at runtime |
+| 400 | `INVALID_INPUT` | Validation failed or malformed argument |
+| 401 | `UNAUTHORIZED` | Admin endpoint accessed without/wrong API key |
+| 404 | `RULE_NOT_FOUND` | Rule ID does not exist in storage |
+| 404 | `NOT_FOUND` | Path does not match any handler |
+| 408 | `TIMEOUT_ERROR` | Operation exceeded its timeout |
+| 413 | `REQUEST_TOO_LARGE` | Request body exceeds size cap |
+| 429 | `RATE_LIMIT_EXCEEDED` | Per-client rate limit hit |
+| 500 | `INTERNAL_ERROR` | Anything not caught by a more specific handler |
+| 503 | `SERVICE_UNAVAILABLE` | Circuit breaker open (S3 or Redis) |
 
 ## 🔬 Development
 
@@ -1130,5 +1133,5 @@ docker-compose exec app jstat -gc 1
 
 For support and questions:
 - Create an issue in this repository
-- Check the [project documentation](project.documentation.md)
-- Review [implementation progress](project.progress.md)
+- Check the [project documentation](project-documentation/00-system-overview.md) — entry point for all 38 docs
+- Review the [troubleshooting guide](project-documentation/31-troubleshooting.md) and [FAQ](project-documentation/35-faq.md)
