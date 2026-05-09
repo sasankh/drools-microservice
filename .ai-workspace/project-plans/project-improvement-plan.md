@@ -1,7 +1,38 @@
 # 🚀 Drools Rule Engine - Improvement Plan
 **Date**: 2026-02-19
 **Updated**: 2026-02-20
+**Last audited**: 2026-05-08 — see "Status Delta" below for what's still relevant
 **Goal**: Transform from "Functionally Complete" to "Production-Ready with Confidence"
+
+---
+
+## 2026-05-08 Status Delta — What's still relevant
+
+This 3-week sprint plan is partially superseded. About 70% has been executed via Phases 6–9 (critical fixes + security hardening) and the 2026-05-08 documentation rebuild. The historical body below is preserved unchanged; this section is the current-state lens.
+
+### Done since this plan was written
+- **Week 1** all complete — Maven Enforcer, KieContainer disposal, RedisConfig + LocalLRUCache fixes (validated by the file's own 2026-02-20 update below).
+- **Week 2 Days 4–9** test infrastructure + unit + integration tests — done. Project has **589 tests** in **44 test files** with **96.2% instruction / 89.7% branch coverage**, far exceeding the plan's 80% target. See [`project-documentation/28-testing-guide.md`](../../project-documentation/28-testing-guide.md).
+- **Week 3 Day 13** security hardening — done, but via a different route than the plan suggested:
+  - Plan: `spring-boot-starter-security` with role-based auth.
+  - Actual: custom 93-line `AdminAuthFilter` plus 39/42 security findings closed across 9 phases (Phase 7, 2026-02-26). Decision documented in [ADR-006](../../project-documentation/36-architecture-decision-records.md#adr-006-adminauthfilter-instead-of-spring-security).
+- **Week 3 Day 15** documentation refresh — done. The operational runbook the plan wanted now lives at [`30-runbooks-and-monitoring.md`](../../project-documentation/30-runbooks-and-monitoring.md); the full 39-doc corpus was rebuilt 2026-05-08.
+
+### Still pending (real backlog)
+1. **JMeter performance test suite** (Week 2 Day 10) — no `performance-tests/` directory, no JMeter in `pom.xml`. The 45 RPS sustained number on record came from memory-leak validation, not formal load testing. Also flagged as deferred at [`01-project-overview.md:78`](../../project-documentation/01-project-overview.md#L78).
+2. **Prometheus + Grafana monitoring stack** (Week 3 Days 11–12) — no `monitoring/` directory, no Prometheus/Grafana services in `docker-compose.yml`. Current monitoring is Micrometer + CloudWatch registry only.
+3. **GitHub Actions CI/CD pipeline** (Week 3 Day 14) — no `.github/workflows/`. No automated build/test/deploy.
+
+Suggested ordering by deployment timeline: CI/CD before the first PR-driven change; monitoring stack before the first real production deploy; JMeter suite before any formal commitment to 1000 RPS.
+
+### Obsolete (do not follow these in the plan body)
+- **"Add Spring Security"** (Day 13) — superseded by [ADR-006](../../project-documentation/36-architecture-decision-records.md#adr-006-adminauthfilter-instead-of-spring-security).
+- **"deploy.sh / ECS auto-deploy"** (Day 14) — superseded by [ADR-007](../../project-documentation/36-architecture-decision-records.md#adr-007-no-terraform-aws-deployment-documented-as-reference-only) (no IaC packaging; deployment is documented as a reference architecture, not automated).
+- **Day 15 README/CLAUDE.md/runbook updates** — already done as part of the 2026-05-08 documentation rebuild. Don't re-do.
+
+### Adjacent backlog items (tracked elsewhere, not from this plan)
+- The 3 unaddressed security findings from "39/42" — see [`security-backlog.md`](security-backlog.md) in this directory.
+- The Redis auth/TLS pre-production checklist item is the only one with real production risk.
 
 ---
 
