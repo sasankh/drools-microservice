@@ -34,9 +34,9 @@ COPY src ./src
 RUN mvn clean package -DskipTests
 ```
 
-**Why `maven:3.9-eclipse-temurin-17` for the build stage**:
+**Why `maven:3.9-eclipse-temurin-25` for the build stage**:
 - Maven 3.9+ matches the project's enforcer rule.
-- Eclipse Temurin 17 is a mainstream OpenJDK 17 distribution. Build-time JDK doesn't have to match runtime JDK as long as both are Java 17.
+- Eclipse Temurin 25 is a mainstream OpenJDK 25 distribution. Build-time JDK doesn't have to match runtime JDK as long as both are Java 25.
 - Multi-stage allows the build artifacts (Maven cache, source) to be excluded from the final image.
 
 **Why pom.xml is copied separately first** (line 8 before line 12):
@@ -50,7 +50,7 @@ RUN mvn clean package -DskipTests
 ### Stage 2: Runtime (lines 16–57)
 
 ```dockerfile
-FROM amazoncorretto:17-alpine-jdk
+FROM amazoncorretto:25-alpine-jdk
 WORKDIR /app
 
 # Add non-root user for security
@@ -61,8 +61,8 @@ RUN addgroup -g 1000 appgroup && \
 COPY --from=build /app/target/drools-rule-engine-*.jar app.jar
 ```
 
-**Why `amazoncorretto:17-alpine-jdk`**:
-- Amazon Corretto = AWS's hardened OpenJDK 17 build, kept in lockstep with security patches. Project deploys to AWS so vendor alignment matters.
+**Why `amazoncorretto:25-alpine-jdk`**:
+- Amazon Corretto = AWS's hardened OpenJDK 25 build, kept in lockstep with security patches. Project deploys to AWS so vendor alignment matters.
 - Alpine base = ~180 MB before Java; final image is ~347 MB.
 - `-jdk` (not `-jre`): Drools `KieBuilder` invokes `javac` at runtime to compile generated rule classes. A JRE-only image breaks rule compilation. **Do not switch to `-jre`.**
 
@@ -100,7 +100,7 @@ ENV JAVA_OPTS="-XX:+UseContainerSupport \
 
 | Flag | What it does | Why this value |
 |---|---|---|
-| `-XX:+UseContainerSupport` | JVM reads cgroup limits to size heap | Required for Java 17 to respect container memory caps. Replaces the deprecated `-XX:+UseCGroupMemoryLimitForHeap`. |
+| `-XX:+UseContainerSupport` | JVM reads cgroup limits to size heap | Required for Java to respect container memory caps. Replaces the deprecated `-XX:+UseCGroupMemoryLimitForHeap` (removed in Java 11+). |
 | `-XX:InitialRAMPercentage=50.0` | Initial heap = 50% of cgroup limit | Smooth ramp; avoids JVM starting too small and immediately resizing. |
 | `-XX:MaxRAMPercentage=75.0` | Max heap = 75% of cgroup limit | Leaves 25% headroom for non-heap (Metaspace, code cache, native, thread stacks). |
 | `-XX:MinRAMPercentage=50.0` | Floor when small containers | For containers < 200MB, ensures heap doesn't shrink absurdly. |
@@ -110,7 +110,7 @@ ENV JAVA_OPTS="-XX:+UseContainerSupport \
 | `-XX:InitiatingHeapOccupancyPercent=30` | Start concurrent GC at 30% old-gen full | Aggressive — starts GC early to avoid full pauses. Trades CPU for predictable latency. |
 | `-XX:+UseStringDeduplication` | G1 deduplicates equal `String` instances | Drools generates many duplicate rule strings; saves ~5-15% heap. |
 | `-XX:+OptimizeStringConcat` | C2 intrinsic for `+` on Strings | Marginal win; cheap to enable. |
-| `-XX:+UseCompressedOops` | 32-bit object pointers (heap < 32GB) | Default true in Java 17, but explicit for clarity. Saves ~50% on object headers. |
+| `-XX:+UseCompressedOops` | 32-bit object pointers (heap < 32GB) | Default true in Java 17+, but explicit for clarity. Saves ~50% on object headers. |
 | `-XX:+UseCompressedClassPointers` | 32-bit class metadata pointers | Same family as above. |
 | `-XX:ThreadStackSize=1024` | Per-thread stack = 1MB | Default is 1MB on most platforms; this pins it. With ~50–100 threads under load, that's 50–100MB native memory. |
 | `-XX:TieredStopAtLevel=4` | Use C2 (full optimizing) compiler | Default. Mentioned explicitly because some "fast startup" profiles set this to 1. |

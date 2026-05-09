@@ -1,7 +1,7 @@
 # Multi-stage Docker build for Drools Rule Engine Microservice
 
 # Build stage
-FROM maven:3.9-eclipse-temurin-17 AS build
+FROM maven:3.9-eclipse-temurin-25 AS build
 WORKDIR /app
 
 # Cache dependencies by copying pom.xml first
@@ -13,7 +13,7 @@ COPY src ./src
 RUN mvn clean package -DskipTests
 
 # Runtime stage
-FROM amazoncorretto:17-alpine-jdk
+FROM amazoncorretto:25-alpine-jdk
 WORKDIR /app
 
 # Add non-root user for security

@@ -30,7 +30,7 @@ In-memory virtual filesystem that the `KieBuilder` reads from. We populate it wi
 Drools terminology for the set of facts (objects) currently being matched against rules during a single `KieSession.fireAllRules()` call. In this project's traditional-DRL pattern, working memory contains a single `Map<String,Object>` (the request's `data` field).
 
 ### Fact
-An object inserted into working memory. In this project's DRL style, the fact is always a `java.util.Map`. In Drools 8 modern style, facts can be typed POJOs.
+An object inserted into working memory. In this project's DRL style, the fact is always a `java.util.Map`. In Drools modern style, facts can be typed POJOs.
 
 ### Agenda
 Drools' internal queue of activated rules (rules whose `when` clause matched). When `fireAllRules()` is called, Drools dequeues activations from the agenda and executes their `then` blocks. Without explicit ordering (`salience`, `agenda-group`), the order is implementation-defined.
@@ -51,7 +51,7 @@ A rule attribute that prevents the rule from re-firing if its own `then` block m
 Stronger than `no-loop`. Prevents re-activation by **any** modification, not just self-modification. Useful for calculation rules.
 
 ### `agenda-group`
-A rule attribute used to partition rules. Only the group with focus fires. **Legacy** in Drools 8 (superseded by rule units, which this project doesn't use).
+A rule attribute used to partition rules. Only the group with focus fires. **Legacy** (superseded by rule units, which this project doesn't use).
 
 ### `activation-group`
 A rule attribute defining a group where only ONE rule can fire. Useful for mutually exclusive rule sets.
@@ -60,16 +60,16 @@ A rule attribute defining a group where only ONE rule can fire. Useful for mutua
 A `when` clause that embeds arbitrary Java boolean expression. **BLOCKED by `DrlSanitizer`** in this project — see [16-drl-sandboxing.md](16-drl-sandboxing.md).
 
 ### DRL (Drools Rule Language)
-The text format for rules. Files end in `.drl`. Drools 8 supports both "traditional" DRL (Map patterns + plain Java) and "modern" DRL (rule units + OOPath). This project uses **traditional only**.
+The text format for rules. Files end in `.drl`. Drools 10 supports both "traditional" DRL (Map patterns + plain Java) and "modern" DRL (rule units + OOPath). This project uses **traditional only**.
 
 ### OOPath
-Drools 8 modern syntax for pattern matching. Looks like XPath: `/persons[ age > 18 ]`. **Not used in this project.**
+Drools modern syntax for pattern matching. Looks like XPath: `/persons[ age > 18 ]`. **Not used in this project.**
 
 ### Rule unit
-Drools 8 modern construct for grouping rules with their data sources (`DataStream`, `DataStore`). **Not used in this project.**
+Drools modern construct for grouping rules with their data sources (`DataStream`, `DataStore`). **Not used in this project.**
 
 ### `DataStream` / `DataStore`
-Drools 8 typed data sources. Append-only / read-write respectively. **Not used in this project.**
+Drools typed data sources. Append-only / read-write respectively. **Not used in this project.**
 
 ### Decision table
 Spreadsheet representation of rules (XLS/XLSX/CSV). Drools compiles them to DRL. **Not used in this project.**
@@ -173,7 +173,7 @@ Java code coverage tool. Generates `target/site/jacoco/index.html`. Currently no
 Java static analysis tool. Detects common bug patterns. Run `mvn spotbugs:check`.
 
 ### Maven Enforcer Plugin
-Maven plugin that enforces build-time invariants. This project uses it to require Java 17 (`[17,18)` range).
+Maven plugin that enforces build-time invariants. This project uses it to require Java 25 (`[25,26)` range).
 
 ### Spring Boot Actuator
 Spring Boot module that exposes management endpoints under `/actuator/*` (port 8081). Provides `/actuator/health`, `/actuator/metrics`, etc.

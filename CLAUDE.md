@@ -39,27 +39,27 @@ See [`project-documentation/14-security-architecture.md`](project-documentation/
 
 This is a Drools Rule Engine Microservice designed for high-performance business rule execution (100-1000 RPS). Rules are stored in AWS S3 and executed via REST API.
 
-**Tech Stack**: Java 17 (enforced), Spring Boot 3.2.5, Drools 8.44.0.Final, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
+**Tech Stack**: Java 25 (enforced), Spring Boot 3.5.3, Drools 10.2.0, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
 
 **Health Status**: 9/10 - 589 tests, 96%/90% coverage, 39/42 security fixes complete
 
 ## Common Commands
 
-### Java 17 Setup (Required for Local Development)
+### Java 25 Setup (Required for Local Development)
 
-**IMPORTANT**: Java 17 is required. Maven will enforce this automatically.
+**IMPORTANT**: Java 25 is required. Maven will enforce this automatically.
 
 ```bash
 # Option 1: Use the setup script (temporary for current terminal)
 source ./set-java-env.sh
 
 # Option 2: Permanent setup (add to ~/.zshrc or ~/.bashrc)
-export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 export PATH="$JAVA_HOME/bin:$PATH"
 
-# Verify Java 17 is active
-java -version   # Should show "openjdk version 17.x.x"
-mvn -version    # Should show "Java version: 17.x.x"
+# Verify Java 25 is active
+java -version   # Should show "openjdk version 25.x.x"
+mvn -version    # Should show "Java version: 25.x.x"
 ```
 
 ### Build & Run (once project is initialized)
@@ -316,7 +316,7 @@ For the canonical narrative — phase history, ADRs, performance targets, testin
 ## Important Project Files
 
 - [`project-documentation/`](project-documentation/) — full 39-doc corpus, the canonical reference
-- [`set-java-env.sh`](set-java-env.sh) — Java 17 environment setup script
+- [`set-java-env.sh`](set-java-env.sh) — Java 25 environment setup script
 - [`docker-build-test.sh`](docker-build-test.sh) — automated Docker build and validation
 - [`setup-dev-environment.sh`](setup-dev-environment.sh) — one-command local dev setup
 - [`init-localstack.sh`](init-localstack.sh) — LocalStack bootstrap (reads from `sample-rules/`)

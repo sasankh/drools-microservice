@@ -12,7 +12,7 @@
 | # | Severity | Item | Real prod risk? |
 |---|---|---|---|
 | **#28 (H-6)** | **HIGH** | Redis without auth or TLS | **Yes — fix before production** |
-| **#30 (M-15)** | MEDIUM | Outdated dependencies | Tech debt; not blocking |
+| ~~**#30 (M-15)**~~ | ~~MEDIUM~~ | ~~Outdated dependencies~~ | **CLOSED 2026-05-09** — see ADR-013 / ADR-014 |
 | **#38 (I-1)** | INFO | KieContainer disposal safety | No — already well-documented in code; counted differently across docs |
 
 ---
@@ -32,18 +32,19 @@
   - Bind Redis to a private network only — never publicly reachable
   - Audit `REDIS_ENABLED=true` deployments to confirm both are set before they ship
 
-### #30 (M-15) — Outdated dependencies
+### #30 (M-15) — Outdated dependencies  ✅ **CLOSED 2026-05-09**
 
 - **Severity**: MEDIUM
 - **File**: [`pom.xml`](../../pom.xml)
-- **What's wrong**: Dependency versions in `pom.xml` lag current upstream. Specific CVEs unspecified in the fix plan; this was a sweep finding, not a CVE-targeted one.
-- **Why deferred**: Skipped per user. Compatibility risk: bumping Drools 8.44.0.Final, Spring Boot 3.2.5, Resilience4j, AWS SDK, Jackson, etc. all at once invites breakage. Needs a compat-test sweep.
-- **Source**: [`security-fix-plan.md:142-143`](../ai-summary/security-fix-plan.md#L142)
-- **What to do**:
-  - Run `mvn dependency-check:check` to enumerate current CVEs
-  - Bump one dependency family at a time (e.g., AWS SDK first, then Spring Boot, then Drools)
-  - Re-run the 589-test suite after each bump; investigate any failures
-  - Pay extra attention to Drools — the project pins traditional DRL syntax and uses `KieContainer` atomic-swap; major-version bumps may break
+- **What was wrong**: Dependency versions in `pom.xml` lagged current upstream.
+- **How it was closed (2026-05-09)**: Bundled with the Java 17 → 25 stack modernization. Bumped Java, Spring Boot, Drools, Lombok, AWS SDK, Resilience4j, Micrometer, Testcontainers, and 5 Maven plugins to current latest stable in a single coordinated change. Verified via the full 584-test suite (Drools-dependent) on Java 25.
+- **References**:
+  - [ADR-013](../../project-documentation/36-architecture-decision-records.md#adr-013-java-17--25--spring-boot-modernization-2026-05-09) — Java + Spring Boot + plugins
+  - [ADR-014](../../project-documentation/36-architecture-decision-records.md#adr-014-drools-8--10-migration-2026-05-09) — Drools 8 → 10
+  - [`stack-modernization-plan.md`](stack-modernization-plan.md) — implementation plan
+  - [`stack-modernization-checklist.md`](stack-modernization-checklist.md) — checklist tracking
+
+**Updated tally**: 40 of 42 security findings closed (was 39/42). Remaining: #28 (Redis auth/TLS — production deploy concern) and #38 (KieContainer disposal — already documented).
 
 ### #38 (I-1) — KieContainer disposal safety
 

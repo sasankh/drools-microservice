@@ -30,8 +30,8 @@ public class TimeoutConfig {
   @Bean("timeoutRestTemplate")
   public RestTemplate restTemplate(RestTemplateBuilder builder) {
     return builder
-        .setConnectTimeout(Duration.ofSeconds(httpConnectionTimeoutSeconds))
-        .setReadTimeout(Duration.ofSeconds(httpReadTimeoutSeconds))
+        .connectTimeout(Duration.ofSeconds(httpConnectionTimeoutSeconds))
+        .readTimeout(Duration.ofSeconds(httpReadTimeoutSeconds))
         .build();
   }
 

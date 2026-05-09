@@ -33,9 +33,9 @@ Client Request → REST API → Rule Engine → Cache Layer → Storage Layer
 
 ### Tech Stack
 
-- **Java 17** - Runtime platform (enforced by Maven Enforcer Plugin)
-- **Spring Boot 3.2.5** - Application framework with security and validation
-- **Drools 8.44.0.Final** - Business rules engine
+- **Java 25** - Runtime platform (enforced by Maven Enforcer Plugin)
+- **Spring Boot 3.5.3** - Application framework with security and validation
+- **Drools 10.2.0** - Business rules engine
 - **AWS S3** - Rule storage (with LocalStack for development)
 - **Redis** - Distributed caching (optional)
 - **Micrometer** - Vendor-agnostic metrics and monitoring
@@ -60,12 +60,12 @@ Client Request → REST API → Rule Engine → Cache Layer → Storage Layer
 
 ### Prerequisites
 
-- **Java 17** (Required - enforced by Maven Enforcer Plugin)
+- **Java 25** (Required - enforced by Maven Enforcer Plugin)
 - Maven 3.8+
 - Docker and Docker Compose
 - AWS CLI (for S3 setup)
 
-**Important**: This project requires **Java 17** specifically. The build will fail if using a different Java version.
+**Important**: This project requires **Java 25** specifically. The build will fail if using a different Java version.
 
 ### 1. Clone the Repository
 
@@ -74,7 +74,7 @@ git clone <repository-url>
 cd drools-microservice
 ```
 
-### 2. Set Up Java 17 Environment
+### 2. Set Up Java 25 Environment
 
 For local development (not needed for Docker-only):
 
@@ -83,15 +83,15 @@ For local development (not needed for Docker-only):
 source ./set-java-env.sh
 
 # Option 2: Permanent setup (add to ~/.zshrc or ~/.bashrc)
-export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 export PATH="$JAVA_HOME/bin:$PATH"
 
-# Verify Java 17 is active
-java -version   # Should show "openjdk version 17.x.x"
-mvn -version    # Should show "Java version: 17.x.x"
+# Verify Java 25 is active
+java -version   # Should show "openjdk version 25.x.x"
+mvn -version    # Should show "Java version: 25.x.x"
 ```
 
-**Note**: The Maven Enforcer Plugin will automatically verify you're using Java 17 and fail the build with a clear error message if not.
+**Note**: The Maven Enforcer Plugin will automatically verify you're using Java 25 and fail the build with a clear error message if not.
 
 ### 3. One-Command Development Environment Setup
 
@@ -136,7 +136,7 @@ docker-compose logs -f app
 
 #### Option B: Local Java Development
 ```bash
-# Build the application (requires Java 17 + Maven)
+# Build the application (requires Java 25 + Maven)
 mvn clean compile
 
 # Run the application
@@ -199,20 +199,20 @@ Expected response:
 
 ### System Requirements
 
-- **Java**: OpenJDK 17 or Oracle JDK 17+
+- **Java**: OpenJDK 25 or Oracle JDK 25+
 - **Memory**: Minimum 2GB RAM, recommended 4GB+
 - **Storage**: 1GB free disk space
 - **Network**: Internet access for Maven dependencies
 
 ### Dependencies Installation
 
-#### Java 17
+#### Java 25
 ```bash
 # Ubuntu/Debian
-sudo apt update && sudo apt install openjdk-17-jdk
+sudo apt update && sudo apt install openjdk-25-jdk
 
 # macOS with Homebrew
-brew install openjdk@17
+brew install openjdk@25
 
 # Windows
 # Download from https://adoptium.net/temurin/releases/

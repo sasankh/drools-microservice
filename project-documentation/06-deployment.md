@@ -579,7 +579,7 @@ The repository ships an actual `Dockerfile` at the repo root. It is **multi-stag
 
 ```dockerfile
 # ── Stage 1: Build ───────────────────────────────────────────
-FROM maven:3.9-eclipse-temurin-17 AS build
+FROM maven:3.9-eclipse-temurin-25 AS build
 WORKDIR /app
 COPY pom.xml .
 RUN mvn dependency:go-offline -B          # dependency caching layer
@@ -588,7 +588,7 @@ RUN mvn clean package -DskipTests
 # Output: /app/target/drools-rule-engine-*.jar
 
 # ── Stage 2: Runtime ─────────────────────────────────────────
-FROM amazoncorretto:17-alpine-jdk
+FROM amazoncorretto:25-alpine-jdk
 RUN addgroup -g 1000 appgroup && adduser -D -u 1000 -G appgroup appuser
 WORKDIR /app
 COPY --from=build /app/target/drools-rule-engine-*.jar app.jar

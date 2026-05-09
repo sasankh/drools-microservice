@@ -41,7 +41,7 @@ This guide provides JVM optimization settings for high-throughput rule processin
 -XX:+ExitOnOutOfMemoryError
 ```
 
-> **Note**: Earlier versions of this guide listed `-XX:+UseCGroupMemoryLimitForHeap`. **Do not use that flag.** It was deprecated in Java 9 and **removed in Java 11+**. Java 17 reads cgroup memory limits automatically when `-XX:+UseContainerSupport` is set (already in the Docker container settings below). Setting the deprecated flag in Java 17 produces a startup warning and is otherwise ignored.
+> **Note**: Earlier versions of this guide listed `-XX:+UseCGroupMemoryLimitForHeap`. **Do not use that flag.** It was deprecated in Java 9 and **removed in Java 11+**. Java 25 reads cgroup memory limits automatically when `-XX:+UseContainerSupport` is set (already in the Docker container settings below). Setting the deprecated flag produces a startup warning and is otherwise ignored.
 
 ### Development Environment (2GB+ heap)
 ```bash

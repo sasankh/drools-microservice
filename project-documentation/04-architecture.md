@@ -1418,7 +1418,7 @@ Response:
                           ↓ Copy JAR only
 ┌─────────────────────────────────────────────────────────────┐
 │                    STAGE 2: RUNTIME                          │
-│  Base: amazoncorretto:17-alpine (~180MB)                     │
+│  Base: amazoncorretto:25-alpine (~180MB)                     │
 │  - Create non-root user (drools:1000)                        │
 │  - Copy JAR from build stage                                 │
 │  - Expose ports 8080, 8081                                   │
@@ -1524,9 +1524,9 @@ Response:
 
 | Component | Technology | Version | Purpose |
 |-----------|-----------|---------|---------|
-| **Runtime** | Java | 17 LTS | Application runtime (enforced) |
-| **Framework** | Spring Boot | 3.2.5 | Application framework |
-| **Rule Engine** | Drools | 8.44.0.Final | Business rule execution |
+| **Runtime** | Java | 25 LTS | Application runtime (enforced) |
+| **Framework** | Spring Boot | 3.5.3 | Application framework |
+| **Rule Engine** | Drools | 10.2.0 | Business rule execution |
 | **Build Tool** | Maven | 3.9+ | Dependency management, build |
 | **Container** | Docker | 24.0+ | Containerization |
 | **Orchestration** | Docker Compose | 2.0+ | Local dev environment |

@@ -919,8 +919,8 @@ S3 Structure:
 ## 📚 Additional Resources
 
 ### Documentation
-- [Drools Documentation (8.x)](https://docs.drools.org/8.44.0.Final/drools-docs/docs-website/)
-- [DRL Rules Reference (8.44)](https://docs.drools.org/8.44.0.Final/drools-docs/docs-website/drools/language/index.html) — note: this project uses only the *traditional* subset of DRL described there.
+- [Drools Documentation (10.x)](https://kie.apache.org/docs/10.0.x/drools/drools/introduction/index.html)
+- [DRL Traditional Syntax Reference (Drools 10)](https://kie.apache.org/docs/10.0.x/drools/drools/language-reference-traditional/index.html) — note: this project uses only the *traditional* subset of DRL described there.
 - Local copy: [23-rule-language-reference.md](23-rule-language-reference.md) (with project-applicability annotations)
 
 ### Project-specific guides

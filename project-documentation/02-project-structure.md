@@ -35,7 +35,7 @@ drools-microservice/
 ├── docker-validation.md              # Docker validation checklist
 ├── full-docker-test-plan.md          # 30-step Docker integration test plan
 │
-├── set-java-env.sh                   # Source to set JAVA_HOME=Java 17 (macOS)
+├── set-java-env.sh                   # Source to set JAVA_HOME=Java 25 (macOS)
 ├── setup-dev-environment.sh          # One-command full dev stack bootstrap
 ├── init-localstack.sh                # Auto-runs in LocalStack container; uploads sample-rules to S3
 ├── test-localstack.sh                # Validates LocalStack S3 setup; ⚠️ embedded curl uses wrong field name
@@ -228,8 +228,8 @@ The path → rule ID transformation: `pricing/discount/vip.drl` ↔ `pricing.dis
 
 | File | Purpose |
 |---|---|
-| `pom.xml` | Maven build. Spring Boot 3.2.5, Drools 8.44.0, Java 17 enforced. Plugins: enforcer, spotless (Google Java Format), JaCoCo, SpotBugs, surefire, spring-boot-maven-plugin. |
-| `Dockerfile` | Multi-stage: `maven:3.9-eclipse-temurin-17` → `amazoncorretto:17-alpine-jdk`. Non-root `appuser`. JAVA_OPTS pre-set with G1GC + container support + Drools properties. |
+| `pom.xml` | Maven build. Spring Boot 3.5.3, Drools 10.2.0, Java 25 enforced. Plugins: enforcer, spotless (Google Java Format), JaCoCo, SpotBugs, surefire, spring-boot-maven-plugin. |
+| `Dockerfile` | Multi-stage: `maven:3.9-eclipse-temurin-25` → `amazoncorretto:25-alpine-jdk`. Non-root `appuser`. JAVA_OPTS pre-set with G1GC + container support + Drools properties. |
 | `docker-compose.yml` | 3-service dev stack: `app` (build from Dockerfile), `localstack` (2.3, S3 only), `redis` (7-alpine). Healthchecks on all three. Networks: `drools-network`. Volumes: `localstack-data`, `redis-data`, plus host mounts for heap dumps and GC logs. |
 | `.dockerignore` | Excludes target/, .git, *.log, IDE files, etc. from Docker build context. |
 | `.env` / `.env.example` | Local env var template. `.env` is gitignored (real secrets); `.env.example` is committed (defaults). |
@@ -240,7 +240,7 @@ The path → rule ID transformation: `pricing/discount/vip.drl` ↔ `pricing.dis
 
 | Script | What it does | When to run |
 |---|---|---|
-| `set-java-env.sh` | `source` to set `JAVA_HOME` and `PATH` to Java 17 (macOS via `/usr/libexec/java_home -v 17`). | Before running `mvn` or local `java` commands. |
+| `set-java-env.sh` | `source` to set `JAVA_HOME` and `PATH` to Java 25 (macOS via `/usr/libexec/java_home -v 25`). | Before running `mvn` or local `java` commands. |
 | `setup-dev-environment.sh` | Full bootstrap: Maven build → Docker build → `docker-compose up -d` → wait for healthy → run `test-localstack.sh`. Flags: `--skip-build`, `--skip-tests`, `--force-rebuild`. | First time on a clean clone. |
 | `init-localstack.sh` | Runs **inside** the LocalStack container as a ready-hook (mounted to `/etc/localstack/init/ready.d/init-aws.sh`). Creates `local-rules` bucket, syncs `sample-rules/` into it, applies a permissive Principal:`*` policy (LocalStack-guarded). | Automatic — fires when LocalStack starts. |
 | `test-localstack.sh` | 5 sequential checks against LocalStack: connectivity, bucket exists, rules uploaded, rule content valid, optional rule execution. ⚠️ Step 5 uses `ruleId` (camelCase) instead of `rule_id` (snake_case) — fails silently against the real DTO. See `CODE_FINDINGS.md` F-025. | After LocalStack is up; manually or via setup script. |

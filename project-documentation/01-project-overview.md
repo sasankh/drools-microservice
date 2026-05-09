@@ -61,13 +61,13 @@ The service is **production-ready** as of 2026-02-26:
 - **589 tests** across 44 test files. **96.2% instruction / 89.7% branch** coverage (JaCoCo). All passing.
 - **Docker integration test plan**: 30 checks across 9 steps, all passing as of last run.
 - **Memory leak fixed** (2026-02-19): KieContainer disposal verified.
-- **Java 17 enforced** at build time via Maven Enforcer Plugin.
+- **Java 25 enforced** at build time via Maven Enforcer Plugin (bumped from Java 17 on 2026-05-09 — see [ADR-013](36-architecture-decision-records.md#adr-013-java-17--25--spring-boot-modernization-2026-05-09)).
 
 ## Non-goals (what this is NOT)
 
 - **Not a workflow engine.** Rules are evaluated in a single fire-all pass; this is not BPMN, not Camunda, not Temporal. If you need orchestration across services, use a workflow tool.
 - **Not an event broker.** No subscriptions, no pub/sub. The service is a synchronous request/response API.
-- **Not a complete Drools 8 deployment.** Only the *traditional DRL subset* (Map-based pattern matching) is used. Rule units, OOPath, DataStream, decision tables — all unused. See [23-rule-language-reference.md](23-rule-language-reference.md) for what's intentionally unused.
+- **Not a complete Drools deployment.** Only the *traditional DRL subset* (Map-based pattern matching) is used. Rule units, OOPath, DataStream, decision tables — all unused. See [23-rule-language-reference.md](23-rule-language-reference.md) for what's intentionally unused.
 - **Not a multi-tenant rule platform.** Single rule namespace per deployment. Multi-tenancy would require additional rule scoping (currently out of scope).
 - **Not authoritative for primary auth.** `AdminAuthFilter` is *defense in depth* behind an upstream API gateway. For end-user authentication, use a real auth service.
 
@@ -77,7 +77,7 @@ The service is **production-ready** as of 2026-02-26:
 |---|---|---|
 | JMeter performance test suite | Phase 4.3 deferred; current load testing is ad hoc | Future |
 | Redis auth/TLS (`requirepass`, TLS connector) | Skipped per user — not needed for current local/dev posture | Production deploy |
-| Dependency version sweep (e.g., Drools 8.x latest) | Compatibility risk; current 8.44.0 is stable baseline | Future |
+| Dependency version sweep | Closed 2026-05-09 via stack modernization (Java 17→25, Spring Boot 3.2.5→3.5.3, Drools 8.44.0→10.2.0) — see [ADR-013](36-architecture-decision-records.md#adr-013-java-17--25--spring-boot-modernization-2026-05-09) | Done |
 | Rule versioning / rollback semantics | Currently relies on S3 versioning + manual refresh | Roadmap |
 | A/B testing of rules | Not implemented — would require rule routing layer | Roadmap |
 | Rule analytics dashboard | Out of scope for this service; consume metrics externally | Roadmap |

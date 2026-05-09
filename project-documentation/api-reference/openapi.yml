@@ -26,7 +26,11 @@ info:
     - CORS configuration (empty default; wildcard only in dev profiles)
     - Sensitive data sanitization in logs
 
-    ## Recent Updates (2026-02-26)
+    ## Recent Updates (2026-05-09)
+    - **Stack Modernization**: Java 17 → 25, Spring Boot 3.2.5 → 3.5.3, Drools 8.44.0 → 10.2.0
+    - **Dependency Sweep Closed**: All Maven Central libraries on current latest stable
+
+    ## Previous Updates (2026-02-26)
     - **Security Hardening**: 39/42 security fixes across 9 phases
     - **Admin Authentication**: API key protection for admin endpoints
     - **DRL Sandboxing**: Rule content scanning prevents arbitrary code execution

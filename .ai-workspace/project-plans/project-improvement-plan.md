@@ -13,6 +13,7 @@ This 3-week sprint plan is partially superseded. About 70% has been executed via
 ### Done since this plan was written
 - **Week 1** all complete — Maven Enforcer, KieContainer disposal, RedisConfig + LocalLRUCache fixes (validated by the file's own 2026-02-20 update below).
 - **Week 2 Days 4–9** test infrastructure + unit + integration tests — done. Project has **589 tests** in **44 test files** with **96.2% instruction / 89.7% branch coverage**, far exceeding the plan's 80% target. See [`project-documentation/28-testing-guide.md`](../../project-documentation/28-testing-guide.md).
+- **Stack modernization (2026-05-09)** — Java 17 → 25, Spring Boot 3.2.5 → 3.5.3, Drools 8.44.0 → 10.2.0, plus all transitive plugin/lib bumps. Closes deferred security finding #30. See [`stack-modernization-plan.md`](stack-modernization-plan.md) + [`stack-modernization-checklist.md`](stack-modernization-checklist.md). All 584 non-Docker tests pass.
 - **Week 3 Day 13** security hardening — done, but via a different route than the plan suggested:
   - Plan: `spring-boot-starter-security` with role-based auth.
   - Actual: custom 93-line `AdminAuthFilter` plus 39/42 security findings closed across 9 phases (Phase 7, 2026-02-26). Decision documented in [ADR-006](../../project-documentation/36-architecture-decision-records.md#adr-006-adminauthfilter-instead-of-spring-security).

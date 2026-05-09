@@ -98,16 +98,16 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 
 | Layer | Choice | Version |
 |---|---|---|
-| Language | Java (LTS) | 17 (enforced) |
-| Framework | Spring Boot | 3.2.5 |
-| Rule engine | Drools | 8.44.0.Final |
-| Storage | AWS S3 (via SDK v2) | 2.20.56 |
+| Language | Java (LTS) | 25 (enforced) |
+| Framework | Spring Boot | 3.5.3 |
+| Rule engine | Drools | 10.2.0 |
+| Storage | AWS S3 (via SDK v2) | 2.34.0 |
 | Cache | LocalLRU primary; Redis dormant | — |
-| Resilience | Resilience4j | 2.2.0 |
-| Metrics | Micrometer (CloudWatch registry) | 1.12.4 |
+| Resilience | Resilience4j | 2.3.0 |
+| Metrics | Micrometer (CloudWatch registry) | 1.14.7 |
 | Logging | Logback + logstash-logback-encoder | 7.4 |
 | Test | JUnit 5, Mockito, AssertJ, Testcontainers | — |
-| Container | Amazon Corretto 17 Alpine | — |
+| Container | Amazon Corretto 25 Alpine | — |
 
 Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 
@@ -170,7 +170,7 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 - [20-rule-generation-prompt.md](20-rule-generation-prompt.md) — AI prompt (full)
 - [21-rule-generation-prompt-enhanced.md](21-rule-generation-prompt-enhanced.md) — AI prompt (with safety patterns)
 - [22-rule-generation-prompt-concise.md](22-rule-generation-prompt-concise.md) — AI prompt (concise)
-- [23-rule-language-reference.md](23-rule-language-reference.md) — upstream Drools 8 reference
+- [23-rule-language-reference.md](23-rule-language-reference.md) — upstream Drools reference
 
 ### Performance & memory (24-26)
 - [24-jvm-optimization.md](24-jvm-optimization.md) — JVM tuning
@@ -189,7 +189,7 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 ### Onboarding & reference (32-35)
 - [32-getting-started.md](32-getting-started.md) — 30-min quickstart
 - [33-simple-start.md](33-simple-start.md) — rule author quickstart
-- [34-java-setup-guide.md](34-java-setup-guide.md) — Java 17 install
+- [34-java-setup-guide.md](34-java-setup-guide.md) — Java 25 install
 - [35-faq.md](35-faq.md) — 65+ Q&A
 
 ### Advanced (36-38)
@@ -243,7 +243,7 @@ If you take only one thing from this overview:
 - **No workflow orchestration** — this is single-pass rule execution, not BPMN.
 - **No event broker** — synchronous request/response only.
 - **No multi-tenancy** — single rule namespace per deployment.
-- **No Drools 8 modern syntax** — rule units / OOPath / DataStream not used. See [ADR-001](36-architecture-decision-records.md#adr-001-traditional-drl-syntax-only-not-rule-units--oopath).
+- **No Drools modern syntax** — rule units / OOPath / DataStream not used. See [ADR-001](36-architecture-decision-records.md#adr-001-traditional-drl-syntax-only-not-rule-units--oopath).
 - **No primary authentication** — `AdminAuthFilter` is defense in depth; primary auth is at API gateway.
 - **No Terraform / IaC** — reference architecture documented, not packaged. See [ADR-007](36-architecture-decision-records.md#adr-007-no-terraform-aws-deployment-documented-as-reference-only).
 - **No JMeter performance suite** — load testing deferred per project plan.

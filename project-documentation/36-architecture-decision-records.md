@@ -467,7 +467,7 @@ Use Jakarta annotations where they fit (`@NotNull`, `@Size`). Add custom annotat
 
 ## ADR-012: Drools 8.44.0.Final (not latest 8.x or 9.x)
 
-**Status**: Accepted
+**Status**: Superseded by [ADR-014](#adr-014-drools-8--10-migration-2026-05-09) on 2026-05-09
 **Date**: project inception
 
 ### Context
@@ -496,9 +496,150 @@ Pin to **8.44.0.Final**. Don't auto-upgrade.
 - Specific feature in newer 8.x version that we want to use.
 - Drools 9.x stable release + community-validated migration guide.
 
+### Status update (2026-05-09)
+
+Revisited and superseded. The project bumped to **Drools 10.2.0** as part of the 2026-05-09 stack modernization. See [ADR-014](#adr-014-drools-8--10-migration-2026-05-09) for the current state.
+
 ### References
 - [`pom.xml`](../pom.xml) — `drools.version`
 - [03-tech-stack.md](03-tech-stack.md) — version table
+
+---
+
+## ADR-013: Java 17 → 25 + Spring Boot modernization (2026-05-09)
+
+**Status**: Accepted
+**Date**: 2026-05-09
+
+### Context
+
+By May 2026, the project had been running on Java 17 (LTS, Sept 2021) with Spring Boot 3.2.5 (April 2024) for ~14 months. Both were two LTS / 3 minor versions behind current. The deferred security finding **#30** ("Outdated dependencies — skipped per user") covered the broader dependency stack — Lombok 1.18.30, AWS SDK 2.20.56, Maven plugins on 2-year-old versions.
+
+The user decided to invest in a single coordinated modernization rather than incremental bumps. Three options on the table:
+1. Java 17 → 21 only — zero library bumps, minimal benefit.
+2. Java 25 + Spring Boot 3.5.x + dependency sweep — current latest stable, closes #30.
+3. Java 25 + Drools 10 + everything — option 2 plus the Drools major bump (see ADR-014).
+
+### Decision
+
+Bump to **Java 25** + **Spring Boot 3.5.3** + bring all build plugins, Lombok, AWS SDK, and Resilience4j to current latest stable. Maven Enforcer rule changes from `[17,18)` to `[25,26)`. Closes security finding #30 in the same change.
+
+### Alternatives considered
+
+- **Stay on Java 17 + bump dependencies separately**: rejected. Bundling reduces total test/regression cost.
+- **Jump to Spring Boot 4.x**: rejected. Spring Boot 4 was approaching GA but not yet on Maven Central as of 2026-05-09. Stay on the latest stable 3.x.
+- **Java 21 (one LTS forward) instead of 25**: rejected. The user explicitly chose maximum modernization.
+
+### Consequences
+
+- **Positive**: project on current latest LTS with Premier support through Sept 2030.
+- **Positive**: closed deferred security finding #30 (dependency sweep).
+- **Positive**: a single coordinated test pass validates everything.
+- **Required code changes**:
+  - `RestTemplateBuilder.setConnectTimeout/setReadTimeout` deprecated in Spring Boot 3.5 → use `connectTimeout/readTimeout` ([`TimeoutConfig.java`](../src/main/java/com/company/drools/config/TimeoutConfig.java)).
+  - `@MockBean` deprecated in Spring Boot 3.4, removed in 3.5+ → use `@MockitoBean` ([`RuleExecutionControllerTest.java`](../src/test/java/com/company/drools/api/controller/RuleExecutionControllerTest.java)).
+- **Negative**: Spring Boot 3.5 doesn't officially list Java 25 in its tested matrix; project relies on forward-compat from the Java 17 baseline. So far works.
+
+### Concrete versions pinned
+
+| Component | Old | New |
+|---|---|---|
+| Java | 17 | **25** |
+| Spring Boot | 3.2.5 | **3.5.3** |
+| AWS SDK BOM | 2.20.56 | **2.34.0** |
+| Lombok | 1.18.30 | **1.18.38** |
+| Resilience4j | 2.2.0 | **2.3.0** |
+| Micrometer | 1.12.4 | **1.14.7** |
+| Testcontainers | 1.19.7 | **1.21.3** |
+| maven-compiler-plugin | 3.11.0 | **3.15.0** |
+| maven-enforcer-plugin | 3.3.0 | **3.6.2** |
+| jacoco-maven-plugin | 0.8.8 | **0.8.13** |
+| spotless-maven-plugin | 2.36.0 | **2.44.5** |
+| google-java-format | 1.17.0 | **1.27.0** |
+| spotbugs-maven-plugin | 4.7.3.0 | **4.9.3.0** |
+
+### When to revisit
+
+- Java 26 LTS (expected ~Sept 2026).
+- Spring Boot 4.x reaches GA + ecosystem stabilizes.
+- New security advisory in any of the bumped libraries.
+
+### References
+- [`pom.xml`](../pom.xml)
+- [`Dockerfile`](../Dockerfile) — base images bumped to `maven:3.9-eclipse-temurin-25` and `amazoncorretto:25-alpine-jdk`
+- [03-tech-stack.md](03-tech-stack.md) — full version table
+- [`.ai-workspace/project-plans/stack-modernization-plan.md`](../.ai-workspace/project-plans/stack-modernization-plan.md) — full modernization plan
+- [`.ai-workspace/project-plans/security-backlog.md`](../.ai-workspace/project-plans/security-backlog.md) — finding #30 closure
+
+---
+
+## ADR-014: Drools 8 → 10 migration (2026-05-09)
+
+**Status**: Accepted (supersedes [ADR-012](#adr-012-drools-8440final-not-latest-8x-or-9x))
+**Date**: 2026-05-09
+
+### Context
+
+Drools 10.x is the current major as of 2026-05-09. Drools 8.x line is in maintenance. As part of the 2026-05-09 stack modernization (see [ADR-013](#adr-013-java-17--25--spring-boot-modernization-2026-05-09)), the team chose to bump Drools too.
+
+The [Drools 10 migration guide](https://kie.apache.org/docs/10.0.x/drools/drools/migration-guide/index.html) explicitly states: *"All APIs and DRL syntax are compatible"* between Drools 8 and 10. The traditional `KieServices`/`KieContainer`/`KieBase`/`KieSession` API the project uses is "still supported but discouraged" — meaning it works without code rewrites.
+
+### Decision
+
+Bump to **Drools 10.2.0**. Replace `drools-core` + `drools-compiler` + `drools-mvel` (3 dependencies) with the single `drools-engine` aggregator. Keep `drools-mvel` as an explicit dependency because traditional DRL `then` blocks default to MVEL semantics and `drools-engine` no longer bundles MVEL by default.
+
+Keep [ADR-001](#adr-001-traditional-drl-syntax-only-not-rule-units--oopath) (traditional DRL only — no Rule Units / OOPath) — the migration guide confirms traditional DRL is still fully supported in Drools 10.
+
+Keep [ADR-003](#adr-003-kiecontainer-atomic-swap-with-disposal) (atomic-swap KieContainer pattern) — Drools 10 didn't change KieContainer lifecycle. Memory tests confirm the disposal-based leak fix still applies.
+
+### Alternatives considered
+
+- **Drools 9.x**: same migration cost as 10, less support runway. Rejected.
+- **Stay on latest 8.x (e.g., 8.45.x)**: lowest risk, no rewrite at all. Rejected — user chose maximum modernization.
+- **Adopt Rule Units / OOPath as part of the migration**: would require rewriting [`DroolsEngineService.java`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java) orchestration. Out of scope; the existing ADR-001 rejection still stands.
+
+### Consequences
+
+- **Positive**: Drools 10 baselines on JDK 17+, so Java 25 is forward-compatible.
+- **Positive**: single `drools-engine` aggregator replaces 3 individual dependencies. Cleaner pom.
+- **Positive**: future-proof — Drools 8.x is in maintenance, 10.x is the active line.
+- **Negative**: `drools-mvel` is officially deprecated by the Drools team but still required at runtime for this project's DRL dialect. Will need attention if Drools removes it in a future major.
+- **Negative**: executable model (the new default in `drools-engine`) has three documented behavior differences from MVEL: invalid type coercion (`(String) intValue` no longer tolerated), strict generics, wrapper coercion (`10` doesn't auto-coerce to `Long`). All 10 sample DRL files were reviewed; no rewrites needed (none of them use those patterns).
+
+### Code changes
+
+Single coordinate swap in [`pom.xml`](../pom.xml):
+
+```xml
+<!-- OLD -->
+<dependency><groupId>org.drools</groupId><artifactId>drools-core</artifactId><version>${drools.version}</version></dependency>
+<dependency><groupId>org.drools</groupId><artifactId>drools-compiler</artifactId><version>${drools.version}</version></dependency>
+<dependency><groupId>org.drools</groupId><artifactId>drools-mvel</artifactId><version>${drools.version}</version></dependency>
+
+<!-- NEW -->
+<dependency><groupId>org.drools</groupId><artifactId>drools-engine</artifactId><version>${drools.version}</version></dependency>
+<dependency><groupId>org.drools</groupId><artifactId>drools-mvel</artifactId><version>${drools.version}</version></dependency>
+```
+
+No application Java code changes required.
+
+### Validation
+
+- All 584 non-Docker tests pass on Java 25 + Drools 10.2.0 + Spring Boot 3.5.3.
+- All 10 sample rules produce identical outputs to pre-migration (verified via `RuleExecutionIntegrationTest$SampleRulesExecution`).
+- KieContainer disposal still functions; memory leak fix from prior Phase 6 still applies.
+
+### When to revisit
+
+- Drools removes `drools-mvel` artifact entirely in a future major. We'd need to either explicitly switch DRL files to Java dialect via `dialect "java"` per rule, or accept whatever replacement Drools provides.
+- Drools 11.x stable release + community-validated migration guide.
+
+### References
+- [`pom.xml`](../pom.xml) — Drools dependencies
+- [03-tech-stack.md](03-tech-stack.md) — Rule engine section
+- [Drools 10 migration guide](https://kie.apache.org/docs/10.0.x/drools/drools/migration-guide/index.html)
+- [Drools 10 traditional DRL reference](https://kie.apache.org/docs/10.0.x/drools/drools/language-reference-traditional/index.html)
+- [`.ai-workspace/project-plans/stack-modernization-plan.md`](../.ai-workspace/project-plans/stack-modernization-plan.md)
 
 ---
 

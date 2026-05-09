@@ -13,14 +13,14 @@
 
 | Tool | Required version | Why | How to verify |
 |---|---|---|---|
-| **Java** | 17 (exactly — enforced) | Spring Boot 3 + Drools 8 baseline | `java -version` should show `17.x.x` |
+| **Java** | 25 (exactly — enforced) | Spring Boot 3.5 + Drools 10 baseline | `java -version` should show `25.x.x` |
 | **Maven** | 3.8+ | Build, dependency resolution, plugin enforcement | `mvn -version` |
 | **Docker** | 20+ | Local stack via docker-compose | `docker info` |
 | **Git** | any recent | Source control | — |
 | **Optional**: AWS CLI | any | Manually inspect LocalStack S3 bucket during dev | `aws --version` |
 | **Optional**: `jq` | any | Parse JSON in shell pipes | `jq --version` |
 
-The build will **fail** with a clear error if Java 17 isn't active. See [34-java-setup-guide.md](34-java-setup-guide.md) for the install guide.
+The build will **fail** with a clear error if Java 25 isn't active. See [34-java-setup-guide.md](34-java-setup-guide.md) for the install guide.
 
 ---
 
@@ -52,15 +52,15 @@ cd drools-microservice
 ### 2. Java environment
 
 ```bash
-# Set JAVA_HOME to Java 17 for the current shell:
+# Set JAVA_HOME to Java 25 for the current shell:
 source ./set-java-env.sh
 
 # Verify:
-java -version           # → openjdk 17.x.x
-mvn -version | grep Java # → Java version: 17.x.x
+java -version           # → openjdk 25.x.x
+mvn -version | grep Java # → Java version: 25.x.x
 ```
 
-The `set-java-env.sh` is macOS-specific (uses `/usr/libexec/java_home`). Linux users: install OpenJDK 17 via your package manager and set `JAVA_HOME` directly. See [34-java-setup-guide.md](34-java-setup-guide.md).
+The `set-java-env.sh` is macOS-specific (uses `/usr/libexec/java_home`). Linux users: install OpenJDK 25 via your package manager and set `JAVA_HOME` directly. See [34-java-setup-guide.md](34-java-setup-guide.md).
 
 ### 3. Build the project
 
@@ -168,9 +168,9 @@ These plugins run as part of the build pipeline. Awareness of what they enforce 
 
 | Plugin | Phase | What it does | Failure mode |
 |---|---|---|---|
-| **maven-enforcer-plugin** 3.3.0 | `validate` | Requires Java 17 (`[17,18)`) and Maven 3.8+ | Build aborts with clear error if Java mismatch |
+| **maven-enforcer-plugin** 3.6.2 | `validate` | Requires Java 25 (`[25,26)`) and Maven 3.8+ | Build aborts with clear error if Java mismatch |
 | **maven-compiler-plugin** 3.11.0 | `compile` | Source/target = 17, `parameters: true` (preserves param names) | Standard compile errors |
-| **spring-boot-maven-plugin** 3.2.5 | `package` | Repackages the jar as a Spring Boot fat jar; excludes Lombok | If executable jar isn't produced, this is the cause |
+| **spring-boot-maven-plugin** 3.5.3 | `package` | Repackages the jar as a Spring Boot fat jar; excludes Lombok | If executable jar isn't produced, this is the cause |
 | **spotless-maven-plugin** 2.36.0 | `verify` (when `spotless:check`) | Code formatting via Google Java Format 1.17.0; removes unused imports; trims trailing whitespace | `mvn spotless:check` fails if any file is unformatted |
 | **jacoco-maven-plugin** 0.8.8 | `test` | Records coverage; outputs `target/site/jacoco/` | None (no threshold gate currently — see CODE_FINDINGS F-029) |
 | **spotbugs-maven-plugin** 4.7.3.0 | `verify` (when `spotbugs:check`) | Static analysis at "Max" effort, "High" threshold | Reports bugs but doesn't fail unless you run `:check` |

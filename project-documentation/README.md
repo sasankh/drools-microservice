@@ -76,7 +76,7 @@ If answers come back accurate and cite the right docs, NotebookLM is ready for e
 | [20-rule-generation-prompt.md](20-rule-generation-prompt.md) | ~360 | AI prompt for rule generation (full version) |
 | [21-rule-generation-prompt-enhanced.md](21-rule-generation-prompt-enhanced.md) | ~390 | AI prompt with safety patterns |
 | [22-rule-generation-prompt-concise.md](22-rule-generation-prompt-concise.md) | ~180 | AI prompt (concise) |
-| [23-rule-language-reference.md](23-rule-language-reference.md) | ~3200 | Drools 8 upstream reference (with "[Not used in this project]" tags) |
+| [23-rule-language-reference.md](23-rule-language-reference.md) | ~3200 | Drools upstream reference (with "[Not used in this project]" tags) |
 
 ### Performance & memory (24-26)
 
@@ -107,7 +107,7 @@ If answers come back accurate and cite the right docs, NotebookLM is ready for e
 |---|---:|---|
 | [32-getting-started.md](32-getting-started.md) | ~240 | <30-minute Docker quickstart |
 | [33-simple-start.md](33-simple-start.md) | ~240 | Rule author quickstart |
-| [34-java-setup-guide.md](34-java-setup-guide.md) | ~660 | Java 17 install (kept) |
+| [34-java-setup-guide.md](34-java-setup-guide.md) | ~660 | Java 25 install guide |
 | [35-faq.md](35-faq.md) | ~510 | 65+ Q&A across 10 categories |
 
 ### Advanced (36-38)
@@ -173,11 +173,12 @@ If the docs go more than 2 sprints without an audit, run a verification pass: sp
 
 ## Provenance
 
-This corpus was rebuilt 2026-05-08 from the prior 13-doc set. The rebuild:
+This corpus was rebuilt 2026-05-08 from the prior 13-doc set, then refreshed 2026-05-09 for the stack modernization (Java 17→25, Spring Boot 3.2.5→3.5.3, Drools 8.44.0→10.2.0). The rebuilds:
 - Verified every claim against actual source code
 - Live-tested every curl example
 - Found and fixed 32+ doc-vs-code inconsistencies (cataloged in `.ai-workspace/documentations/CODE_FINDINGS.md`)
 - Extended coverage from ~65% of the 11-category framework to 100%
+- Closed deferred security finding #30 (outdated dependencies) via the 2026-05-09 modernization — see [ADR-013](36-architecture-decision-records.md) and [ADR-014](36-architecture-decision-records.md)
 
 Tracking artifacts (in `.ai-workspace/documentations/`):
 - `SUMMARY.md` — high-level overview of the rebuild

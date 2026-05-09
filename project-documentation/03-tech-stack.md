@@ -13,70 +13,70 @@
 
 | Layer | Choice | Version |
 |---|---|---|
-| Language | Java (LTS) | **17** *(enforced)* |
-| Application framework | Spring Boot | **3.2.5** |
-| Rule engine | Drools | **8.44.0.Final** |
-| HTTP server | Embedded Tomcat (via Spring Boot) | bundled with 3.2.5 |
+| Language | Java (LTS) | **25** *(enforced)* |
+| Application framework | Spring Boot | **3.5.3** |
+| Rule engine | Drools | **10.2.0** |
+| HTTP server | Embedded Tomcat (via Spring Boot) | bundled with 3.5.3 |
 | Build tool | Apache Maven | **3.9+** |
-| Container base (build) | `maven:3.9-eclipse-temurin-17` | — |
-| Container base (runtime) | `amazoncorretto:17-alpine-jdk` | — |
-| AWS SDK | `software.amazon.awssdk` v2 | **2.20.56** |
+| Container base (build) | `maven:3.9-eclipse-temurin-25` | — |
+| Container base (runtime) | `amazoncorretto:25-alpine-jdk` | — |
+| AWS SDK | `software.amazon.awssdk` v2 | **2.34.0** |
 | Cache library | Spring Data Redis (Lettuce) | bundled with Spring Boot |
-| Resilience | Resilience4j | **2.2.0** |
-| Metrics | Micrometer (CloudWatch registry) | **1.12.4** |
+| Resilience | Resilience4j | **2.3.0** |
+| Metrics | Micrometer (CloudWatch registry) | **1.14.7** |
 | Logging | Logback + logstash-logback-encoder | encoder **7.4** |
 | Validation | Jakarta Bean Validation (Hibernate Validator) | bundled with Spring Boot |
 | Env loading | dotenv-java | **3.0.0** |
-| Code style | Spotless + Google Java Format | spotless **2.36.0**, GJF **1.17.0** |
-| Coverage | JaCoCo | **0.8.8** |
-| Static analysis | SpotBugs | **4.7.3.0** |
-| Build enforcement | Maven Enforcer Plugin | **3.3.0** |
+| Code style | Spotless + Google Java Format | spotless **2.44.5**, GJF **1.27.0** |
+| Coverage | JaCoCo | **0.8.13** |
+| Static analysis | SpotBugs | **4.9.3.0** |
+| Build enforcement | Maven Enforcer Plugin | **3.6.2** |
 | Test framework | JUnit 5 (Jupiter) | bundled with `spring-boot-starter-test` |
 | Mocking | Mockito | bundled |
-| Integration tests | Testcontainers + LocalStack | **1.19.7** |
+| Integration tests | Testcontainers + LocalStack | **1.21.3** |
 | Async polling | Awaitility | bundled (test scope) |
 
 ---
 
 ## Runtime
 
-### Java 17 (LTS)
+### Java 25 (LTS)
 
 **Why this version, why enforced:**
-- Spring Boot 3.x requires Java 17 minimum. Drools 8.44.0 is tested against Java 17.
-- Java 17 is the current LTS with broad JDK vendor support and a security patch lifeline through 2029.
-- Java 21 is intentionally not adopted yet — the ecosystem (notably Drools, some Resilience4j internals) hasn't been verified for compatibility, and the user has noted this as a future task.
+- Java 25 is the current latest LTS (released September 2025); Premier support runs through September 2030.
+- Spring Boot 3.5.3 baselines on Java 17, but runs cleanly on Java 25 (forward-compatible). Drools 10 baselines on Java 17 and likewise runs on 25.
+- Bumping to 25 (vs staying on the older 17 LTS) was done as part of the 2026-05-09 stack modernization. See [ADR-013](36-architecture-decision-records.md#adr-013-java-17--25--spring-boot-modernization-2026-05-09).
 
 **Enforcement** (in [pom.xml](../pom.xml) — Maven Enforcer Plugin):
 ```xml
 <requireJavaVersion>
-  <version>[17,18)</version>
-  <message>❌ Java 17 is required!</message>
+  <version>[25,26)</version>
+  <message>❌ Java 25 is required!</message>
 </requireJavaVersion>
 ```
 Builds with the wrong Java version fail at the `validate` phase with a clear error. There is no fallback path — this is by design.
 
 Local setup helper: [`set-java-env.sh`](../set-java-env.sh) (macOS); detailed guide in [34-java-setup-guide.md](34-java-setup-guide.md).
 
-### Container runtime: Amazon Corretto 17 Alpine
+### Container runtime: Amazon Corretto 25 Alpine
 
 **Why this image:**
 - Alpine base = ~180 MB; the multi-stage build produces a final image of ~347 MB.
 - Amazon Corretto is AWS's hardened JDK distribution; receives security patches in lockstep with OpenJDK and is well-tested in AWS environments where this service is deployed.
 - Alpine's musl libc is acceptable here because we have no native dependencies that conflict with musl. (The JDK bundles its own libraries.)
 
-The Maven build stage uses `maven:3.9-eclipse-temurin-17` (separate JDK distribution) — the build-time JDK doesn't need to match the runtime JDK as long as both are 17. See [Dockerfile](../Dockerfile) for the multi-stage layout.
+The Maven build stage uses `maven:3.9-eclipse-temurin-25` (separate JDK distribution) — the build-time JDK doesn't need to match the runtime JDK as long as both are 25. See [Dockerfile](../Dockerfile) for the multi-stage layout.
 
 ---
 
 ## Application framework
 
-### Spring Boot 3.2.5
+### Spring Boot 3.5.3
 
 **Why this version:**
-- Spring Boot 3.x is the current major line (Jakarta EE namespace, Java 17 baseline).
-- 3.2.5 is a stable patch release used in production. Newer 3.2.x patches are compatible upgrades.
-- 3.3.x and 3.4.x updates are deferred pending compatibility check with Resilience4j 2.2.0 and Drools 8.44.0.
+- Spring Boot 3.5.x is the current latest 3.x line (Jakarta EE namespace, Java 17 baseline).
+- 3.5.3 is the latest stable patch release as of 2026-05-09. Spring Boot 4.x is on the horizon but not yet GA.
+- The bump from 3.2.5 → 3.5.3 was part of the 2026-05-09 stack modernization; see [ADR-013](36-architecture-decision-records.md#adr-013-java-17--25--spring-boot-modernization-2026-05-09).
 
 **Starters used** (transitively pulls dependencies; see `pom.xml` lines 56–70):
 - `spring-boot-starter-web` — Spring MVC, embedded Tomcat, Jackson
@@ -98,25 +98,25 @@ We did **not** swap to Undertow or Jetty — Tomcat is well-tested with our load
 
 ## Rule engine
 
-### Drools 8.44.0.Final
+### Drools 10.2.0
 
 **Why this version, why traditional syntax:**
-- 8.44.0 is the latest 8.x release in the Drools 8 line at time of project start. The 8.x line continues to support traditional DRL syntax (Map-based pattern matching) alongside the modern rule-unit/OOPath syntax.
-- This project uses **only the traditional subset** — see [ADR-001](36-architecture-decision-records.md) for the reasoning. Short version: traditional DRL has a smaller learning curve, integrates cleanly with JSON→Map conversion, and the modern features (rule units, DataStream) don't add value for synchronous request/response rule execution.
-- Drools 9.x is intentionally not adopted — different release cadence, breaking changes possible.
+- Drools 10.x is the current latest major. Drools 10 baselines on JDK 17+, deprecates `drools-engine-classic` and `drools-mvel` in favor of the single `drools-engine` aggregator (executable model by default).
+- Per the [Drools 10 migration guide](https://kie.apache.org/docs/10.0.x/drools/drools/migration-guide/index.html): *"All APIs and DRL syntax are compatible"* between Drools 8 and 10. Traditional KieServices/KieContainer/KieBase/KieSession is "still supported but discouraged" — meaning it works without code rewrites.
+- This project uses **only the traditional subset** — see [ADR-001](36-architecture-decision-records.md). Traditional DRL has a smaller learning curve, integrates cleanly with JSON→Map conversion, and the modern Rule Units / OOPath features don't add value for synchronous request/response rule execution.
+- The bump from 8.44.0.Final → 10.2.0 was part of the 2026-05-09 stack modernization; see [ADR-014](36-architecture-decision-records.md#adr-014-drools-8--10-migration-2026-05-09).
 
-**Modules pulled** (`pom.xml` lines 72–89):
-- `drools-core` — engine runtime
-- `drools-compiler` — `.drl` parser and compiler
-- `drools-mvel` — MVEL expression language support (some Drools internals require it)
+**Modules pulled** (`pom.xml`):
+- `drools-engine` — the new aggregator that replaces `drools-core` + `drools-compiler` + `drools-engine-classic` (the executable model is the new default)
+- `drools-mvel` — MVEL dialect runtime; still required because traditional DRL `then` blocks default to MVEL semantics. Officially deprecated by the Drools team but still published in 10.2.0.
 
-> Note on MVEL: rule files in this project do not use MVEL dialect (everything is Java dialect). MVEL is pulled in because Drools internally uses it for certain expression evaluation paths.
+> Note on MVEL: rule files in this project use the default dialect, which is MVEL semantics inside `then` blocks. The `drools-mvel` artifact provides the runtime support; without it, rule compilation fails with `MissingDependencyException`.
 
 ---
 
 ## Storage layer
 
-### AWS SDK v2 (2.20.56)
+### AWS SDK v2 (2.34.0)
 
 **Why v2 over v1:**
 - AWS SDK v2 is the current generation: smaller dependency footprint, async-first, modular (only pull `s3`, not the whole `aws-sdk-bundle`).
@@ -165,7 +165,7 @@ When Redis is enabled (`REDIS_ENABLED=true`):
 
 ## Resilience and observability
 
-### Resilience4j 2.2.0
+### Resilience4j 2.3.0
 
 **Why Resilience4j over Hystrix**:
 - Hystrix is in maintenance mode at Netflix.
@@ -178,7 +178,7 @@ When Redis is enabled (`REDIS_ENABLED=true`):
 
 Configured in `CircuitBreakerConfig.java`. Two breakers: `s3CircuitBreaker`, `redisCircuitBreaker`. Stricter thresholds in prod (40%/50% failure) than dev (60%/70%). Full details in [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md).
 
-### Micrometer 1.12.4
+### Micrometer 1.14.7
 
 **Why Micrometer:**
 - Vendor-agnostic: same metric calls support CloudWatch, Prometheus, Datadog, Grafana.
@@ -228,12 +228,12 @@ Triggered via `@Valid` in controller signatures. Validation failures bubble up a
 
 | Plugin | Version | What it enforces |
 |---|---:|---|
-| **maven-enforcer-plugin** | 3.3.0 | Java 17 (`[17,18)`), Maven 3.8+. Hard-fails the build on violation. |
-| **maven-compiler-plugin** | 3.11.0 | Source/target = 17, `parameters: true` (preserves method param names). |
-| **spring-boot-maven-plugin** | 3.2.5 | `repackage` goal — produces fat jar with embedded Tomcat. Excludes Lombok from the runtime jar. |
-| **spotless-maven-plugin** | 2.36.0 | Code formatting via Google Java Format 1.17.0. Run `mvn spotless:apply` before commit; `mvn spotless:check` is recommended in CI. Also: removes unused imports, trims trailing whitespace. |
-| **jacoco-maven-plugin** | 0.8.8 | Coverage instrumentation (`prepare-agent`) and report (`report` in test phase). Output: `target/site/jacoco/`. **No threshold configured** (would be a useful addition — see [`CODE_FINDINGS.md`](../.ai-workspace/documentations/CODE_FINDINGS.md) F-029). |
-| **spotbugs-maven-plugin** | 4.7.3.0 | Static analysis at "Max" effort, "High" threshold. Run with `mvn spotbugs:check`. Recommended in CI. |
+| **maven-enforcer-plugin** | 3.6.2 | Java 25 (`[25,26)`), Maven 3.8+. Hard-fails the build on violation. |
+| **maven-compiler-plugin** | 3.15.0 | Source/target = 25, `parameters: true` (preserves method param names). |
+| **spring-boot-maven-plugin** | 3.5.3 | `repackage` goal — produces fat jar with embedded Tomcat. Excludes Lombok from the runtime jar. |
+| **spotless-maven-plugin** | 2.44.5 | Code formatting via Google Java Format 1.27.0. Run `mvn spotless:apply` before commit; `mvn spotless:check` is recommended in CI. Also: removes unused imports, trims trailing whitespace. |
+| **jacoco-maven-plugin** | 0.8.13 | Coverage instrumentation (`prepare-agent`) and report (`report` in test phase). Output: `target/site/jacoco/`. **No threshold configured** (would be a useful addition — see [`CODE_FINDINGS.md`](../.ai-workspace/documentations/CODE_FINDINGS.md) F-029). |
+| **spotbugs-maven-plugin** | 4.9.3.0 | Static analysis at "Max" effort, "High" threshold. Run with `mvn spotbugs:check`. Recommended in CI. |
 | **maven-surefire-plugin** | 3.0.0 | Runs unit tests in the `test` phase. Default include patterns: `**/*Test.java`, `**/*Tests.java`. |
 
 ---
@@ -250,7 +250,7 @@ Pulled via `spring-boot-starter-test`. We use:
 
 Base test classes: `BaseUnitTest` (Mockito + mocked `MeterRegistry`) and `BaseIntegrationTest` (Testcontainers fixtures).
 
-### Testcontainers 1.19.7 + LocalStack
+### Testcontainers 1.21.3 + LocalStack
 
 For integration tests that need real AWS S3 behavior. The `localstack` Testcontainers module spins up a fresh LocalStack container per test class.
 
@@ -271,7 +271,7 @@ Fluent async assertions (`await().atMost(...).until(...)`). Used sparingly — m
 | Spring Security | Lightweight `AdminAuthFilter` instead — see [ADR-006](36-architecture-decision-records.md). API gateway is primary auth; this is defense in depth. |
 | Hibernate / JPA | No relational database. Rules in S3, cache in memory/Redis. |
 | GraphQL | REST is sufficient. The API is small. |
-| Kotlin / Scala | Java 17 only. Single-language codebase. |
+| Kotlin / Scala | Java 25 only. Single-language codebase. |
 | Reactive (WebFlux, Reactor) | Synchronous request/response is sufficient. Async only inside the rule executor (`CompletableFuture` for timeout cancellation). |
 | Spring Cloud | Single-service, not microservices-ecosystem deployment. No service registry / config server. |
 | Terraform / Pulumi / CDK | No IaC in repo. AWS deployment is documented as a reference architecture in [06-deployment.md](06-deployment.md) but provisioning is owned by the deploying team. |
@@ -288,20 +288,21 @@ If you're considering version bumps:
 
 | Component | Risk | Notes |
 |---|---|---|
-| Java 17 → 21 | Medium | User-deferred. Verify Drools 8.44.0 + Resilience4j 2.2.0 against 21 first. Update `Dockerfile` base image, `set-java-env.sh`, `pom.xml` enforcer rule. |
-| Spring Boot 3.2.5 → 3.3/3.4 | Low | Patch releases generally drop in cleanly. Verify Actuator endpoint structure if external monitoring depends on it. |
-| Drools 8.44.0 → 8.x latest | Low–Medium | Drools 8.x line is stable. Test sample rules + DrlSanitizer against the new version. |
-| Drools 8 → 9 | High | Major upgrade. Different runtime model. Out of scope for this project. |
-| AWS SDK 2.20.56 → 2.x latest | Low | v2 patch releases are backward compatible. |
-| Resilience4j 2.2.0 → 2.x latest | Low | Verify `@CircuitBreaker` annotation usage if we adopt it later. |
+| Java 25 → 26 | TBD | Java 26 expected ~Sept 2026. Verify Drools 10.x + Spring Boot 3.5.x compatibility before bumping. |
+| Spring Boot 3.5.3 → 4.x | Medium | Spring Boot 4.x is approaching GA. Major version with possible API changes. Wait for ecosystem to stabilize. |
+| Drools 10.2.0 → 10.x latest | Low | Patch releases within 10.x are backward compatible. |
+| Drools 10 → 11 | High | Hypothetical future major. Different runtime model expected. Out of scope. |
+| AWS SDK 2.34.0 → 2.x latest | Low | v2 patch releases are backward compatible. |
+| Resilience4j 2.3.0 → 2.x latest | Low | Verify `@CircuitBreaker` annotation usage if we adopt it later. |
 | Lettuce / Jedis swap | Medium | Only if Redis becomes hot path. Stay with Lettuce. |
+| Adopt Drools Rule Units / OOPath | High | Would change `DroolsEngineService` orchestration. Currently rejected by ADR-001. |
 
 ---
 
 ## Where this is set / verified
 
-- **Versions**: [`pom.xml`](../pom.xml) lines 16–27 (`<properties>`), then per-dependency overrides
-- **Java 17 enforcement**: [`pom.xml`](../pom.xml) Maven Enforcer Plugin section
-- **Container Java**: [`Dockerfile`](../Dockerfile) `FROM amazoncorretto:17-alpine-jdk`
-- **Build Java**: [`Dockerfile`](../Dockerfile) `FROM maven:3.9-eclipse-temurin-17 AS build`
+- **Versions**: [`pom.xml`](../pom.xml) lines 16–28 (`<properties>`), then per-dependency overrides
+- **Java 25 enforcement**: [`pom.xml`](../pom.xml) Maven Enforcer Plugin section
+- **Container Java**: [`Dockerfile`](../Dockerfile) `FROM amazoncorretto:25-alpine-jdk`
+- **Build Java**: [`Dockerfile`](../Dockerfile) `FROM maven:3.9-eclipse-temurin-25 AS build`
 - **JVM tuning**: `Dockerfile` `ENV JAVA_OPTS=...` and `docker-compose.yml` env override
