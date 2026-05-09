@@ -1,6 +1,6 @@
 # project-documentation
 
-This is the documentation corpus for the **Drools Rule Engine Microservice**. 38 markdown files designed to be uploaded as a NotebookLM source corpus or read directly.
+This is the documentation corpus for the **Drools Rule Engine Microservice**. 39 markdown files designed to be uploaded as a NotebookLM source corpus or read directly.
 
 **Start here**: [00-system-overview.md](00-system-overview.md) — entry point with role-based reading paths.
 
@@ -8,12 +8,12 @@ This is the documentation corpus for the **Drools Rule Engine Microservice**. 38
 
 ## Upload to NotebookLM
 
-NotebookLM accepts up to 50 sources, each up to 500K characters. This corpus has 38 markdown files totaling ~28,000 lines (~900 KB) — well within limits.
+NotebookLM accepts up to 50 sources, each up to 500K characters. This corpus has 39 markdown files totaling ~28,000 lines (~900 KB) — well within limits.
 
 ### Upload steps
 
 1. Create a new notebook at https://notebooklm.google.com.
-2. Drag-and-drop **all 38 `.md` files** from this directory.
+2. Drag-and-drop **all 39 `.md` files** from this directory.
 3. Also upload [`api-reference/openapi.yml`](api-reference/openapi.yml) for full API spec coverage.
 4. Wait for indexing (~1-2 minutes for this corpus size).
 5. Test with sample queries:
@@ -110,12 +110,13 @@ If answers come back accurate and cite the right docs, NotebookLM is ready for e
 | [34-java-setup-guide.md](34-java-setup-guide.md) | ~660 | Java 17 install (kept) |
 | [35-faq.md](35-faq.md) | ~510 | 65+ Q&A across 10 categories |
 
-### Advanced (36-37)
+### Advanced (36-38)
 
 | File | Lines | Purpose |
 |---|---:|---|
 | [36-architecture-decision-records.md](36-architecture-decision-records.md) | ~615 | 12 ADRs + extension points appendix |
 | [37-glossary.md](37-glossary.md) | ~310 | 70+ terms + acronyms defined |
+| [38-for-ai-agents.md](38-for-ai-agents.md) | ~150 | Verification rules and pitfalls for AI sessions working on this repo |
 
 ### Reference assets
 
@@ -134,7 +135,7 @@ If answers come back accurate and cite the right docs, NotebookLM is ready for e
 | **Operator** | [06](06-deployment.md) → [30](30-runbooks-and-monitoring.md) → [25](25-memory-monitoring-guide.md) → [26](26-performance-tuning-runbook.md) → [31](31-troubleshooting.md) |
 | **Integrator** | [10](10-api-reference.md) → [11](11-integration-guide.md) → [12](12-error-code-catalog.md) → [13](13-rate-limiting-and-throttling.md) → [api-reference/openapi.yml](api-reference/openapi.yml) |
 | **Rule author** | [33](33-simple-start.md) → [16](16-drl-sandboxing.md) → [17](17-rule-development.md) → [18](18-rule-id-and-storage-layout.md) → [19](19-sample-rules-cookbook.md) |
-| **AI agent** | [00](00-system-overview.md) → [01](01-project-overview.md) → [02](02-project-structure.md) → [37](37-glossary.md) → [09](09-environment-variables-reference.md) → [12](12-error-code-catalog.md) → [16](16-drl-sandboxing.md) |
+| **AI agent** | [00](00-system-overview.md) → [38](38-for-ai-agents.md) → [01](01-project-overview.md) → [02](02-project-structure.md) → [37](37-glossary.md) → [09](09-environment-variables-reference.md) → [12](12-error-code-catalog.md) → [16](16-drl-sandboxing.md) |
 
 ---
 

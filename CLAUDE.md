@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. `ai-instructions/ai-initial-context-instructions.md` — how to handle the `ai-context-update` command
 
 ### Project documentation (the canonical reference)
-3. **`project-documentation/00-system-overview.md`** — entry point for all 38 docs. Has role-based reading paths.
+3. **`project-documentation/00-system-overview.md`** — entry point for all 39 docs. Has role-based reading paths.
 
 The full documentation corpus is in `project-documentation/`. See [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md) for the index and reading paths by role.
 
@@ -219,7 +219,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 ## Development Workflow
 
-1. **Current Status**: 39/42 security findings addressed (Phases 1–9 complete, 2026-02-26); 589 tests; 96% instruction / 90% branch coverage; documentation rebuild complete (2026-05-08, 38 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
+1. **Current Status**: 39/42 security findings addressed (Phases 1–9 complete, 2026-02-26); 589 tests; 96% instruction / 90% branch coverage; documentation rebuild complete (2026-05-08, 39 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
 
 2. **One-Command Development Environment**: Complete automated setup with validation
    ```bash
@@ -311,18 +311,18 @@ Current snapshot:
 - **Security**: 39/42 findings addressed
 - **Performance**: 100–1000 RPS target, P99 < 100ms cached / < 500ms cache miss
 
-For the canonical narrative — phase history, ADRs, performance targets, testing strategy, runbooks — see [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md) and the 38 numbered docs it indexes.
+For the canonical narrative — phase history, ADRs, performance targets, testing strategy, runbooks — see [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md) and the 39 numbered docs it indexes.
 
 ## Important Project Files
 
-- [`project-documentation/`](project-documentation/) — full 38-doc corpus, the canonical reference
+- [`project-documentation/`](project-documentation/) — full 39-doc corpus, the canonical reference
 - [`set-java-env.sh`](set-java-env.sh) — Java 17 environment setup script
 - [`docker-build-test.sh`](docker-build-test.sh) — automated Docker build and validation
 - [`setup-dev-environment.sh`](setup-dev-environment.sh) — one-command local dev setup
 - [`init-localstack.sh`](init-localstack.sh) — LocalStack bootstrap (reads from `sample-rules/`)
 - [`sample-rules/`](sample-rules/) — 10 sample DRL files (single source of truth)
 - `gc-logs/`, `heap-dumps/` — runtime diagnostics output (gitignored content)
-- `snap-memory/` — session memory files for `snap-memory` AI workflow
+- [`.ai-workspace/snap-memory/`](.ai-workspace/snap-memory/) — session memory files for `snap-memory` AI workflow
 
 ## Quick development setup
 

@@ -84,12 +84,13 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 ### 🤖 AI agent (Claude Code, Codex, NotebookLM)
 
 1. This file — orientation
-2. [01-project-overview.md](01-project-overview.md) — capabilities and non-goals
-3. [02-project-structure.md](02-project-structure.md) — clickable file index for code navigation
-4. [37-glossary.md](37-glossary.md) — every acronym and term defined
-5. [09-environment-variables-reference.md](09-environment-variables-reference.md) — exhaustive config catalog
-6. [12-error-code-catalog.md](12-error-code-catalog.md) — error codes for diagnostics
-7. [16-drl-sandboxing.md](16-drl-sandboxing.md) — required reading before generating any DRL
+2. [38-for-ai-agents.md](38-for-ai-agents.md) — verification rules and pitfalls (read before claiming or writing)
+3. [01-project-overview.md](01-project-overview.md) — capabilities and non-goals
+4. [02-project-structure.md](02-project-structure.md) — clickable file index for code navigation
+5. [37-glossary.md](37-glossary.md) — every acronym and term defined
+6. [09-environment-variables-reference.md](09-environment-variables-reference.md) — exhaustive config catalog
+7. [12-error-code-catalog.md](12-error-code-catalog.md) — error codes for diagnostics
+8. [16-drl-sandboxing.md](16-drl-sandboxing.md) — required reading before generating any DRL
 
 ---
 
@@ -116,7 +117,7 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 
 | Stat | Value |
 |---|---|
-| Total documentation files | **38** (including this one) |
+| Total documentation files | **39** (including this one) |
 | Total Java source files | 57 |
 | Total test files | 44 |
 | Total tests (`@Test` + `@ParameterizedTest`) | **589** |
@@ -135,7 +136,7 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 
 ---
 
-## The 38-doc corpus, by category
+## The 39-doc corpus, by category
 
 ### Foundation (00-04)
 - [00-system-overview.md](00-system-overview.md) — this file
@@ -191,9 +192,10 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 - [34-java-setup-guide.md](34-java-setup-guide.md) — Java 17 install
 - [35-faq.md](35-faq.md) — 65+ Q&A
 
-### Advanced (36-37)
+### Advanced (36-38)
 - [36-architecture-decision-records.md](36-architecture-decision-records.md) — 12 ADRs + extension points
 - [37-glossary.md](37-glossary.md) — every term defined
+- [38-for-ai-agents.md](38-for-ai-agents.md) — verification rules and pitfalls for AI sessions working on this repo
 
 ### Reference assets
 - [api-reference/openapi.yml](api-reference/openapi.yml) — OpenAPI 3.0 spec

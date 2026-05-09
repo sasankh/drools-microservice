@@ -4,7 +4,7 @@ A high-performance business rule execution microservice built with Spring Boot a
 
 > ## 📚 Full documentation
 >
-> The full documentation lives in [`project-documentation/`](project-documentation/) — 38 docs covering architecture, APIs, security, deployment, operations, and rule authoring.
+> The full documentation lives in [`project-documentation/`](project-documentation/) — 39 docs covering architecture, APIs, security, deployment, operations, and rule authoring.
 >
 > **Start here**: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md) — the entry point with role-based reading paths.
 >
@@ -1133,5 +1133,5 @@ docker-compose exec app jstat -gc 1
 
 For support and questions:
 - Create an issue in this repository
-- Check the [project documentation](project-documentation/00-system-overview.md) — entry point for all 38 docs
+- Check the [project documentation](project-documentation/00-system-overview.md) — entry point for all 39 docs
 - Review the [troubleshooting guide](project-documentation/31-troubleshooting.md) and [FAQ](project-documentation/35-faq.md)
