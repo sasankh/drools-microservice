@@ -192,10 +192,11 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 - [34-java-setup-guide.md](34-java-setup-guide.md) — Java 25 install
 - [35-faq.md](35-faq.md) — 65+ Q&A
 
-### Advanced (36-38)
+### Advanced (36-39)
 - [36-architecture-decision-records.md](36-architecture-decision-records.md) — 12 ADRs + extension points
 - [37-glossary.md](37-glossary.md) — every term defined
 - [38-for-ai-agents.md](38-for-ai-agents.md) — verification rules and pitfalls for AI sessions working on this repo
+- [39-load-test-findings.md](39-load-test-findings.md) — measured numbers, architectural trade-offs, production-planning guidance from the 2026-05-10 load test (1,000 rules, mixed-workload soak)
 
 ### Reference assets
 - [api-reference/openapi.yml](api-reference/openapi.yml) — OpenAPI 3.0 spec
@@ -246,7 +247,7 @@ If you take only one thing from this overview:
 - **No Drools modern syntax** — rule units / OOPath / DataStream not used. See [ADR-001](36-architecture-decision-records.md#adr-001-traditional-drl-syntax-only-not-rule-units--oopath).
 - **No primary authentication** — `AdminAuthFilter` is defense in depth; primary auth is at API gateway.
 - **No Terraform / IaC** — reference architecture documented, not packaged. See [ADR-007](36-architecture-decision-records.md#adr-007-no-terraform-aws-deployment-documented-as-reference-only).
-- **No JMeter performance suite** — load testing deferred per project plan.
+- ~~**No JMeter performance suite** — load testing deferred per project plan.~~ Delivered 2026-05-10 — see [39-load-test-findings.md](39-load-test-findings.md) and `scripts/run-load-test.sh`.
 - **No SDK packages** — partners use HTTP directly. See [11-integration-guide.md](11-integration-guide.md) for code patterns.
 
 ---
