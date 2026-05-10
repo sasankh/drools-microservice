@@ -1,0 +1,26 @@
+package com.company.rules.pricing.bundle
+
+import java.util.Map
+import java.util.List
+
+// Accumulate pattern: aggregate over a derived collection (sum, count, average, etc).
+// Here we sum the price of each item in items and apply a 10% bundle discount when the
+// total exceeds 100. The threshold check is expressed as a constraint on the accumulator
+// result (Number with a doubleValue greater-than constraint) rather than via the literal
+// EVAL keyword which the project's DrlSanitizer blocks for security.
+rule "Bundle Discount via Accumulate"
+when
+    $data : Map(this["items"] != null)
+    $total : Number(doubleValue > 100.0)
+        from accumulate(
+            $i : Map() from ((List) $data.get("items")),
+            sum( ((Number) $i.get("price")).doubleValue() )
+        )
+then
+    double total = $total.doubleValue();
+    double discount = total * 0.10;
+    $data.put("bundleTotal", total);
+    $data.put("bundleDiscount", discount);
+    $data.put("bundleFinalAmount", total - discount);
+    $data.put("appliedRule", "bundle-accumulate");
+end

@@ -52,7 +52,7 @@ Tick each box (`[ ]` → `[x]`) as completed. Each phase has exit criteria the n
 - [ ] `sample-rules/inventory/warning/exists.drl` — `exists` pattern; trigger when any list element matches
 - [ ] `sample-rules/validation/cart/notempty.drl` — `not` pattern; reject when cart items list is missing/empty
 - [ ] `sample-rules/pricing/loyalty/salience.drl` — `salience` pattern; loyalty members get ≥15% as override
-- [ ] `sample-rules/validation/email/eval.drl` — `eval()` with regex check
+- [ ] `sample-rules/validation/email/compound.drl` — compound `and`/`or` LHS using `matches` regex operator (substituted from the originally-planned `eval()` after Phase 0 found DrlSanitizer.java:102 blocks `eval(`)
 - [ ] `sample-rules/seasonal/expiry/temporal.drl` — date comparison; promo code valid in date range
 - [ ] `sample-rules/validation/cart/forall.drl` — `forall` universal quantification; every cart item must satisfy a condition
 

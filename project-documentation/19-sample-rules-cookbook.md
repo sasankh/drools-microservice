@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Audience** | Rule authors, partners, AI agents |
-| **Purpose** | Live-tested catalog of all 10 sample rules with reproducible curl examples — the canonical way to learn what each rule does and how rules interact |
-| **Last verified against** | Running stack on 2026-05-08 (every example below was produced by a real `curl` against `http://localhost:8080/execute-rule`) |
+| **Purpose** | Live-tested catalog of all 17 sample rules with reproducible curl examples — the canonical way to learn what each rule does and how rules interact |
+| **Last verified against** | The original 10 rules were verified against the running stack on 2026-05-08; the 7 added on 2026-05-10 are verified by the `RuleExecutionIntegrationTest$SampleRulesExecution` integration tests (all 11 cases green). |
 | **Related docs** | [10-api-reference.md](10-api-reference.md), [16-drl-sandboxing.md](16-drl-sandboxing.md), [17-rule-development.md](17-rule-development.md), [18-rule-id-and-storage-layout.md](18-rule-id-and-storage-layout.md) |
 
 ---
@@ -39,20 +39,29 @@ All curl examples below assume the service is at `http://localhost:8080`. Replac
 
 ---
 
-## The 10 rules at a glance
+## The 17 rules at a glance
 
-| Rule ID | What it does | When it fires |
-|---|---|---|
-| [`pricing.discount.simple`](#pricingdiscountsimple) | 10% off | `amount >= 50` |
-| [`pricing.discount.vip`](#pricingdiscountvip) | 20% VIP discount | `customerType == "VIP"` |
-| [`pricing.discount.bulk`](#pricingdiscountbulk) | 15% bulk discount | `quantity >= 10` |
-| [`pricing.discount.first-time`](#pricingdiscountfirst-time) | 5% first-time customer discount | `isFirstTimeCustomer == true` |
-| [`pricing.shipping.standard`](#pricingshippingstandard) | Standard shipping cost | `shippingType == "standard"` |
-| [`pricing.shipping.express`](#pricingshippingexpress) | Express shipping cost (free over $100) | `shippingType == "express"` |
-| [`seasonal.holiday.discount`](#seasonalholidaydiscount) | 12% holiday season discount | `isHolidaySeason == true` |
-| [`seasonal.holiday.blackfriday`](#seasonalholidayblackfriday) | 25% Black Friday | `promotionCode == "BLACK2024"` and `amount >= 100` |
-| [`validation.customer.age`](#validationcustomerage) | Age-based eligibility + age group | `customerAge` set |
-| [`validation.customer.credit`](#validationcustomercredit) | Credit-tier approval | `creditScore` and `requestedAmount` set |
+The original 10 rules cover the most common business-logic shapes (numeric thresholds, string equality, boolean flags). The **7 rules added on 2026-05-10** demonstrate Drools-specific patterns previously missing from the cookbook (`accumulate`, `exists`, `not`, `salience`, compound `&&`/`||` LHS, date comparison via `java.time`, `forall`).
+
+| Rule ID | What it does | When it fires | Pattern |
+|---|---|---|---|
+| [`pricing.discount.simple`](#pricingdiscountsimple) | 10% off | `amount >= 50` | basic numeric threshold |
+| [`pricing.discount.vip`](#pricingdiscountvip) | 20% VIP discount | `customerType == "VIP"` | string equality |
+| [`pricing.discount.bulk`](#pricingdiscountbulk) | 15% bulk discount | `quantity >= 10` | int threshold |
+| [`pricing.discount.first-time`](#pricingdiscountfirst-time) | 5% first-time customer discount | `isFirstTimeCustomer == true` | boolean flag |
+| [`pricing.shipping.standard`](#pricingshippingstandard) | Standard shipping cost | `shippingType == "standard"` | tiered numeric |
+| [`pricing.shipping.express`](#pricingshippingexpress) | Express shipping cost (free over $100) | `shippingType == "express"` | conditional discount |
+| [`seasonal.holiday.discount`](#seasonalholidaydiscount) | 12% holiday season discount | `isHolidaySeason == true` | boolean flag |
+| [`seasonal.holiday.blackfriday`](#seasonalholidayblackfriday) | 25% Black Friday | `promotionCode == "BLACK2024"` and `amount >= 100` | promo code + threshold |
+| [`validation.customer.age`](#validationcustomerage) | Age-based eligibility + age group | `customerAge` set | comparison + categorization |
+| [`validation.customer.credit`](#validationcustomercredit) | Credit-tier approval | `creditScore` and `requestedAmount` set | multi-tier classification |
+| [`pricing.bundle.accumulate`](#pricingbundleaccumulate) | 10% bundle discount when summed item prices > $100 | `items: [...]` with prices summing > 100 | **`accumulate`** (sum aggregation) |
+| [`inventory.warning.exists`](#inventorywarningexists) | Low-stock warning if any item has stockLevel < 5 | `items: [...]` with at least one stockLevel < 5 | **`exists`** quantifier |
+| [`validation.cart.notempty`](#validationcartnotempty) | Reject when items is missing or empty | items missing OR empty list | **`not`** pattern |
+| [`pricing.loyalty.salience`](#pricingloyaltysalience) | 15% loyalty discount with priority firing | `loyaltyMember == true`, `amount` set | **`salience 100`** priority override |
+| [`validation.email.compound`](#validationemailcompound) | Validate email by customer-type rules | (internal + corp email) OR (external + any valid email) | **compound `&&`/`||`** + `matches` regex |
+| [`seasonal.expiry.temporal`](#seasonalexpirytemporal) | Promo ACTIVE/EXPIRED + days remaining/overdue | `currentDate` + `expiryDate` set (ISO-8601) | **date comparison** via `java.time` |
+| [`validation.cart.forall`](#validationcartforall) | All items in stock (universal quantification) | `items: [...]` with every item's stockLevel > 0 | **`forall`** universal quantification |
 
 Source files: [`sample-rules/`](../sample-rules/).
 
@@ -662,6 +671,271 @@ EOF
 ```
 
 Outputs are exactly as documented above. If any are different, see [31-troubleshooting.md](31-troubleshooting.md).
+
+---
+
+---
+
+# Phase 1 cookbook expansion (2026-05-10) — 7 advanced patterns
+
+The 7 rules below were added to expand the cookbook beyond simple field-equality / threshold patterns. Each demonstrates a distinct Drools construct previously not represented. All are verified by `RuleExecutionIntegrationTest$SampleRulesExecution`.
+
+---
+
+## `pricing.bundle.accumulate`
+
+**File**: [`sample-rules/pricing/bundle/accumulate.drl`](../sample-rules/pricing/bundle/accumulate.drl)
+**What it does**: Sums `price` across all items in `items[]`. If the total exceeds $100, applies a 10% bundle discount.
+**Inputs**: `items` (list of objects with a numeric `price` field).
+**Pattern demonstrated**: Drools' **`accumulate`** with a `sum(...)` accumulator function. The threshold check is expressed as a constraint on the accumulator result (`Number(doubleValue > 100.0)`) rather than via the `eval()` keyword (which is blocked by `DrlSanitizer`).
+
+### Example: bundle over threshold
+
+Request:
+```bash
+curl -sX POST http://localhost:8080/execute-rule \
+  -H 'Content-Type: application/json' \
+  -d '{"rule_id":"pricing.bundle.accumulate","data":{"items":[{"price":50},{"price":60}]}}' | jq
+```
+
+Response (selected fields):
+```json
+{
+  "result": {
+    "items": [{"price":50}, {"price":60}],
+    "bundleTotal": 110.0,
+    "bundleDiscount": 11.0,
+    "bundleFinalAmount": 99.0,
+    "appliedRule": "bundle-accumulate"
+  }
+}
+```
+
+### Example: bundle under threshold (rule does not fire)
+
+Request:
+```bash
+curl -sX POST http://localhost:8080/execute-rule \
+  -H 'Content-Type: application/json' \
+  -d '{"rule_id":"pricing.bundle.accumulate","data":{"items":[{"price":40}]}}' | jq
+```
+
+The accumulator's constraint `doubleValue > 100.0` fails, so the rule does not fire. Result is the input unchanged.
+
+---
+
+## `inventory.warning.exists`
+
+**File**: [`sample-rules/inventory/warning/exists.drl`](../sample-rules/inventory/warning/exists.drl)
+**What it does**: Sets a `lowStockWarning` flag if **any** item in `items[]` has `stockLevel < 5`.
+**Inputs**: `items` (list of objects with a numeric `stockLevel` field).
+**Pattern demonstrated**: **`exists`** quantifier. Without `exists`, the rule fires once per matching item (i.e. multiple times). With `exists`, it fires once regardless of how many items match.
+
+### Example: at least one low-stock item
+
+Request:
+```bash
+curl -sX POST http://localhost:8080/execute-rule \
+  -H 'Content-Type: application/json' \
+  -d '{"rule_id":"inventory.warning.exists","data":{"items":[{"stockLevel":10},{"stockLevel":3}]}}' | jq
+```
+
+Response (selected fields):
+```json
+{
+  "result": {
+    "lowStockWarning": true,
+    "warningType": "STOCK_LOW",
+    "validationMethod": "exists-pattern"
+  }
+}
+```
+
+---
+
+## `validation.cart.notempty`
+
+**File**: [`sample-rules/validation/cart/notempty.drl`](../sample-rules/validation/cart/notempty.drl)
+**What it does**: Rejects requests where the cart's `items` list is missing or empty.
+**Inputs**: an optional `items` (list).
+**Pattern demonstrated**: **`not`** — fires when a pattern is **absent** from working memory. The rule checks "no Map exists with `items != null` AND `items.size() > 0`" — equivalent to "the cart is empty/missing".
+
+### Example: empty items list
+
+Request:
+```bash
+curl -sX POST http://localhost:8080/execute-rule \
+  -H 'Content-Type: application/json' \
+  -d '{"rule_id":"validation.cart.notempty","data":{"items":[]}}' | jq
+```
+
+Response (selected fields):
+```json
+{
+  "result": {
+    "validationResult": "REJECTED",
+    "reason": "EMPTY_CART",
+    "validationMethod": "not-pattern"
+  }
+}
+```
+
+> **Note**: this works because the project inserts a single Map fact per request. `not Map(...)` checks for the absence of any Map matching the constraint; since `$data` is the only Map in working memory, the not-pattern fires iff `$data` itself does not satisfy the inner constraints.
+
+---
+
+## `pricing.loyalty.salience`
+
+**File**: [`sample-rules/pricing/loyalty/salience.drl`](../sample-rules/pricing/loyalty/salience.drl)
+**What it does**: 15% loyalty discount. Has `salience 100`, so when multiple rules match the same input, this rule fires **before** rules at the default salience (0).
+**Inputs**: `loyaltyMember` (boolean, must be `true`), `amount` (number).
+**Pattern demonstrated**: **`salience N`** — explicit firing-order priority. Higher salience fires first.
+
+### Example: loyalty member, amount over $50
+
+Request:
+```bash
+curl -sX POST http://localhost:8080/execute-rule \
+  -H 'Content-Type: application/json' \
+  -d '{"rule_id":"pricing.loyalty.salience","data":{"loyaltyMember":true,"amount":100}}' | jq
+```
+
+Response (selected fields, loyalty rule alone):
+```json
+{
+  "result": {
+    "amount": 85.0,
+    "loyaltyDiscount": 15.0,
+    "loyaltyApplied": true,
+    "discountReason": "Loyalty member - 15% off (salience 100)"
+  }
+}
+```
+
+> **Stacking note**: when this rule is loaded alongside `pricing.discount.simple`, both fire on the same input (amount > 50). With `salience 100`, loyalty fires **first** (`100 → 85`); then simple fires at salience 0 (`85 → 76.5`). Without the salience attribute, the firing order is undefined.
+
+---
+
+## `validation.email.compound`
+
+**File**: [`sample-rules/validation/email/compound.drl`](../sample-rules/validation/email/compound.drl)
+**What it does**: Validates an email differently based on customer type:
+- Internal customers must have an `@company.com` email.
+- External customers can have any string matching `.+@.+\..+` (basic well-formed pattern).
+
+**Inputs**: `email` (string), `customerType` (`"internal"` or `"external"`).
+**Pattern demonstrated**: **compound LHS** using `&&` / `||` operators inside a single `Map(...)` pattern, plus the **`matches`** regex operator.
+
+> **Important syntax note**: the Drools-keyword `and` / `or` operators combine **whole patterns** (e.g. `(Map(...) and Map(...))`); for compound logic **inside a single pattern's constraint list** you use the Java-style `&&` / `||` operators. Mixing these up causes parser errors. This rule was originally planned to use `eval()`, but the project's `DrlSanitizer` blocks the `eval` keyword for security; compound LHS gives equivalent expressive power within the security model.
+
+### Example: internal customer with corporate email
+
+Request:
+```bash
+curl -sX POST http://localhost:8080/execute-rule \
+  -H 'Content-Type: application/json' \
+  -d '{"rule_id":"validation.email.compound","data":{"email":"alice@company.com","customerType":"internal"}}' | jq
+```
+
+Response (selected fields):
+```json
+{
+  "result": {
+    "emailValidationResult": "VALID",
+    "validationMethod": "compound-lhs"
+  }
+}
+```
+
+### Example: external customer with any valid email
+
+Request:
+```bash
+curl -sX POST http://localhost:8080/execute-rule \
+  -H 'Content-Type: application/json' \
+  -d '{"rule_id":"validation.email.compound","data":{"email":"bob@gmail.com","customerType":"external"}}' | jq
+```
+
+Response: also VALID. The first branch fails (not internal); the second branch matches.
+
+---
+
+## `seasonal.expiry.temporal`
+
+**File**: [`sample-rules/seasonal/expiry/temporal.drl`](../sample-rules/seasonal/expiry/temporal.drl)
+**What it does**: Validates a promo's expiry. Returns `promoStatus: ACTIVE` with `daysRemaining`, or `promoStatus: EXPIRED` with `daysOverdue`.
+**Inputs**: `currentDate` (string, ISO-8601 `yyyy-MM-dd`), `expiryDate` (string, ISO-8601).
+**Pattern demonstrated**: **date comparison** using `java.time.LocalDate`. Drools' built-in temporal operators (`before`, `after`, `coincides`) target CEP-style `@role(event)` facts; for stateless one-shot rules over `Map<String,Object>` data, the canonical approach is to do the date math in the RHS using `java.time` (allowed by `DrlSanitizer`'s import allowlist).
+
+### Example: within expiry
+
+Request:
+```bash
+curl -sX POST http://localhost:8080/execute-rule \
+  -H 'Content-Type: application/json' \
+  -d '{"rule_id":"seasonal.expiry.temporal","data":{"currentDate":"2026-05-10","expiryDate":"2026-12-31"}}' | jq
+```
+
+Response (selected fields):
+```json
+{
+  "result": {
+    "promoValid": true,
+    "promoStatus": "ACTIVE",
+    "daysRemaining": 235
+  }
+}
+```
+
+### Example: expired
+
+Request:
+```bash
+curl -sX POST http://localhost:8080/execute-rule \
+  -H 'Content-Type: application/json' \
+  -d '{"rule_id":"seasonal.expiry.temporal","data":{"currentDate":"2026-05-10","expiryDate":"2026-01-01"}}' | jq
+```
+
+Response: `promoStatus: "EXPIRED"`, `daysOverdue: 129`.
+
+---
+
+## `validation.cart.forall`
+
+**File**: [`sample-rules/validation/cart/forall.drl`](../sample-rules/validation/cart/forall.drl)
+**What it does**: Sets `allItemsInStock: true` only when **every** item in `items[]` has `stockLevel > 0`.
+**Inputs**: `items` (list of objects with a numeric `stockLevel` field).
+**Pattern demonstrated**: **`forall`** universal quantification — fires when every fact matching the base pattern also matches the additional pattern. Functionally equivalent to `not(... NOT condition)` (see `validation.cart.notempty` for the not-form), but with an explicit universal-quantifier reading.
+
+### Example: all items in stock
+
+Request:
+```bash
+curl -sX POST http://localhost:8080/execute-rule \
+  -H 'Content-Type: application/json' \
+  -d '{"rule_id":"validation.cart.forall","data":{"items":[{"stockLevel":10},{"stockLevel":20}]}}' | jq
+```
+
+Response (selected fields):
+```json
+{
+  "result": {
+    "allItemsInStock": true,
+    "validationMethod": "forall"
+  }
+}
+```
+
+### Example: one item out of stock (rule does not fire)
+
+Request:
+```bash
+curl -sX POST http://localhost:8080/execute-rule \
+  -H 'Content-Type: application/json' \
+  -d '{"rule_id":"validation.cart.forall","data":{"items":[{"stockLevel":10},{"stockLevel":0}]}}' | jq
+```
+
+The forall is not satisfied (the second item violates `stockLevel > 0`), so `allItemsInStock` is not set. The input is returned unchanged except for the items list.
 
 ---
 

@@ -1,0 +1,32 @@
+package com.company.rules.seasonal.expiry
+
+import java.util.Map
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+
+// Temporal/date-comparison pattern: check whether a current date falls within (or before)
+// a configured expiry. Drools' built-in temporal operators (before/after/coincides) target
+// CEP-style event facts with @role(event) timestamps; for stateless one-shot rules over
+// Map data the canonical pattern is to do the date math in the RHS using java.time.
+// Inputs and outputs use ISO-8601 date strings (yyyy-MM-dd).
+rule "Promo Expiry Validation"
+when
+    $data : Map(this["currentDate"] != null,
+                this["expiryDate"] != null)
+then
+    LocalDate current =
+        LocalDate.parse((String) $data.get("currentDate"), DateTimeFormatter.ISO_LOCAL_DATE);
+    LocalDate expiry =
+        LocalDate.parse((String) $data.get("expiryDate"), DateTimeFormatter.ISO_LOCAL_DATE);
+    boolean valid = !current.isAfter(expiry);
+    $data.put("promoValid", valid);
+    if (valid) {
+        $data.put("promoStatus", "ACTIVE");
+        long daysRemaining = java.time.temporal.ChronoUnit.DAYS.between(current, expiry);
+        $data.put("daysRemaining", daysRemaining);
+    } else {
+        $data.put("promoStatus", "EXPIRED");
+        long daysOverdue = java.time.temporal.ChronoUnit.DAYS.between(expiry, current);
+        $data.put("daysOverdue", daysOverdue);
+    }
+end

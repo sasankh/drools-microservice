@@ -58,7 +58,7 @@ Seven new curated rules, each adding a Drools pattern not currently represented 
 | 2 | `inventory.warning.exists` | `exists` | trigger when any element of a list satisfies a condition |
 | 3 | `validation.cart.notempty` | `not` | fire when a pattern is **absent** (empty cart guard) |
 | 4 | `pricing.loyalty.salience` | `salience` | priority override — loyalty members always get ≥15% even if other rules also fire |
-| 5 | `validation.email.eval` | `eval()` | arbitrary boolean expression in LHS (regex match) |
+| 5 | `validation.email.compound` | compound `and`/`or` LHS | explicit `and` / `or` operators combining sub-conditions; uses `matches` regex operator. (Substituted from the originally-planned `eval()` pattern after Phase 0 caught that DrlSanitizer.java:102 blocks `eval(` for security.) |
 | 6 | `seasonal.expiry.temporal` | date comparison | promo code valid only within a date range |
 | 7 | `validation.cart.forall` | `forall` | universal quantification — every cart item must satisfy a condition (e.g. all in stock) |
 
@@ -226,7 +226,7 @@ Steady execute load (~half safe RPS), 1 hour. Background full refresh every 30s.
 - [`sample-rules/inventory/warning/exists.drl`](../../sample-rules/inventory/warning/exists.drl)
 - [`sample-rules/validation/cart/notempty.drl`](../../sample-rules/validation/cart/notempty.drl)
 - [`sample-rules/pricing/loyalty/salience.drl`](../../sample-rules/pricing/loyalty/salience.drl)
-- [`sample-rules/validation/email/eval.drl`](../../sample-rules/validation/email/eval.drl)
+- [`sample-rules/validation/email/compound.drl`](../../sample-rules/validation/email/compound.drl)
 - [`sample-rules/seasonal/expiry/temporal.drl`](../../sample-rules/seasonal/expiry/temporal.drl)
 - [`sample-rules/validation/cart/forall.drl`](../../sample-rules/validation/cart/forall.drl)
 
