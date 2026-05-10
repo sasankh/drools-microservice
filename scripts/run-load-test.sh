@@ -140,9 +140,40 @@ fi
 
 # ----------------------------------------------------------------------------
 # Run-scoped output directory + summary state
+#
+# Default: each invocation creates a fresh timestamped dir.
+# Exception: when running an individual phase >= 3, or --from >= 3, we continue
+# the most recent existing run dir (so rule-ids.csv from Phase 2, baseline_p99
+# from Phase 3, etc. survive across invocations).
 # ----------------------------------------------------------------------------
 RUN_TS="$(date -u +%Y-%m-%dT%H%M%SZ)"
 RUN_DIR="${SCRIPT_DIR}/load-test-results/${RUN_TS}"
+
+resume_threshold=3
+should_resume=false
+if [[ -n "${PHASE_FILTER}" && "${PHASE_FILTER}" -ge "${resume_threshold}" ]]; then
+  should_resume=true
+fi
+if [[ -n "${FROM_PHASE}" && "${FROM_PHASE}" -ge "${resume_threshold}" ]]; then
+  should_resume=true
+fi
+if $should_resume; then
+  # Find the most recent prior run dir that actually has rule-ids.csv (skips failed runs).
+  prior_run=""
+  for d in $(find "${SCRIPT_DIR}/load-test-results" -mindepth 1 -maxdepth 1 -type d \
+              -name '20*' 2>/dev/null | sort -r); do
+    if [[ -f "${d}/rule-ids.csv" ]]; then
+      prior_run="${d}"
+      break
+    fi
+  done
+  if [[ -n "${prior_run}" ]]; then
+    RUN_DIR="${prior_run}"
+    RUN_TS=$(basename "${prior_run}")
+    echo "==> Continuing prior run dir: ${RUN_DIR}"
+  fi
+fi
+
 mkdir -p "${RUN_DIR}"
 
 # rule-ids.csv (corpus) lives at RUN_DIR root for JMeter/loop scripts to share.
@@ -252,26 +283,32 @@ run_jmeter() {
   return 0
 }
 
-# Extracts P50/P95/P99/error-rate/count from a JTL file using awk.
+# Extracts P50/P95/P99/error-rate/count from a JTL file using perl.
 # Outputs a single CSV line: count,p50,p95,p99,err_pct
+# Uses perl rather than awk because macOS BSD awk lacks asort().
 analyze_jtl() {
   local jtl="$1"
-  awk -F',' '
-    NR == 1 { next }                       # skip header
-    {
-      total++
-      times[total] = $2 + 0                # elapsed ms is column 2
-      if ($8 != "true") errors++           # success column is 8
+  perl -e '
+    my @times; my $errors = 0; my $total = 0;
+    open(my $fh, "<", $ARGV[0]) or die "cannot open $ARGV[0]: $!";
+    <$fh>;                                  # skip header
+    while (my $line = <$fh>) {
+      chomp $line;
+      my @f = split /,/, $line;
+      next if @f < 7;
+      push @times, $f[1] + 0;               # elapsed ms is column 2 (index 1)
+      $errors++ if $f[6] ne "true";         # success column is 7 (index 6)
+      $total++;
     }
-    END {
-      if (total == 0) { print "0,0,0,0,0"; exit }
-      n = asort(times)
-      p50_idx = int(n * 0.50); if (p50_idx < 1) p50_idx = 1
-      p95_idx = int(n * 0.95); if (p95_idx < 1) p95_idx = 1
-      p99_idx = int(n * 0.99); if (p99_idx < 1) p99_idx = 1
-      err_pct = (errors + 0) * 100.0 / total
-      printf "%d,%d,%d,%d,%.3f\n", total, times[p50_idx], times[p95_idx], times[p99_idx], err_pct
-    }
+    close $fh;
+    if ($total == 0) { print "0,0,0,0,0\n"; exit; }
+    my @sorted = sort { $a <=> $b } @times;
+    my $i50 = int($total * 0.50); $i50 = 0 if $i50 >= $total;
+    my $i95 = int($total * 0.95); $i95 = $total - 1 if $i95 >= $total;
+    my $i99 = int($total * 0.99); $i99 = $total - 1 if $i99 >= $total;
+    printf "%d,%d,%d,%d,%.3f\n",
+      $total, $sorted[$i50], $sorted[$i95], $sorted[$i99],
+      $errors * 100.0 / $total;
   ' "${jtl}"
 }
 

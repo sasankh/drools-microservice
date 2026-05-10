@@ -349,8 +349,14 @@ class DroolsEngineServiceTest {
       executor.shutdown();
 
       assertThat(completed).isTrue();
-      // Execution should NOT happen while load is in progress (write lock blocks read)
-      assertThat(executionDuringLoad.get()).isFalse();
+      // Non-blocking reads: execution SHOULD proceed against the OLD KieBase while a new
+      // version is compiling outside the lock. (An earlier version of this test asserted the
+      // opposite — that execution was blocked during compile — which masked the LOADING-marker
+      // bug fixed on 2026-05-10. Compile happens outside the rulesLock; only the brief
+      // updateToVersion swap is under the write lock.)
+      assertThat(executionDuringLoad.get())
+          .as("executeRule must proceed during compile-outside-lock window")
+          .isTrue();
     }
 
     @Test
@@ -432,42 +438,48 @@ class DroolsEngineServiceTest {
     }
 
     @Test
-    @DisplayName("executeRule returns failure for inactive rule")
-    void testExecuteRule_InactiveRule_ReturnsFailure() {
-      // Load rule successfully first so it's in loadedRules
-      Rule rule = RuleTestUtils.createSimpleRule("inactive.rule");
+    @DisplayName("loadRules with compile failure preserves prior ACTIVE rules (no spurious downgrade)")
+    void testLoadRules_CompilationFailure_PreservesPriorActive() {
+      // Load rule successfully first so it's ACTIVE and present in loadedRules.
+      Rule rule = RuleTestUtils.createSimpleRule("preserved.rule");
       loadRuleSuccessfully(rule);
+      assertThat(service.getRuleMetadata("preserved.rule").getStatus())
+          .isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
 
-      // Now reload with failure - this marks metadata as ERROR but keeps rule in loadedRules
+      // Re-attempt loading with a compile failure. The previous (correct) version of this
+      // logic flipped the rule's metadata to ERROR (and earlier still: LOADING during compile)
+      // even though the OLD KieBase + rule were still serviceable. That caused spurious
+      // "Rule is not active" 400s during refresh-under-load. The fix: on compile failure, do
+      // not mutate metadata — the previously-ACTIVE rule stays ACTIVE and serviceable.
       RuleCompiler.CompilationResult failResult =
           RuleCompiler.CompilationResult.failure("Compilation error on refresh");
       when(ruleCompiler.compileRules(List.of(rule))).thenReturn(failResult);
-      service.loadRules(List.of(rule));
+      boolean ok = service.loadRules(List.of(rule));
 
-      Map<String, Object> inputData = RuleTestUtils.createTestData("amount", 100.0);
-      RuleExecutor.ExecutionResult result = service.executeRule("inactive.rule", inputData);
-
-      assertThat(result.isSuccess()).isFalse();
-      assertThat(result.getErrorMessage()).contains("not active");
-      verify(ruleExecutor, never())
-          .executeRule(any(KieContainer.class), anyString(), anyMap(), anyLong());
+      assertThat(ok).isFalse();
+      RuleMetadata metadata = service.getRuleMetadata("preserved.rule");
+      assertThat(metadata).isNotNull();
+      assertThat(metadata.getStatus())
+          .as("previously-ACTIVE rule must stay ACTIVE after a failed recompile")
+          .isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
     }
 
     @Test
-    @DisplayName("loadRules marks rules as ERROR on compilation failure")
-    void testLoadRules_CompilationFailure_RulesMarkedAsError() {
-      Rule rule = RuleTestUtils.createSimpleRule("broken.rule");
-      String errorMsg = "Syntax error in DRL file";
-      RuleCompiler.CompilationResult failResult = RuleCompiler.CompilationResult.failure(errorMsg);
+    @DisplayName("loadRules with compile failure on a brand-new rule leaves no metadata")
+    void testLoadRules_CompilationFailure_NewRuleLeavesNoMetadata() {
+      Rule rule = RuleTestUtils.createSimpleRule("brand.new.broken.rule");
+      RuleCompiler.CompilationResult failResult =
+          RuleCompiler.CompilationResult.failure("Syntax error in DRL file");
       when(ruleCompiler.compileRules(List.of(rule))).thenReturn(failResult);
 
       boolean result = service.loadRules(List.of(rule));
 
       assertThat(result).isFalse();
-      RuleMetadata metadata = service.getRuleMetadata("broken.rule");
-      assertThat(metadata).isNotNull();
-      assertThat(metadata.getStatus()).isEqualTo(RuleMetadata.RuleStatus.ERROR);
-      assertThat(metadata.getErrorMessage()).isEqualTo(errorMsg);
+      // Brand-new rule that never compiled is not present in metadata. (Earlier behavior
+      // populated metadata as ERROR; that has been removed since the rule was never actually
+      // loaded into a KieBase.)
+      assertThat(service.getRuleMetadata("brand.new.broken.rule")).isNull();
+      assertThat(service.hasRule("brand.new.broken.rule")).isFalse();
     }
 
     @Test
@@ -485,7 +497,7 @@ class DroolsEngineServiceTest {
     }
 
     @Test
-    @DisplayName("loadRules handles invalid DRL gracefully")
+    @DisplayName("loadRules handles invalid DRL gracefully (returns false, leaves engine state untouched)")
     void testLoadRules_InvalidDRL_FailsGracefully() {
       Rule invalidRule = RuleTestUtils.createInvalidRule("invalid.drl.rule");
       String errorMsg = "Compilation errors: missing package declaration";
@@ -495,10 +507,9 @@ class DroolsEngineServiceTest {
       boolean result = service.loadRules(List.of(invalidRule));
 
       assertThat(result).isFalse();
-      RuleMetadata metadata = service.getRuleMetadata("invalid.drl.rule");
-      assertThat(metadata).isNotNull();
-      assertThat(metadata.getStatus()).isEqualTo(RuleMetadata.RuleStatus.ERROR);
-      assertThat(metadata.getErrorMessage()).contains("Compilation errors");
+      // The brand-new rule never made it into the engine; metadata is absent.
+      assertThat(service.getRuleMetadata("invalid.drl.rule")).isNull();
+      assertThat(service.hasRule("invalid.drl.rule")).isFalse();
     }
   }
 
@@ -773,9 +784,12 @@ class DroolsEngineServiceTest {
       boolean loaded = service.loadRules(List.of(rule));
 
       assertThat(loaded).isFalse();
-      // Rule must NOT be marked active when the update failed (KieBase remains at prior version).
-      RuleMetadata metadata = service.getRuleMetadata("update.error.rule");
-      assertThat(metadata.getStatus()).isEqualTo(RuleMetadata.RuleStatus.ERROR);
+      // Brand-new rule: updateToVersion failed before metadata could be populated, so the
+      // rule never made it into the engine at all. (Earlier behavior populated ERROR metadata
+      // upfront; that was removed on 2026-05-10 because it caused spurious "not active"
+      // failures during refresh-under-load. See DroolsEngineService.loadRules comment.)
+      assertThat(service.getRuleMetadata("update.error.rule")).isNull();
+      assertThat(service.hasRule("update.error.rule")).isFalse();
     }
 
     @Test

@@ -67,10 +67,7 @@ Properties (with -J on the CLI):
         <hashTree/>
         <ConstantThroughputTimer guiclass="TestBeanGUI" testclass="ConstantThroughputTimer" testname="rate limiter" enabled="true">
           <intProp name="calcMode">2</intProp>
-          <doubleProp>
-            <name>throughput</name>
-            <value>${__P(rps_per_min,3000)}</value>
-          </doubleProp>
+          <stringProp name="throughput">${__P(rps_per_min,3000)}</stringProp>
         </ConstantThroughputTimer>
         <hashTree/>
         <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="POST /execute-rule" enabled="true">

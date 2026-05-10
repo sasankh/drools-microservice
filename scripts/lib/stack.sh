@@ -4,17 +4,23 @@
 
 stack::up() {
   local rebuild="${1:-yes}"
-  echo "==> Bringing stack up"
+  echo "==> Bringing stack up (with load-test override: rate-limit disabled)"
+  local override="scripts/docker-compose.loadtest.yml"
   if [[ "${rebuild}" == "yes" ]]; then
-    docker compose up -d --build > /dev/null
+    docker compose -f docker-compose.yml -f "${override}" up -d --build > /dev/null
   else
-    docker compose up -d > /dev/null
+    docker compose -f docker-compose.yml -f "${override}" up -d > /dev/null
   fi
 }
 
 stack::down() {
   echo "==> Tearing stack down (volumes removed)"
-  docker compose down -v > /dev/null 2>&1 || true
+  local override="scripts/docker-compose.loadtest.yml"
+  if [[ -f "${override}" ]]; then
+    docker compose -f docker-compose.yml -f "${override}" down -v > /dev/null 2>&1 || true
+  else
+    docker compose down -v > /dev/null 2>&1 || true
+  fi
 }
 
 # Polls /admin/health until either status==UP or timeout. Defaults to 90s timeout.

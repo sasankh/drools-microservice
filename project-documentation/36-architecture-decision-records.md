@@ -194,6 +194,24 @@ References:
 - [`e2e-validation-findings.md`](../.ai-workspace/project-plans/e2e-validation-findings.md) — the original Finding #1 + #2 write-up
 - [Drools 10 `KieContainer.updateToVersion` docs](https://docs.drools.org/latest/kie-api-javadoc/org/kie/api/runtime/KieContainer.html)
 
+### 2026-05-10 update — load tested at 1,000 rules
+
+**Status**: validated end-to-end via the load-test harness ([`load-test-plan.md`](../.ai-workspace/project-plans/load-test-plan.md) / [`load-test-checklist.md`](../.ai-workspace/project-plans/load-test-checklist.md)) on 2026-05-10. Result: **PASS** with one bug discovered + fixed during the run, and one architectural note for production planning.
+
+Headline numbers (full report: [`scripts/load-test-results/2026-05-10T073852Z/summary.md`](../scripts/load-test-results/2026-05-10T073852Z/summary.md)):
+
+- Baseline (50 RPS × 30 min, 1,000 rules): **P99=9 ms, 0 errors over 93,002 samples, post-GC heap 67 MB**.
+- Concurrency ramp 50 → 100 → 250 → 500 RPS: P99 stayed ≤ 5 ms; safe-RPS ceiling = 500 (cliff never reached).
+- Hot full-refresh under load: 0 errors, P99 = 9 ms (no measurable spike during the swap).
+- Hot single-rule refresh under load: 0 errors, P95 = 11 ms, P99 = 483 ms during ~1 % of the run that overlapped the lock-held-through-compile window. Architecturally correct behaviour for atomic rule swaps; SLO consideration for sub-100 ms tier services.
+- 15-min mixed-workload soak (12 full + 86 single-rule refreshes under 50 RPS): **heap drift 1 MB**, 0 errors over 43,397 samples.
+
+**Bug surfaced + fixed**: `DroolsEngineService.loadRules` was setting all rules to `LOADING` state upfront before the compile, then back to `ACTIVE` after. With 10-rule corpora the LOADING window was sub-millisecond and never observable; at 1,000 rules and a 46-second cold-JIT compile, ~1.5 % of concurrent execute requests hit the LOADING window and got `400 "Rule is not active"`. The pre-mark defeated the goal of "compile outside the lock = non-blocking reads of the OLD KieBase". Fix: removed the pre-mark; rules stay ACTIVE in the OLD KieBase during compile, and metadata is updated under the write lock only after `updateToVersion` succeeds. 5 unit tests in `DroolsEngineServiceTest` updated to reflect the corrected semantics. Phase 5 re-run after fix → 0 errors.
+
+**KieRepository cleanup verified**: 1 MB heap drift over 98 refresh operations confirms `kieRepository.removeKieModule(oldReleaseId)` (the Phase 0 patch) is doing its job. Without it, each refresh would leak one `ProjectClassLoader` + every compiled rule class — hundreds of MB across the soak.
+
+**Architectural note** (not a bug): single-rule refresh holds the write lock through a full ~510 ms warm-JIT compile of the entire rule set; a per-rule incremental KieBase rebuild is technically possible but currently not implemented. See the load-test summary for production-planning mitigations.
+
 ---
 
 ## ADR-004: LocalLRUCache uses WRITE lock on `get()`

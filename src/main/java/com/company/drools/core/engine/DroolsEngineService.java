@@ -148,25 +148,26 @@ public class DroolsEngineService {
   public boolean loadRules(List<Rule> rules) {
     log.info("Loading {} rules", rules.size());
 
-    // Mark all rules as loading (ConcurrentHashMap — no lock needed)
-    for (Rule rule : rules) {
-      ruleMetadata.put(rule.getRuleId(), RuleMetadata.createNew());
-    }
-
     // Compile rules OUTSIDE the write lock so reads are not blocked. The compiler registers a
     // new versioned KieModule in the KieRepository; we then call kieContainer.updateToVersion(...)
     // to swap the running KieBase to that module.
+    //
+    // Important: we do NOT pre-mark rules as LOADING. An earlier version reset every rule's
+    // metadata to LOADING upfront, which caused executeRule to return 400 "Rule is not active"
+    // for the entire compile window — defeating the goal of non-blocking reads of the OLD
+    // KieBase while a new one is being built. With 10-rule corpora the LOADING window was
+    // sub-millisecond and never observable; at 1k+ rules it's tens of seconds and surfaces a
+    // >1% error rate during refresh-under-load. Surfaced by the 2026-05-10 load test, Phase 5.
+    // The existing metadata stays ACTIVE for previously-loaded rules during compile, and is
+    // only updated under the write lock after updateToVersion succeeds, so the metadata-vs-
+    // KieBase swap is observable atomically by readers.
     RuleCompiler.CompilationResult compilationResult = ruleCompiler.compileRules(rules);
 
     if (!compilationResult.isSuccess()) {
       log.error("Failed to compile rules: {}", compilationResult.getErrorMessage());
-      for (Rule rule : rules) {
-        RuleMetadata current = ruleMetadata.get(rule.getRuleId());
-        if (current != null) {
-          ruleMetadata.put(
-              rule.getRuleId(), current.withError(compilationResult.getErrorMessage()));
-        }
-      }
+      // Compile failure: the previous KieBase + previous metadata remain in effect. Don't
+      // mutate metadata (we'd flip ACTIVE rules to ERROR even though they're still serviceable
+      // from the old KieBase). Caller observes the failure via the return value.
       return false;
     }
 
@@ -180,15 +181,8 @@ public class DroolsEngineService {
         log.error(
             "Failed to apply rule update: {}",
             updateResults.getMessages(Message.Level.ERROR));
-        // KieBase remains at the previous version — Drools guarantees no partial swap on error
-        for (Rule rule : rules) {
-          RuleMetadata current = ruleMetadata.get(rule.getRuleId());
-          if (current != null) {
-            ruleMetadata.put(
-                rule.getRuleId(),
-                current.withError(updateResults.getMessages(Message.Level.ERROR).toString()));
-          }
-        }
+        // KieBase remains at the previous version — Drools guarantees no partial swap on error.
+        // Same reasoning as compile-failure path above: don't mutate ACTIVE metadata.
         return false;
       }
 

@@ -23,7 +23,7 @@ corpus::_emit_simple() {
   local n="${1}" out_dir="${2}" csv="${3}"
   local rid="synth.simple.$(printf '%04d' "${n}")"
   local key="k_simple_${n}"
-  local fpath="${out_dir}/synthetic/simple/${rid}.drl"
+  local fpath="${out_dir}/synthetic/${rid//.//}.drl"
   mkdir -p "$(dirname "${fpath}")"
   cat > "${fpath}" <<EOF
 package com.company.rules.synthetic.simple
@@ -49,7 +49,7 @@ corpus::_emit_string() {
   local rid="synth.string.$(printf '%04d' "${n}")"
   local key="k_str_${n}"
   local val="S${n}"
-  local fpath="${out_dir}/synthetic/string/${rid}.drl"
+  local fpath="${out_dir}/synthetic/${rid//.//}.drl"
   mkdir -p "$(dirname "${fpath}")"
   cat > "${fpath}" <<EOF
 package com.company.rules.synthetic.string
@@ -72,7 +72,7 @@ corpus::_emit_int() {
   local n="${1}" out_dir="${2}" csv="${3}"
   local rid="synth.int.$(printf '%04d' "${n}")"
   local key="k_int_${n}"
-  local fpath="${out_dir}/synthetic/int/${rid}.drl"
+  local fpath="${out_dir}/synthetic/${rid//.//}.drl"
   mkdir -p "$(dirname "${fpath}")"
   cat > "${fpath}" <<EOF
 package com.company.rules.synthetic.intt
@@ -97,7 +97,7 @@ corpus::_emit_bool() {
   local n="${1}" out_dir="${2}" csv="${3}"
   local rid="synth.bool.$(printf '%04d' "${n}")"
   local key="k_bool_${n}"
-  local fpath="${out_dir}/synthetic/bool/${rid}.drl"
+  local fpath="${out_dir}/synthetic/${rid//.//}.drl"
   mkdir -p "$(dirname "${fpath}")"
   cat > "${fpath}" <<EOF
 package com.company.rules.synthetic.bool
@@ -128,7 +128,7 @@ corpus::_emit_multi() {
   local rid="synth.multi.$(printf '%04d' "${n}")"
   local k1="k_m1_${n}"
   local k2="k_m2_${n}"
-  local fpath="${out_dir}/synthetic/multi/${rid}.drl"
+  local fpath="${out_dir}/synthetic/${rid//.//}.drl"
   mkdir -p "$(dirname "${fpath}")"
   cat > "${fpath}" <<EOF
 package com.company.rules.synthetic.multi
@@ -155,7 +155,7 @@ corpus::_emit_accumulate() {
   local n="${1}" out_dir="${2}" csv="${3}"
   local rid="synth.acc.$(printf '%04d' "${n}")"
   local key="acc_items_${n}"
-  local fpath="${out_dir}/synthetic/acc/${rid}.drl"
+  local fpath="${out_dir}/synthetic/${rid//.//}.drl"
   mkdir -p "$(dirname "${fpath}")"
   cat > "${fpath}" <<EOF
 package com.company.rules.synthetic.acc
@@ -184,7 +184,7 @@ corpus::_emit_exists() {
   local n="${1}" out_dir="${2}" csv="${3}"
   local rid="synth.exists.$(printf '%04d' "${n}")"
   local key="exists_items_${n}"
-  local fpath="${out_dir}/synthetic/exists/${rid}.drl"
+  local fpath="${out_dir}/synthetic/${rid//.//}.drl"
   mkdir -p "$(dirname "${fpath}")"
   cat > "${fpath}" <<EOF
 package com.company.rules.synthetic.exists
@@ -209,7 +209,7 @@ corpus::_emit_notempty() {
   local n="${1}" out_dir="${2}" csv="${3}"
   local rid="synth.notempty.$(printf '%04d' "${n}")"
   local key="not_items_${n}"
-  local fpath="${out_dir}/synthetic/notempty/${rid}.drl"
+  local fpath="${out_dir}/synthetic/${rid//.//}.drl"
   mkdir -p "$(dirname "${fpath}")"
   cat > "${fpath}" <<EOF
 package com.company.rules.synthetic.notempty
@@ -235,7 +235,7 @@ corpus::_emit_salience() {
   local rid="synth.sal.$(printf '%04d' "${n}")"
   local kflag="sal_flag_${n}"
   local kamt="sal_amt_${n}"
-  local fpath="${out_dir}/synthetic/sal/${rid}.drl"
+  local fpath="${out_dir}/synthetic/${rid//.//}.drl"
   mkdir -p "$(dirname "${fpath}")"
   cat > "${fpath}" <<EOF
 package com.company.rules.synthetic.sal
@@ -262,7 +262,7 @@ corpus::_emit_compound() {
   local rid="synth.comp.$(printf '%04d' "${n}")"
   local kemail="comp_email_${n}"
   local ktype="comp_type_${n}"
-  local fpath="${out_dir}/synthetic/comp/${rid}.drl"
+  local fpath="${out_dir}/synthetic/${rid//.//}.drl"
   mkdir -p "$(dirname "${fpath}")"
   cat > "${fpath}" <<EOF
 package com.company.rules.synthetic.comp
@@ -291,7 +291,7 @@ corpus::_emit_temporal() {
   local rid="synth.tmp.$(printf '%04d' "${n}")"
   local kcur="tmp_current_${n}"
   local kexp="tmp_expiry_${n}"
-  local fpath="${out_dir}/synthetic/tmp/${rid}.drl"
+  local fpath="${out_dir}/synthetic/${rid//.//}.drl"
   mkdir -p "$(dirname "${fpath}")"
   cat > "${fpath}" <<EOF
 package com.company.rules.synthetic.tmp
@@ -321,7 +321,7 @@ corpus::_emit_forall() {
   local n="${1}" out_dir="${2}" csv="${3}"
   local rid="synth.fa.$(printf '%04d' "${n}")"
   local key="fa_items_${n}"
-  local fpath="${out_dir}/synthetic/fa/${rid}.drl"
+  local fpath="${out_dir}/synthetic/${rid//.//}.drl"
   mkdir -p "$(dirname "${fpath}")"
   cat > "${fpath}" <<EOF
 package com.company.rules.synthetic.fa
