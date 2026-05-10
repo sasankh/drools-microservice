@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Architects, security reviewers, operators, developers |
 | **Purpose** | Complete picture of how the service is defended in depth — eight layers, with code citations and threat-model rationale |
-| **Last verified against** | All `api/filter/`, `core/engine/DrlSanitizer.java`, `common/LogSanitizer.java`, `config/CorsConfig.java`, `config/S3Config.java` on 2026-05-08 |
+| **Last verified against** | All `api/filter/`, `core/engine/DrlSanitizer.java`, `common/LogSanitizer.java`, `config/CorsConfig.java`, `config/S3Config.java` on 2026-05-10 |
 | **Related docs** | [15-admin-authentication.md](15-admin-authentication.md), [16-drl-sandboxing.md](16-drl-sandboxing.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) |
 
 ---

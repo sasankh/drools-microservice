@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Operators, on-call engineers, developers debugging external-dependency failures |
 | **Purpose** | Complete behavior of the two Resilience4j circuit breakers (S3 and Redis) — how they trip, what they protect, what state transitions look like, how to recover |
-| **Last verified against** | [`CircuitBreakerConfig.java`](../src/main/java/com/company/drools/config/CircuitBreakerConfig.java), [`S3RuleStorage.java`](../src/main/java/com/company/drools/storage/S3RuleStorage.java), [`RedisRuleCache.java`](../src/main/java/com/company/drools/cache/RedisRuleCache.java) on 2026-05-08 |
+| **Last verified against** | [`CircuitBreakerConfig.java`](../src/main/java/com/company/drools/config/CircuitBreakerConfig.java), [`S3RuleStorage.java`](../src/main/java/com/company/drools/storage/S3RuleStorage.java), [`RedisRuleCache.java`](../src/main/java/com/company/drools/cache/RedisRuleCache.java) on 2026-05-10 |
 | **Related docs** | [09-environment-variables-reference.md](09-environment-variables-reference.md), [12-error-code-catalog.md](12-error-code-catalog.md), [26-performance-tuning-runbook.md](26-performance-tuning-runbook.md), [30-runbooks-and-monitoring.md](30-runbooks-and-monitoring.md) |
 
 ---
@@ -272,9 +272,9 @@ Available at `GET /actuator/metrics/resilience4j.circuitbreaker.calls?tag=name:s
 
 Every state transition is logged at INFO:
 ```
-2026-05-08 12:34:56.789 INFO  S3 Circuit breaker state transition: CLOSED -> OPEN
-2026-05-08 12:35:56.123 INFO  S3 Circuit breaker state transition: OPEN -> HALF_OPEN
-2026-05-08 12:35:56.456 INFO  S3 Circuit breaker state transition: HALF_OPEN -> CLOSED
+2026-05-10 12:34:56.789 INFO  S3 Circuit breaker state transition: CLOSED -> OPEN
+2026-05-10 12:35:56.123 INFO  S3 Circuit breaker state transition: OPEN -> HALF_OPEN
+2026-05-10 12:35:56.456 INFO  S3 Circuit breaker state transition: HALF_OPEN -> CLOSED
 ```
 
 Every fast-failure is logged at WARN:

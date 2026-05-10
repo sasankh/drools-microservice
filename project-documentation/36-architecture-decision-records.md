@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Architects, senior developers, future contributors trying to understand "why was this done this way?" |
 | **Purpose** | Capture the load-bearing design decisions and their rationale, so future changes don't re-litigate the same choices unaware |
-| **Last updated** | 2026-05-08 |
+| **Last updated** | 2026-05-10 (ADR-003 sign-off note appended after 1000-rule load test; ADR-013/014 cover the 2026-05-09 stack modernization) |
 | **Related docs** | All — ADRs reference specific implementation files |
 
 ---

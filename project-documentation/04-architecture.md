@@ -1,8 +1,8 @@
 # Drools Rule Engine Microservice - Architecture Documentation
 
 **Version**: 1.0.0
-**Last Updated**: 2026-02-19
-**Status**: Production-Ready Architecture
+**Last Updated**: 2026-05-10 (post-modernization, post-load-test)
+**Status**: Production-Ready Architecture (load tested at 1,000 rules — see [39-load-test-findings.md](39-load-test-findings.md))
 
 ---
 
@@ -286,28 +286,43 @@ public void refreshRules()
 **Memory Management Architecture** (Critical):
 
 ```java
-// OLD APPROACH (Memory Leak - FIXED):
-currentKieContainer = compilationResult.getKieContainer();
-// ❌ Old container never disposed, accumulates 10-100MB per refresh
+// CURRENT APPROACH (Drools 10 incremental update via updateToVersion + explicit cleanup):
+//
+// 1. RuleCompiler emits a versioned KieModule with a fresh ReleaseId, registered
+//    in the singleton KieRepository. Compilation runs OUTSIDE the rulesLock so
+//    reads against the OLD KieBase are not blocked.
+ReleaseId newReleaseId = ruleCompiler.compileRules(rules).getReleaseId();
 
-// NEW APPROACH (Memory Stable):
-KieContainer oldContainer = currentKieContainer;
-currentKieContainer = compilationResult.getKieContainer();
-
-if (oldContainer != null && oldContainer != currentKieContainer) {
-    oldContainer.dispose();  // ✅ Explicitly free memory
+// 2. Take the write lock, capture the prior ReleaseId, swap the running KieBase
+//    via Drools 10's incremental update. This is atomic; in-flight sessions keep
+//    the old definitions, new sessions see the new ones.
+ReleaseId oldReleaseId;
+rulesLock.writeLock().lock();
+try {
+    oldReleaseId = kieContainer.getReleaseId();
+    kieContainer.updateToVersion(newReleaseId);
+    // ... update loadedRules / ruleMetadata maps
+} finally {
+    rulesLock.writeLock().unlock();
 }
+
+// 3. Outside the write lock, evict the prior KieModule from KieRepository.
+//    Drools 10 does NOT auto-clean — without this, every refresh accumulates a
+//    KieModule + ProjectClassLoader + compiled rule classes until LRU caps evict.
+//    Verified by load test: 1 MB heap drift over 98 refreshes (see 39-load-test-findings.md).
+kieRepository.removeKieModule(oldReleaseId);
 ```
 
 **Why This Matters**:
-- Each KieContainer holds compiled rule bytecode (10-100MB)
-- Without disposal: Memory grows indefinitely → OOM (exit code 137)
-- With disposal: Memory remains stable indefinitely
+- Each `KieModule` retained in `KieRepository` holds a `ProjectClassLoader` + every compiled rule class (10–100 MB at scale).
+- Without explicit `removeKieModule`, refreshes accumulate compiled bytecode in the singleton repository → OOM under sustained hot reloads.
+- With explicit cleanup: heap stable across thousands of refreshes (load tested 2026-05-10).
+- The earlier "two-container atomic-swap with `oldContainer.dispose()`" pattern was superseded on 2026-05-10 — Drools 10's `updateToVersion` swaps the internal `KieBase` in place, and the explicit `dispose()` of an old container is no longer the right model. See [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal).
 
 **Thread Safety**:
 - Uses `ConcurrentHashMap` for thread-safe rule and metadata storage
-- Each execution creates new `KieSession` (stateless, thread-safe)
-- KieContainer updates are atomic with proper synchronization
+- Each execution creates a new `KieSession` (stateless, thread-safe)
+- `KieContainer.updateToVersion(ReleaseId)` is atomic; the brief swap window is held under `rulesLock.writeLock()` while the long compile happens outside the lock
 
 #### RuleCompiler
 
@@ -539,7 +554,9 @@ Request for Rule ID
 4. CORE SERVICE
    - DroolsEngineService.executeRule(ruleId, data)
    - Acquire READ lock; atomic loadedRules.get(ruleId) + null check (TOCTOU-safe)
-   - Retrieve currentKieContainer (atomic-swap reference)
+   - Verify metadata.status == ACTIVE
+   - Use the long-lived kieContainer (a single instance for the lifetime of the JVM,
+     updated in place via updateToVersion(ReleaseId) on refresh)
    - Release READ lock
         ↓
 5. RULE EXECUTION (RuleExecutor)
@@ -565,7 +582,7 @@ Request for Rule ID
    }
 ```
 
-**Note**: `RULE_COMPILATION` is **not** in the request path — rules are compiled once at startup and on `POST /admin/refresh-rules`, then held in `currentKieContainer`. Each request creates a new `KieSession` from the cached `KieBase`. See "Atomic-swap Rule Loading Pattern" below.
+**Note**: `RULE_COMPILATION` is **not** in the request path — rules are compiled once at startup and on `POST /admin/refresh-rules`, then held in the long-lived `kieContainer`. Each request creates a new `KieSession` from the current `KieBase`. See "Compile-outside-the-lock Rule Loading Pattern" below.
 
 ### Admin Flow - Rule Refresh
 
@@ -587,21 +604,19 @@ Request for Rule ID
    - Fetch all rule IDs from S3 bucket
         ↓
 5. RELOAD RULES
-   - For each ruleId:
-     - Fetch rule content from S3
-     - Compile to KieBase
-     - Cache compiled KieBase
-   - CRITICAL: Dispose old KieContainer
+   - Fetch all rule contents from S3
+   - RuleCompiler.compileRules(rules) builds a fresh versioned KieModule via
+     KieFileSystem + generateAndWritePomXML(releaseId) + KieBuilder.buildAll().
+     Auto-registered in the singleton KieRepository under the bumped ReleaseId.
         ↓
-6. MEMORY MANAGEMENT
-   KieContainer oldContainer = currentKieContainer;
-   currentKieContainer = newContainer;
-   oldContainer.dispose();  // Free memory!
+6. ATOMIC SWAP (under write lock)
+   ReleaseId oldReleaseId = kieContainer.getReleaseId();
+   Results r = kieContainer.updateToVersion(newReleaseId);  // Drools 10 in-place swap
+   // ... update loadedRules + ruleMetadata maps to ACTIVE
         ↓
-7. UPDATE METADATA
-   - Set status to ACTIVE
-   - Record loadedAt timestamp
-   - Reset error messages
+7. CLEANUP (outside the write lock)
+   kieRepository.removeKieModule(oldReleaseId);  // free prior compiled bytecode
+   // (Drools 10 does NOT auto-clean; without this, refreshes leak ProjectClassLoaders)
         ↓
 8. RESPONSE
    {
@@ -918,24 +933,31 @@ Request 1 (Thread 1)          Request 2 (Thread 2)
 4. **Concurrent Collections**: Thread-safe data structures for caches
 5. **Atomic Updates**: KieContainer replacement is atomic
 
-### Atomic-Swap Rule Loading Pattern
+### Compile-outside-the-lock Rule Loading Pattern (Drools 10 `updateToVersion`)
 
-A defining choice in this service: **rule compilation happens *outside* the write lock**, then a brief atomic swap installs the new container. Readers are never blocked during compilation, even though compilation can take seconds for many rules.
+A defining choice in this service: **rule compilation happens *outside* the write lock**, then a brief in-place swap via `KieContainer.updateToVersion(ReleaseId)` installs the new `KieBase`. Readers are not blocked during compilation, even though full-set compile can take ~50 s cold-JIT / ~1 s warm-JIT for 1,000 rules.
 
 ```
-                BEFORE (blocking):              AFTER (non-blocking):
-                ──────────────────              ───────────────────
-                writeLock.lock()                newContainer = compile(rules)
-                  ├── compile(rules)            writeLock.lock()
-                  ├── swap container              ├── oldContainer = current
-                  └── dispose old                 ├── current = newContainer
-                writeLock.unlock()                └── oldContainer.dispose()
-                                                writeLock.unlock()
-                Reads BLOCKED for                 Reads BLOCKED only for
-                full compile time.                ~microseconds (the swap).
+                BEFORE 2026-05-10 (atomic-swap):      AFTER 2026-05-10 (Drools 10 update):
+                ─────────────────────────────────     ────────────────────────────────────
+                newContainer = compile(rules)         newReleaseId = compile(rules)
+                writeLock.lock()                      writeLock.lock()
+                  ├── oldContainer = current            ├── oldReleaseId = container.getReleaseId()
+                  ├── current = newContainer            ├── container.updateToVersion(newReleaseId)
+                  └── oldContainer.dispose()            └── update loadedRules / metadata maps
+                writeLock.unlock()                    writeLock.unlock()
+                                                      kieRepository.removeKieModule(oldReleaseId)
+                Two-container window                  Single long-lived container.
+                during the swap.                      KieRepository cleanup is the
+                                                      explicit leak-stopper.
 ```
 
-Implementation: [DroolsEngineService.java:165-194](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java#L165-L194). Old `KieContainer.dispose()` is called inside the lock to prevent OOM on repeated reloads — this fixed a memory-leak incident on 2026-02-19.
+Two architectural fixes from the load test on 2026-05-10:
+
+1. **`KieRepository.removeKieModule(oldReleaseId)`** is called outside the write lock after a successful `updateToVersion`. Drools 10 does not auto-clean — without this, every refresh accumulates a `KieModule` + `ProjectClassLoader` + every compiled rule class until LRU caps evict (~1000 entries for our single-GA app). Verified leak-free under 98 refreshes during a 15-min soak.
+2. **No upfront LOADING-state pre-mark**. An earlier version set every rule's metadata to `LOADING` before the compile, then back to `ACTIVE` after. With 10-rule corpora the LOADING window was sub-millisecond and never observable; at 1,000 rules and a 46-second cold-JIT compile, ~1.5 % of concurrent execute requests hit the LOADING window and got `400 "Rule is not active"` — defeating the goal of non-blocking reads. Removed; rules stay ACTIVE in the OLD KieBase during compile, and metadata is updated under the write lock only after `updateToVersion` succeeds.
+
+Implementation: [`DroolsEngineService.loadRules`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java). See also [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal) and [39-load-test-findings.md](39-load-test-findings.md).
 
 ### TOCTOU-Safe Rule Lookup
 
@@ -948,7 +970,7 @@ RuleMetadata meta = ruleMetadata.get(ruleId);
 if (rule == null || !meta.isActive()) { ... } // null check, no race
 ```
 
-Even if a concurrent `loadRules()` swaps the container between the check and use, this code is safe because the local references (`rule`, `meta`) are pinned. The new container goes live only after the atomic swap completes.
+Even if a concurrent `loadRules()` triggers `updateToVersion` between the check and use, this code is safe: the long-lived `kieContainer` reference is stable, and the in-flight `KieSession` keeps its existing rule definitions until disposal. New sessions created after the swap see the new `KieBase`.
 
 ### Component Dependency Map
 

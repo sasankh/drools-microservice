@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Partners, developers, AI agents |
 | **Purpose** | Complete prose reference for every HTTP endpoint, with request/response shapes and live curl examples |
-| **Last verified against** | Controller files in [`src/main/java/com/company/drools/api/controller/`](../src/main/java/com/company/drools/api/controller/), [`api-reference/openapi.yml`](api-reference/openapi.yml) on 2026-05-08 |
+| **Last verified against** | Controller files in [`src/main/java/com/company/drools/api/controller/`](../src/main/java/com/company/drools/api/controller/), [`api-reference/openapi.yml`](api-reference/openapi.yml) on 2026-05-10 |
 | **Related docs** | [11-integration-guide.md](11-integration-guide.md), [12-error-code-catalog.md](12-error-code-catalog.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md), [15-admin-authentication.md](15-admin-authentication.md), [api-reference/openapi.yml](api-reference/openapi.yml) |
 
 ---
@@ -186,13 +186,13 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/health
 ```json
 {
   "status": "UP",
-  "timestamp": "2026-05-08T08:57:10.549046921Z",
+  "timestamp": "2026-05-10T08:57:10.549046921Z",
   "components": {
     "drools": {
       "status": "UP",
       "details": {
-        "loaded_rules": 10,
-        "active_rules": 10,
+        "loaded_rules": 17,
+        "active_rules": 17,
         "cache_hit_rate": 0.0
       }
     },
@@ -264,8 +264,8 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/info | jq
 {
   "application": "drools-rule-engine",
   "version": "1.0.0",
-  "java_version": "17.0.13",
-  "timestamp": "2026-05-08T08:57:10Z"
+  "java_version": "25.0.1",
+  "timestamp": "2026-05-10T08:57:10Z"
 }
 ```
 
@@ -281,15 +281,15 @@ Returns metadata for every rule currently in memory.
 curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/rules | jq
 ```
 
-**Response** (verified against running stack 2026-05-08):
+**Response** (verified against running stack 2026-05-10):
 ```json
 {
-  "total_rules": 10,
+  "total_rules": 17,
   "rules": [
     {
       "rule_id": "pricing.discount.simple",
       "status": "ACTIVE",
-      "loaded_at": "2026-05-08T11:58:40.752099511Z",
+      "loaded_at": "2026-05-10T11:58:40.752099511Z",
       "last_modified": null,
       "execution_count": 0,
       "avg_execution_time_ms": 0.0,
@@ -317,7 +317,7 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/rules | jq
 
 ### `POST /admin/refresh-rules` — Reload all rules
 
-Re-fetches all rules from storage, sandbox-scans them, recompiles, and atomically swaps the `KieContainer`. Existing `/execute-rule` traffic continues during compilation (atomic-swap pattern; see [04-architecture.md](04-architecture.md)).
+Re-fetches all rules from storage, sandbox-scans them, recompiles, and updates the long-lived `KieContainer` in place via Drools 10's `KieContainer.updateToVersion(ReleaseId)`. Existing `/execute-rule` traffic continues during compilation — the compile happens outside the write lock, and the lock is held only briefly for the version swap. See [04-architecture.md](04-architecture.md), [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal), and [39-load-test-findings.md](39-load-test-findings.md) for measured behavior at 1000 rules.
 
 ```bash
 curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/refresh-rules | jq
@@ -327,11 +327,11 @@ curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/re
 ```json
 {
   "status": "completed",
-  "rules_loaded": 10,
+  "rules_loaded": 17,
   "rules_failed": 0,
   "duration_ms": 1234,
   "errors": [],
-  "cache_updated_at": "2026-05-08T08:57:10Z"
+  "cache_updated_at": "2026-05-10T08:57:10Z"
 }
 ```
 
@@ -339,7 +339,7 @@ curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/re
 ```json
 {
   "status": "completed_with_errors",
-  "rules_loaded": 9,
+  "rules_loaded": 16,
   "rules_failed": 1,
   "errors": [
     {
@@ -352,7 +352,7 @@ curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/re
 
 **Response (full failure)**: HTTP 500 with `INTERNAL_ERROR` envelope.
 
-> When this returns, the new rule set is live for subsequent requests. In-flight requests continue with whatever container they captured (atomic-swap is non-blocking for readers).
+> When this returns, the new rule set is live for subsequent requests. In-flight requests use whichever `KieBase` was current when the `KieSession` was created — Drools 10's `updateToVersion` is non-blocking for in-flight sessions.
 
 **Source**: [`AdminController.java:368-414`](../src/main/java/com/company/drools/api/controller/AdminController.java#L368-L414).
 

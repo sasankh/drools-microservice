@@ -72,7 +72,7 @@ If answers come back accurate and cite the right docs, NotebookLM is ready for e
 |---|---:|---|
 | [17-rule-development.md](17-rule-development.md) | ~950 | Comprehensive rule-author guide |
 | [18-rule-id-and-storage-layout.md](18-rule-id-and-storage-layout.md) | ~420 | Rule ID format, S3 path mapping, path-traversal protection |
-| [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) | ~675 | All 10 sample rules with live-tested curl examples |
+| [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) | ~880 | All 17 sample rules with live-tested curl examples |
 | [20-rule-generation-prompt.md](20-rule-generation-prompt.md) | ~360 | AI prompt for rule generation (full version) |
 | [21-rule-generation-prompt-enhanced.md](21-rule-generation-prompt-enhanced.md) | ~390 | AI prompt with safety patterns |
 | [22-rule-generation-prompt-concise.md](22-rule-generation-prompt-concise.md) | ~180 | AI prompt (concise) |
@@ -91,7 +91,7 @@ If answers come back accurate and cite the right docs, NotebookLM is ready for e
 | File | Lines | Purpose |
 |---|---:|---|
 | [27-development-setup.md](27-development-setup.md) | ~385 | New-contributor onboarding + conventions |
-| [28-testing-guide.md](28-testing-guide.md) | ~460 | Test suite map (44 files, 589 tests, 96.2% coverage) |
+| [28-testing-guide.md](28-testing-guide.md) | ~460 | Test suite map (45 files, 598 tests, 96.2% coverage pre-modernization) |
 | [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md) | ~420 | Resilience4j wiring + state machine |
 
 ### Operations (30-31)
@@ -173,12 +173,13 @@ If the docs go more than 2 sprints without an audit, run a verification pass: sp
 
 ## Provenance
 
-This corpus was rebuilt 2026-05-08 from the prior 13-doc set, then refreshed 2026-05-09 for the stack modernization (Java 17→25, Spring Boot 3.2.5→3.5.3, Drools 8.44.0→10.2.0). The rebuilds:
+This corpus was rebuilt 2026-05-08 from the prior 13-doc set, then refreshed 2026-05-09 for the stack modernization (Java 17→25, Spring Boot 3.2.5→3.5.3, Drools 8.44.0→10.2.0), then refreshed again 2026-05-10 for the Drools 10 rule-loading rework (`KieContainer.updateToVersion` + `KieRepository.removeKieModule`), 7 new sample rules (cookbook 10→17), and the 1000-rule load test (new doc 39). The rebuilds:
 - Verified every claim against actual source code
 - Live-tested every curl example
 - Found and fixed 32+ doc-vs-code inconsistencies (cataloged in `.ai-workspace/documentations/CODE_FINDINGS.md`)
 - Extended coverage from ~65% of the 11-category framework to 100%
 - Closed deferred security finding #30 (outdated dependencies) via the 2026-05-09 modernization — see [ADR-013](36-architecture-decision-records.md) and [ADR-014](36-architecture-decision-records.md)
+- Load-tested the architecture at 1000 rules / 1-hour mixed-workload soak — see [39-load-test-findings.md](39-load-test-findings.md) and the 2026-05-10 update note appended to [ADR-003](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal)
 
 Tracking artifacts (in `.ai-workspace/documentations/`):
 - `SUMMARY.md` — high-level overview of the rebuild

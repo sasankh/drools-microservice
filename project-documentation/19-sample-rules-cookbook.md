@@ -648,7 +648,7 @@ Each approach has trade-offs. **Pick one and apply it consistently across your r
 
 ```bash
 #!/usr/bin/env bash
-# Run all 10 sample rules with sample inputs
+# Run a representative subset of the 17 sample rules with sample inputs (covers the original 10 — see the dedicated sections above for the 7 added 2026-05-10)
 
 while IFS='|' read -r rule_id label payload; do
   echo "=== $label ($rule_id) ==="

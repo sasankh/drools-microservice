@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | All readers, especially AI agents looking up unfamiliar terms |
 | **Purpose** | Definitions of every Drools term, project-specific concept, and infrastructure word used in this corpus |
-| **Last updated** | 2026-05-08 |
+| **Last updated** | 2026-05-10 |
 | **Related docs** | All — this is the lookup reference |
 
 ---
@@ -18,7 +18,7 @@ A stateless evaluation session. Created from a `KieBase`, used once for a single
 The compiled rule set. Immutable once compiled. Multiple `KieSession`s can be created from one `KieBase`. In this project, the `KieBase` is held by the `KieContainer`.
 
 ### `KieContainer`
-The top-level Drools container that holds compiled `KieBase` objects. **Memory-heavy** — holds compiled bytecode for all rules. The service replaces the `KieContainer` atomically on rule refresh and disposes the old one to prevent OOM (see ADR-003 in [36-architecture-decision-records.md](36-architecture-decision-records.md)).
+The top-level Drools container that holds compiled `KieBase` objects. **Memory-heavy** — holds compiled bytecode for all rules. Since the 2026-05-10 Drools 10 migration, the service holds a **single long-lived `KieContainer`** and updates it in place via `KieContainer.updateToVersion(ReleaseId)` on every rule refresh. The old versioned `KieModule` is explicitly removed from the `KieRepository` after the swap (Drools 10 does **not** auto-clean — verified by load test). See [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal).
 
 ### `KieBuilder`
 Drools API for compiling `.drl` text into a `KieContainer`. Invoked by [`RuleCompiler`](../src/main/java/com/company/drools/core/engine/RuleCompiler.java) after the `DrlSanitizer` has approved the content.
@@ -112,13 +112,13 @@ The set of restrictions enforced by `DrlSanitizer`. Specifically: import allowli
 The secret value that protects `/admin/*` endpoints when `ADMIN_API_KEY` env var is set. Sent via `X-Admin-API-Key` header. See [15-admin-authentication.md](15-admin-authentication.md).
 
 ### Sample rules
-The 10 `.drl` files in [`sample-rules/`](../sample-rules/). Used as both demonstration content and reference for rule format. See [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md).
+The 17 `.drl` files in [`sample-rules/`](../sample-rules/) (10 original + 7 added 2026-05-10 to cover `accumulate`, `exists`, `not`, `salience`, regex, temporal, and accumulate-with-collect patterns). Used as both demonstration content and reference for rule format. See [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md).
 
 ### LocalStack
 AWS service emulator. Used in dev for S3. Runs as a Docker container. `init-localstack.sh` populates the bucket with sample rules on container startup.
 
-### Atomic-swap (rule loading)
-The pattern where new `KieContainer` is compiled OUTSIDE the write lock, then atomically swapped INSIDE the lock. Old container is disposed inside the lock. Prevents reader blocking during compilation. See [04-architecture.md](04-architecture.md) and [DroolsEngineService.java:165-194](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java#L165-L194).
+### `updateToVersion` (rule loading) — formerly "atomic-swap"
+The current rule-load pattern (post-2026-05-10 Drools 10 migration). The rule set is compiled into a new versioned `KieModule` OUTSIDE the write lock; the lock is then briefly acquired to call `kieContainer.updateToVersion(newReleaseId)` (in-place version swap on the long-lived container); after release, the old `KieModule` is removed from the `KieRepository`. Prevents reader blocking during compilation. Replaces the earlier two-container atomic-swap-with-`dispose()` pattern. See [04-architecture.md](04-architecture.md) and [`DroolsEngineService.loadRules`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java).
 
 ### TOCTOU (Time-Of-Check-Time-Of-Use)
 A race condition where state checked at one moment differs at the moment of use. The service avoids this in rule lookup by doing a single atomic `loadedRules.get(ruleId)` + null check, instead of `containsKey` followed by `get`.
@@ -256,8 +256,8 @@ Returning an error immediately rather than blocking/timing out. Circuit breakers
 ### Backpressure
 Slowing down or rejecting incoming work when the system can't keep up. The thread pool's `CallerRunsPolicy` is a backpressure mechanism.
 
-### Atomic-swap
-Replacing one reference with another in a single non-interruptible operation. Used for `KieContainer` rotation during rule refresh.
+### Atomic-swap (deprecated term)
+Originally referred to replacing the entire `KieContainer` reference on rule refresh. **Superseded** by `KieContainer.updateToVersion(ReleaseId)` (Drools 10 in-place version swap) on 2026-05-10. The doc corpus uses both terms interchangeably for the locking guarantee (in-flight readers see a consistent `KieBase`); for the modern wiring see [04-architecture.md](04-architecture.md) and [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal).
 
 ### Stateless
 The service holds no per-request state across requests. Every replica handles every request identically. Enables horizontal scaling.

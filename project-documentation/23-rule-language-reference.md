@@ -1,8 +1,8 @@
-# Drools 8 Rule Language Reference (Upstream)
+# Drools Rule Language Reference (Upstream)
 
 > ## ⚠️ READ THIS BEFORE USING THIS DOCUMENT
 >
-> **This is the upstream Drools 8 reference.** It documents the complete DRL language including features that **this project does NOT use**.
+> **This is the upstream Drools reference (originally compiled from Drools 8 docs; the DRL syntax sections below remain accurate for Drools 10.2.0, which this project upgraded to on 2026-05-09 — see [ADR-014](36-architecture-decision-records.md#adr-014-drools-844--102-as-part-of-stack-modernization)).** It documents the complete DRL language including features that **this project does NOT use**.
 >
 > **What this project uses** (the *traditional* DRL subset):
 > - `package` declarations
@@ -23,10 +23,10 @@
 >
 > Sections describing those features are tagged **`[Not used in this project]`** as you scroll through. For project-specific patterns and verified examples, see:
 > - [17-rule-development.md](17-rule-development.md) — Project rule-authoring guide
-> - [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) — All 10 working sample rules
+> - [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) — All 17 working sample rules
 > - [16-drl-sandboxing.md](16-drl-sandboxing.md) — What the sandbox blocks
 >
-> The reference content below is preserved verbatim from the official Drools 8 docs as a comprehensive language overview. Read it for context; do not copy unused-feature syntax into project rules.
+> The reference content below is preserved verbatim from the official Drools 8 docs as a comprehensive language overview (Drools 10 keeps the same DRL syntax for the subset this project uses — `rule … when … then … end`, `Map()` patterns, traditional non-RuleUnit form). Read it for context; do not copy unused-feature syntax into project rules.
 
 ---
 

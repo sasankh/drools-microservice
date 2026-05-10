@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Future AI sessions (Claude Code, Codex, agents) working on this repo |
 | **Purpose** | Distill the verification rules and pitfalls learned during the 2026-05-08 documentation overhaul, so future agents don't re-make the same mistakes |
-| **Last verified against** | This conversation's overhaul findings + [`.ai-workspace/documentations/CODE_FINDINGS.md`](../.ai-workspace/documentations/CODE_FINDINGS.md) on 2026-05-08 |
+| **Last verified against** | This conversation's overhaul findings + [`.ai-workspace/documentations/CODE_FINDINGS.md`](../.ai-workspace/documentations/CODE_FINDINGS.md) on 2026-05-08 (refreshed 2026-05-10 for stack modernization + load test) |
 | **Related docs** | [00-system-overview.md](00-system-overview.md), [12-error-code-catalog.md](12-error-code-catalog.md), [36-architecture-decision-records.md](36-architecture-decision-records.md), [`../.ai-workspace/README.md`](../.ai-workspace/README.md) |
 
 ---
@@ -103,7 +103,7 @@ Output for `snap-memory` lands in [`../.ai-workspace/snap-memory/`](../.ai-works
 | [`.ai-workspace/documentations/CODE_FINDINGS.md`](../.ai-workspace/documentations/CODE_FINDINGS.md) | Catalog of code-vs-doc mismatches discovered during the overhaul (32+ items, all severity Low; doc-fixes applied, code-side recommendations logged) |
 | [`.ai-workspace/project-plans/security-backlog.md`](../.ai-workspace/project-plans/security-backlog.md) | The 3 unaddressed security findings from "39/42" — what they are, prod risk |
 | [`.ai-workspace/documentations/CHECKLIST.md`](../.ai-workspace/documentations/CHECKLIST.md) | Phase-by-phase rebuild log including the retroactive Phase 4+5 rigorous review (which caught the metric-name and count bugs above) |
-| [36-architecture-decision-records.md](36-architecture-decision-records.md) | 12 ADRs covering the non-obvious design choices (atomic-swap KieContainer, write-lock-on-get LRU, AdminAuthFilter instead of Spring Security, traditional DRL only) |
+| [36-architecture-decision-records.md](36-architecture-decision-records.md) | ADRs covering the non-obvious design choices (Drools 10 `KieContainer.updateToVersion` rule loading — see ADR-003 with 2026-05-10 update, write-lock-on-get LRU, AdminAuthFilter instead of Spring Security, traditional DRL only, Drools 10 + Java 25 modernization) |
 
 ---
 

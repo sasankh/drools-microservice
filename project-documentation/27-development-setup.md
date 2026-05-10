@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | New contributors, engineers extending the service |
 | **Purpose** | Clone-to-running-tests in under 30 minutes. Plus the conventions and patterns this codebase follows so contributions are consistent. |
-| **Last verified against** | [`pom.xml`](../pom.xml), [`Dockerfile`](../Dockerfile), [`setup-dev-environment.sh`](../setup-dev-environment.sh) on 2026-05-08 |
+| **Last verified against** | [`pom.xml`](../pom.xml), [`Dockerfile`](../Dockerfile), [`setup-dev-environment.sh`](../setup-dev-environment.sh) on 2026-05-10 |
 | **Related docs** | [03-tech-stack.md](03-tech-stack.md), [28-testing-guide.md](28-testing-guide.md), [32-getting-started.md](32-getting-started.md), [34-java-setup-guide.md](34-java-setup-guide.md) |
 
 ---
@@ -67,7 +67,7 @@ The `set-java-env.sh` is macOS-specific (uses `/usr/libexec/java_home`). Linux u
 ```bash
 mvn clean compile         # compile only
 # OR
-mvn clean package         # compile + run all 589 tests + package jar
+mvn clean package         # compile + run all 598 tests + package jar
 # OR
 mvn clean package -DskipTests   # if you want to skip tests
 ```

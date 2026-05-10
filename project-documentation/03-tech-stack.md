@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, architects |
 | **Purpose** | Every technology used, with version, purpose, and rationale. The single source of truth for "what version of X are we on?" |
-| **Last verified against** | [pom.xml](../pom.xml), [Dockerfile](../Dockerfile) on 2026-05-08 |
+| **Last verified against** | [pom.xml](../pom.xml), [Dockerfile](../Dockerfile) on 2026-05-10 |
 | **Related docs** | [02-project-structure.md](02-project-structure.md), [27-development-setup.md](27-development-setup.md), [36-architecture-decision-records.md](36-architecture-decision-records.md) |
 
 ---
