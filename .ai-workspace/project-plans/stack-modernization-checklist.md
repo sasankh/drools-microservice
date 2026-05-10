@@ -323,3 +323,51 @@ All phases complete. Implementation log + deviations from plan are at the bottom
 - [`stack-modernization-plan.md`](stack-modernization-plan.md) — full plan
 - [`security-backlog.md`](security-backlog.md) — security findings; #30 now closed
 - [`project-improvement-plan.md`](project-improvement-plan.md) — original 2026-02 sprint plan with 2026-05-08 + 2026-05-09 deltas
+- [`e2e-validation-plan.md`](e2e-validation-plan.md) + [`e2e-validation-checklist.md`](e2e-validation-checklist.md) — Phase 8 (full docker-compose end-to-end validation)
+
+---
+
+## Phase 8 — Full docker-compose end-to-end validation ✅ (2026-05-09 → 2026-05-10)
+
+**Why this phase exists**: Phases 1–7 were verified against the standalone Docker container running `RULE_SOURCE=memory` (built-in `InMemoryRuleStorage` with 2 rules). The full docker-compose stack (app + LocalStack + Redis) loading the 10 actual sample DRL files from S3 was NOT tested. Phase 8 closes that gap.
+
+### Result
+
+**PASS** with 2 documented findings (both pre-existing, not Drools 10 regressions). Full per-phase results in [`e2e-validation-checklist.md`](e2e-validation-checklist.md).
+
+### Headline numbers
+- 3/3 docker-compose services healthy (app + localstack + redis)
+- 10/10 sample rules loaded from LocalStack S3
+- 10/10 sample rules execute and produce cookbook-matching outputs (with rule-stacking accounted for)
+- 0 DRL files needed editing — all 10 work unchanged on Drools 10.2.0
+- 0 application config changes required
+- KieContainer atomic-swap disposal confirmed working under Drools 10 (post-GC heap *below* pre-test baseline after 10 refreshes)
+- 7/7 security headers present
+- Only ERROR in logs is the Finding #2 malformed-JSON case from edge-case testing
+
+### Findings raised (added to backlog)
+
+1. **Single-rule refresh (`POST /admin/refresh-rules/{id}`) replaces the entire KieContainer** — pre-existing, silently degrades all other rules until a full refresh runs. Severity: medium. Suggested fix: merge single rule into a copy of existing KieBase before swap, or deprecate the endpoint.
+2. **Malformed JSON returns 500 INTERNAL_ERROR instead of 400** — `GlobalExceptionHandler` lacks an `@ExceptionHandler(HttpMessageNotReadableException.class)`. Severity: low. Suggested fix: add the handler returning 400 INVALID_INPUT.
+
+Both findings are appended to the project backlog and will be addressed in a follow-up pass; neither blocks the modernization sign-off.
+
+### What this validates
+
+- Spring Boot 3.5.3 boots cleanly in the docker profile with all configuration unchanged
+- AWS SDK 2.34.0 talks to LocalStack S3 without API or BOM-managed transitive regressions
+- Spring Data Redis / Lettuce (Spring Boot 3.5 line) caches and circuit-breakers correctly
+- Drools 10.2.0 executable model compiles and fires all 10 production-shaped DRL files (including the wrapper-coercion-safe `((Number)...).doubleValue()` pattern they already use)
+- The atomic-swap KieContainer pattern (ADR-003) preserved across the 8→10 migration is leak-free under Drools 10 + S3 + Redis
+- All 7 security headers (and the security headers filter) still apply on every response on the new stack
+
+### Working notes log additions
+
+- **2026-05-09 ~21:30** — Phase 8 kicked off. `docker-compose` subcommand absent on this host; switched to `docker compose`.
+- **2026-05-09 ~21:35** — Stack healthy in <30 s.
+- **2026-05-09 ~21:40** — init-localstack.sh + test-localstack.sh both green; 10 rules in LocalStack S3.
+- **2026-05-09 ~21:50** — All 10 rules tested via S3 path; outputs match cookbook (after correcting test inputs to use the actual field names referenced in each .drl's `Map(this[...])` constraints, and recovering from a stale single-rule refresh — Finding #1 surfaced here).
+- **2026-05-10 ~00:53** — Phase D edge cases. 3/5 expected; 2 findings captured.
+- **2026-05-10 ~00:54** — Memory test: 78 → 161 MB raw growth across 10 refreshes; GC reclaimed to 41 MB (below pre-test baseline). KieContainer disposal confirmed.
+- **2026-05-10 ~00:55** — Logs clean (only the Finding #2 ERROR), all 7 security headers present.
+- **2026-05-10 ~00:57** — Cleanup (`docker compose down -v`) + doc updates (this section, full-docker-test-plan.md, ADR-014).

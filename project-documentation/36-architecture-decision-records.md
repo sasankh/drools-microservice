@@ -628,6 +628,7 @@ No application Java code changes required.
 - All 584 non-Docker tests pass on Java 25 + Drools 10.2.0 + Spring Boot 3.5.3.
 - All 10 sample rules produce identical outputs to pre-migration (verified via `RuleExecutionIntegrationTest$SampleRulesExecution`).
 - KieContainer disposal still functions; memory leak fix from prior Phase 6 still applies.
+- **Validated end-to-end on 2026-05-09 / 2026-05-10** against the full docker-compose stack (app + LocalStack + Redis) using all 10 production-shaped sample DRL files loaded from S3. Result: **PASS** with 0 DRL changes and 0 application config changes required. KieContainer atomic-swap disposal confirmed leak-free (post-GC heap below pre-test baseline after 10 successive full refreshes). 2 pre-existing findings (single-rule refresh KieContainer-replacement bug; malformed JSON returns 500 instead of 400) raised to backlog — neither is a Drools 10 regression. Full results: [`.ai-workspace/project-plans/e2e-validation-checklist.md`](../.ai-workspace/project-plans/e2e-validation-checklist.md).
 
 ### When to revisit
 
