@@ -295,4 +295,15 @@ class RuleExecutionControllerTest {
       handlerLogger.detachAppender(handlerAppender);
     }
   }
+
+  // --- Malformed JSON (Finding #2) ---
+
+  @Test
+  void testExecuteRule_MalformedJson_Returns400InvalidInput() throws Exception {
+    mockMvc
+        .perform(post("/execute-rule").contentType(MediaType.APPLICATION_JSON).content("{"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error.code").value("INVALID_INPUT"))
+        .andExpect(jsonPath("$.error.message").value("Request body is not valid JSON"));
+  }
 }

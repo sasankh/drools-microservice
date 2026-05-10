@@ -160,9 +160,39 @@ try {
 - **Negative**: there's a brief window (microseconds) during the swap where some readers see the old container and others see the new. Readers that captured `currentKieContainer` before the swap continue with the old container; their KieSession is created from the old KieBase. After the swap completes, all new lookups see the new container. **This is actually fine** — both old and new containers are valid KieContainers; the request just uses whichever was current when it started.
 
 ### References
-- [`DroolsEngineService.java:165-194`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java#L165-L194) — implementation
+- [`DroolsEngineService.java`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java) — implementation (now uses `updateToVersion`; see 2026-05-10 update below)
 - [04-architecture.md](04-architecture.md) — "Atomic-Swap Rule Loading Pattern" section
 - [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md) — verification load tests
+
+### 2026-05-10 update — superseded by `KieContainer.updateToVersion(ReleaseId)`
+
+The two-container atomic-swap with explicit `dispose()` documented above is **replaced** by Drools 10's canonical `KieContainer.updateToVersion(ReleaseId)` pattern. The change was driven by [`fix-findings-plan.md`](../.ai-workspace/project-plans/fix-findings-plan.md) (Finding #1 — single-rule refresh wiping out other rules). The fix had to give the engine a "merge one rule into the current set" primitive; the cleanest path was to switch the whole refresh pipeline to the canonical Drools 10 idiom rather than maintain two parallel architectures.
+
+What changed:
+- `RuleCompiler` now emits each compiled rule set as a versioned `KieModule` with a synthetic `ReleaseId` (`com.company.drools:rules-runtime:1.0.<n>`) registered in the `KieRepository`.
+- `DroolsEngineService` holds **one long-lived `KieContainer`** for the lifetime of the JVM; refresh calls `kieContainer.updateToVersion(newReleaseId)`. Drools handles the internal KieBase swap.
+- The explicit `oldContainer.dispose()` block was removed — there is no "old container" to dispose. Drools releases the previous internal KieBase as part of `updateToVersion`.
+
+What is preserved:
+- **No leak.** Verified by re-running the 10-refresh heap-stability check on 2026-05-10 with the new pattern: pre-test 118 MB → after 10 refreshes 215 MB → post-GC 47 MB. Post-GC heap is below the pre-test baseline, matching the original ADR-003 leak-free claim.
+- **Compile outside the lock**, then take the write lock only for the swap. Latency profile for concurrent readers is unchanged.
+- The **3000-refresh load test rationale** still holds. The new pattern has, if anything, lower memory churn because there is no double-container window during the swap.
+
+What is new (and why):
+- A new method `loadOrReplaceRule(Rule)` is the merge primitive used by `POST /admin/refresh-rules/{id}`. It snapshots `loadedRules`, swaps in the new rule, and re-runs `loadRules(combined)`. The whole sequence runs under the write lock (reentrant) so concurrent merges cannot lose each other's updates.
+- `loadRules(List<Rule>)` is now strictly **replacement** semantics — the new rule set is authoritative. Previous code was accidentally additive on the in-memory map; the bug surfaced as Finding #1 (caller passes 1 rule, KieContainer rebuild loses the other 9, but `loadedRules` map kept stale entries from prior calls).
+- Initial `KieContainer` (`DroolsConfig.kieContainer`) now uses the matching `groupId:artifactId` (`com.company.drools:rules-runtime:1.0.0`). Required so `updateToVersion` can resolve newly-built modules from the `KieRepository`.
+
+What is unchanged in the codebase:
+- ADR-001 (single-KieBase architecture).
+- One stateless `KieSession` per execute-rule call.
+- The 7 security headers, the rate-limiting filter chain, the observability hooks.
+- `KieScanner` still rejected — same reason as 2026-02-19.
+
+References:
+- [`fix-findings-plan.md`](../.ai-workspace/project-plans/fix-findings-plan.md) + [`fix-findings-checklist.md`](../.ai-workspace/project-plans/fix-findings-checklist.md) — the fix plan/checklist
+- [`e2e-validation-findings.md`](../.ai-workspace/project-plans/e2e-validation-findings.md) — the original Finding #1 + #2 write-up
+- [Drools 10 `KieContainer.updateToVersion` docs](https://docs.drools.org/latest/kie-api-javadoc/org/kie/api/runtime/KieContainer.html)
 
 ---
 

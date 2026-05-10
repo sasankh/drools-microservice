@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -102,6 +103,30 @@ public class GlobalExceptionHandler {
 
     RuleExecutionResponse response =
         RuleExecutionResponse.failure(null, "INVALID_INPUT", "Invalid request parameter");
+
+    return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+  }
+
+  /**
+   * Map malformed-JSON request bodies to 400 INVALID_INPUT instead of letting them fall through
+   * to the generic 500 catch-all. {@link HttpMessageNotReadableException} wraps Jackson parse
+   * failures (JsonParseException, JsonMappingException, MismatchedInputException, etc.), so a
+   * single handler covers all read-side JSON errors. The raw parser message is logged but never
+   * echoed to the client — it can leak fragments of the input.
+   */
+  @ExceptionHandler(HttpMessageNotReadableException.class)
+  public ResponseEntity<RuleExecutionResponse> handleMalformedJson(
+      HttpMessageNotReadableException ex) {
+    Throwable cause = ex.getMostSpecificCause();
+    String causeMessage = cause != null ? cause.getMessage() : ex.getMessage();
+    log.warn("Malformed JSON in request body: {}", LogSanitizer.sanitizeMessage(causeMessage));
+
+    RuleExecutionResponse response =
+        RuleExecutionResponse.failure(
+            null,
+            "INVALID_INPUT",
+            "Request body is not valid JSON",
+            "Verify the request body is well-formed JSON matching the documented schema");
 
     return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
   }

@@ -7,9 +7,12 @@ import java.lang.reflect.Method;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import com.fasterxml.jackson.core.JsonParseException;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.mock.http.MockHttpInputMessage;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -70,6 +73,24 @@ class GlobalExceptionHandlerTest {
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
     assertThat(response.getBody().getError().getCode()).isEqualTo("SERVICE_UNAVAILABLE");
     assertThat(response.getBody().getError().getMessage()).contains("s3");
+  }
+
+  @Test
+  @DisplayName("handles malformed JSON with 400 INVALID_INPUT (Finding #2)")
+  void testHandleMalformedJson() {
+    JsonParseException cause =
+        new JsonParseException(null, "Unexpected end-of-input: expected close marker for Object");
+    HttpMessageNotReadableException ex =
+        new HttpMessageNotReadableException(
+            "JSON parse error", cause, new MockHttpInputMessage(new byte[0]));
+
+    ResponseEntity<RuleExecutionResponse> response = handler.handleMalformedJson(ex);
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    assertThat(response.getBody().getError().getCode()).isEqualTo("INVALID_INPUT");
+    assertThat(response.getBody().getError().getMessage()).isEqualTo("Request body is not valid JSON");
+    // Raw parser cause must NOT be echoed to client.
+    assertThat(response.getBody().getError().getDetails()).doesNotContain("Unexpected end-of-input");
   }
 
   @Test

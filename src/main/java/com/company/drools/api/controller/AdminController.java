@@ -442,8 +442,11 @@ public class AdminController {
       // Remove from cache
       ruleCache.remove(ruleId);
 
-      // Reload rule into engine
-      boolean success = droolsEngineService.loadRules(List.of(rule));
+      // Reload rule into engine. loadOrReplaceRule merges the new rule into the current loaded
+      // set before recompiling, so other rules continue to fire after a single-rule refresh.
+      // (Previously this called loadRules(List.of(rule)) which silently replaced the entire
+      // KieContainer with a single-rule one — see e2e-validation-findings.md Finding #1.)
+      boolean success = droolsEngineService.loadOrReplaceRule(rule);
 
       if (success) {
         // Add back to cache

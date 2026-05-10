@@ -111,10 +111,16 @@ class RuleExecutionIntegrationTest {
   }
 
   private KieContainer createEmptyKieContainer() {
+    // Must use the same groupId/artifactId that RuleCompiler emits, so updateToVersion(...)
+    // can resolve newly-built modules from the KieRepository.
+    var releaseId =
+        kieServices.newReleaseId(
+            RuleCompiler.GROUP_ID, RuleCompiler.ARTIFACT_ID, RuleCompiler.INITIAL_VERSION);
     var kfs = kieServices.newKieFileSystem();
+    kfs.generateAndWritePomXML(releaseId);
     var kb = kieServices.newKieBuilder(kfs);
     kb.buildAll();
-    return kieServices.newKieContainer(kb.getKieModule().getReleaseId());
+    return kieServices.newKieContainer(releaseId);
   }
 
   private Rule loadSampleRule(String ruleId) throws IOException {

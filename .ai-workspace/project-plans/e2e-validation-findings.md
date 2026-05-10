@@ -1,7 +1,7 @@
 # E2E Validation Findings — Fix Plan
 
 **Source**: surfaced during the [e2e-validation-checklist.md](e2e-validation-checklist.md) run on 2026-05-09 / 2026-05-10
-**Status**: filed for backlog; neither blocks the 2026-05-09 stack modernization sign-off
+**Status**: ✅ **Both fixed on 2026-05-10**. See [`fix-findings-plan.md`](fix-findings-plan.md) + [`fix-findings-checklist.md`](fix-findings-checklist.md) for the implementation. Finding #1 was fixed via Option B (Drools 10 `KieContainer.updateToVersion(ReleaseId)`); Finding #2 was fixed by adding the `HttpMessageNotReadableException` handler. ADR-003 updated with the new architecture's supersession note.
 **Both findings are pre-existing**, not Drools 10 / Spring Boot 3.5 / Java 25 regressions
 
 ---

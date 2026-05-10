@@ -6,10 +6,15 @@ import com.company.drools.core.model.RuleMetadata;
 import com.company.drools.storage.RuleStorage;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import org.kie.api.builder.Message;
+import org.kie.api.builder.Results;
 import org.kie.api.runtime.KieContainer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,8 +37,9 @@ public class DroolsEngineService {
   private final Map<String, Rule> loadedRules = new ConcurrentHashMap<>();
   private final Map<String, RuleMetadata> ruleMetadata = new ConcurrentHashMap<>();
 
-  // Current KieContainer with compiled rules
-  private volatile KieContainer currentKieContainer;
+  // Long-lived KieContainer. Updated in place via KieContainer.updateToVersion(ReleaseId) — no
+  // explicit dispose() / two-container swap. See ADR-003 (2026-05-10 supersession note).
+  private final KieContainer kieContainer;
 
   // Lock for managing rule updates
   private final ReentrantReadWriteLock rulesLock = new ReentrantReadWriteLock();
@@ -47,7 +53,7 @@ public class DroolsEngineService {
       MeterRegistry meterRegistry) {
     this.ruleCompiler = ruleCompiler;
     this.ruleExecutor = ruleExecutor;
-    this.currentKieContainer = kieContainer;
+    this.kieContainer = kieContainer;
     this.ruleStorage = ruleStorage;
     this.timeoutConfig = timeoutConfig;
     this.meterRegistry = meterRegistry;
@@ -98,7 +104,7 @@ public class DroolsEngineService {
       // Execute the rule with configured timeout
       RuleExecutor.ExecutionResult result =
           ruleExecutor.executeRule(
-              currentKieContainer,
+              kieContainer,
               ruleId,
               inputData,
               timeoutConfig.getRuleExecutionTimeoutSeconds());
@@ -139,17 +145,16 @@ public class DroolsEngineService {
 
     // Mark all rules as loading (ConcurrentHashMap — no lock needed)
     for (Rule rule : rules) {
-      RuleMetadata metadata = RuleMetadata.createNew();
-      ruleMetadata.put(rule.getRuleId(), metadata);
+      ruleMetadata.put(rule.getRuleId(), RuleMetadata.createNew());
     }
 
-    // Compile rules OUTSIDE the write lock so reads are not blocked
+    // Compile rules OUTSIDE the write lock so reads are not blocked. The compiler registers a
+    // new versioned KieModule in the KieRepository; we then call kieContainer.updateToVersion(...)
+    // to swap the running KieBase to that module.
     RuleCompiler.CompilationResult compilationResult = ruleCompiler.compileRules(rules);
 
     if (!compilationResult.isSuccess()) {
       log.error("Failed to compile rules: {}", compilationResult.getErrorMessage());
-
-      // Mark all rules as error
       for (Rule rule : rules) {
         RuleMetadata current = ruleMetadata.get(rule.getRuleId());
         if (current != null) {
@@ -157,39 +162,75 @@ public class DroolsEngineService {
               rule.getRuleId(), current.withError(compilationResult.getErrorMessage()));
         }
       }
-
       return false;
     }
 
-    // Acquire write lock only for the atomic swap of KieContainer and rule maps
     rulesLock.writeLock().lock();
     try {
-      // Dispose old KieContainer to prevent memory leak
-      // This is critical to avoid OOM errors (exit code 137)
-      KieContainer oldContainer = currentKieContainer;
-      currentKieContainer = compilationResult.getKieContainer();
-
-      // Dispose old container to free memory
-      if (oldContainer != null && oldContainer != currentKieContainer) {
-        try {
-          log.info("Disposing old KieContainer to free memory (prevents memory leak)");
-          oldContainer.dispose();
-          log.debug("Old KieContainer disposed successfully");
-        } catch (Exception e) {
-          log.warn("Error disposing old KieContainer: {}", e.getMessage());
+      Results updateResults = kieContainer.updateToVersion(compilationResult.getReleaseId());
+      if (updateResults.hasMessages(Message.Level.ERROR)) {
+        log.error(
+            "Failed to apply rule update: {}",
+            updateResults.getMessages(Message.Level.ERROR));
+        // KieBase remains at the previous version — Drools guarantees no partial swap on error
+        for (Rule rule : rules) {
+          RuleMetadata current = ruleMetadata.get(rule.getRuleId());
+          if (current != null) {
+            ruleMetadata.put(
+                rule.getRuleId(),
+                current.withError(updateResults.getMessages(Message.Level.ERROR).toString()));
+          }
         }
+        return false;
       }
+
+      // The new release is authoritative — drop rules from the previous release that are not
+      // in this set, then repopulate. (The previous code accumulated rule IDs across loads,
+      // which could leave stale loadedRules / ruleMetadata entries for removed rules.)
+      Set<String> newRuleIds = new HashSet<>();
+      for (Rule rule : rules) {
+        newRuleIds.add(rule.getRuleId());
+      }
+      loadedRules.keySet().retainAll(newRuleIds);
+      ruleMetadata.keySet().retainAll(newRuleIds);
 
       for (Rule rule : rules) {
         loadedRules.put(rule.getRuleId(), rule);
-        RuleMetadata activeMetadata =
-            ruleMetadata.get(rule.getRuleId()).withStatus(RuleMetadata.RuleStatus.ACTIVE);
-        ruleMetadata.put(rule.getRuleId(), activeMetadata);
+        RuleMetadata current = ruleMetadata.get(rule.getRuleId());
+        if (current == null) {
+          current = RuleMetadata.createNew();
+        }
+        ruleMetadata.put(rule.getRuleId(), current.withStatus(RuleMetadata.RuleStatus.ACTIVE));
       }
 
-      log.info("Successfully loaded {} rules", rules.size());
+      log.info(
+          "Successfully loaded {} rules at release {}",
+          rules.size(),
+          compilationResult.getReleaseId().getVersion());
       return true;
 
+    } finally {
+      rulesLock.writeLock().unlock();
+    }
+  }
+
+  /**
+   * Replace (or add) a single rule, preserving all other currently-loaded rules. Reads the current
+   * loaded rule set, swaps in the new rule, and re-runs the standard {@link #loadRules} path so
+   * the resulting KieBase contains both the new rule and all the unchanged ones. Fixes the bug
+   * where calling loadRules with a single-rule list discarded all other rules.
+   *
+   * <p>Holds the write lock for the full snapshot+compile+update sequence so concurrent merges
+   * cannot lose each other's updates. The lock is reentrant, so the inner {@link #loadRules}
+   * call re-acquires it without deadlock. Rule-execution reads block until the merge completes.
+   */
+  public boolean loadOrReplaceRule(Rule rule) {
+    rulesLock.writeLock().lock();
+    try {
+      List<Rule> combined = new ArrayList<>(loadedRules.values());
+      combined.removeIf(r -> r.getRuleId().equals(rule.getRuleId()));
+      combined.add(rule);
+      return loadRules(combined);
     } finally {
       rulesLock.writeLock().unlock();
     }

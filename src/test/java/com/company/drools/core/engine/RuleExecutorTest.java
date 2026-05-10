@@ -29,14 +29,14 @@ class RuleExecutorTest {
     kieServices = KieServices.Factory.get();
   }
 
-  /** Helper: compile a single rule and return the KieContainer. */
+  /** Helper: compile a single rule and return a fresh KieContainer at its release. */
   private KieContainer compileRule(Rule rule) {
     RuleCompiler compiler = new RuleCompiler(kieServices, new DrlSanitizer());
     RuleCompiler.CompilationResult result = compiler.compileRules(List.of(rule));
     assertThat(result.isSuccess())
         .as("Rule compilation should succeed for: " + rule.getRuleId())
         .isTrue();
-    return result.getKieContainer();
+    return kieServices.newKieContainer(result.getReleaseId());
   }
 
   @Nested
