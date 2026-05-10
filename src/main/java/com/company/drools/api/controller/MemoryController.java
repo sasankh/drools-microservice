@@ -1,5 +1,6 @@
 package com.company.drools.api.controller;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
@@ -140,6 +141,9 @@ public class MemoryController {
    *
    * @return Message indicating GC was triggered
    */
+  @SuppressFBWarnings(
+      value = "DM_GC",
+      justification = "Admin diagnostic endpoint; explicit GC trigger is the entire purpose")
   @PostMapping("/gc")
   public ResponseEntity<Map<String, Object>> triggerGC() {
     logger.warn("Manual garbage collection triggered via API");
