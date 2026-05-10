@@ -81,3 +81,6 @@ jacoco.exec
 # Others
 heap-dumps/
 gc-logs/
+
+# Load test artifacts (orchestrator output: JTL files, HTML reports, heap dumps, memory CSVs)
+scripts/load-test-results/

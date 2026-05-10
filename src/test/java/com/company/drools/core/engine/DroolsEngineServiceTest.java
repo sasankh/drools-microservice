@@ -36,6 +36,7 @@ class DroolsEngineServiceTest {
   @Mock private RuleCompiler ruleCompiler;
   @Mock private RuleExecutor ruleExecutor;
   @Mock private KieContainer initialKieContainer;
+  @Mock private org.kie.api.builder.KieRepository kieRepository;
   @Mock private RuleStorage ruleStorage;
   @Mock private TimeoutConfig timeoutConfig;
 
@@ -55,6 +56,7 @@ class DroolsEngineServiceTest {
             ruleCompiler,
             ruleExecutor,
             initialKieContainer,
+            kieRepository,
             ruleStorage,
             timeoutConfig,
             meterRegistry);
@@ -547,6 +549,48 @@ class DroolsEngineServiceTest {
       }
       // The long-lived container is never disposed.
       verify(initialKieContainer, never()).dispose();
+    }
+
+    @Test
+    @DisplayName("loadRules evicts prior KieModule from KieRepository to prevent leak")
+    void testLoadRules_EvictsPriorModuleFromRepository() {
+      ReleaseId oldReleaseId = mock(ReleaseId.class, "old-release");
+      ReleaseId newReleaseId = mock(ReleaseId.class, "new-release");
+      when(initialKieContainer.getReleaseId()).thenReturn(oldReleaseId);
+
+      Rule rule = RuleTestUtils.createSimpleRule("evict.test.rule");
+      when(ruleCompiler.compileRules(List.of(rule)))
+          .thenReturn(RuleCompiler.CompilationResult.success(newReleaseId));
+
+      service.loadRules(List.of(rule));
+
+      // After a successful updateToVersion, the prior module must be removed from the singleton
+      // KieRepository — Drools 10.2.0 does NOT auto-clean (verified against the 10.2.0 source).
+      verify(kieRepository).removeKieModule(oldReleaseId);
+    }
+
+    @Test
+    @DisplayName("loadRules does not evict on update failure (rollback target preserved)")
+    void testLoadRules_NoEvictionOnUpdateFailure() {
+      ReleaseId oldReleaseId = mock(ReleaseId.class, "old-release");
+      ReleaseId newReleaseId = mock(ReleaseId.class, "new-release");
+      when(initialKieContainer.getReleaseId()).thenReturn(oldReleaseId);
+
+      Rule rule = RuleTestUtils.createSimpleRule("noevict.test.rule");
+      when(ruleCompiler.compileRules(List.of(rule)))
+          .thenReturn(RuleCompiler.CompilationResult.success(newReleaseId));
+
+      // Force the update to report errors → swap fails → old module must NOT be evicted (it's
+      // still the active rollback target).
+      Results errorResults = mock(Results.class);
+      when(errorResults.hasMessages(Message.Level.ERROR)).thenReturn(true);
+      when(errorResults.getMessages(Message.Level.ERROR)).thenReturn(List.of());
+      when(initialKieContainer.updateToVersion(newReleaseId)).thenReturn(errorResults);
+
+      boolean result = service.loadRules(List.of(rule));
+
+      assertThat(result).isFalse();
+      verify(kieRepository, never()).removeKieModule(any(ReleaseId.class));
     }
 
     @Test

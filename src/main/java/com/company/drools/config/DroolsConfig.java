@@ -4,6 +4,7 @@ import com.company.drools.core.engine.RuleCompiler;
 import org.kie.api.KieServices;
 import org.kie.api.builder.KieBuilder;
 import org.kie.api.builder.KieFileSystem;
+import org.kie.api.builder.KieRepository;
 import org.kie.api.builder.ReleaseId;
 import org.kie.api.runtime.KieContainer;
 import org.slf4j.Logger;
@@ -19,6 +20,18 @@ public class DroolsConfig {
   @Bean
   public KieServices kieServices() {
     return KieServices.Factory.get();
+  }
+
+  /**
+   * The singleton KieRepository. Exposed as a bean so DroolsEngineService can call
+   * removeKieModule(oldReleaseId) after a successful KieContainer.updateToVersion(...) — Drools
+   * 10.2.0 does NOT auto-clean prior KieModules from the repository, so without explicit eviction
+   * the repo accumulates compiled bytecode (one ProjectClassLoader per refresh) and leaks under
+   * sustained hot reloads.
+   */
+  @Bean
+  public KieRepository kieRepository(KieServices kieServices) {
+    return kieServices.getRepository();
   }
 
   @Bean

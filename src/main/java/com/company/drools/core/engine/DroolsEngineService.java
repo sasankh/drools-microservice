@@ -13,7 +13,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import org.kie.api.builder.KieRepository;
 import org.kie.api.builder.Message;
+import org.kie.api.builder.ReleaseId;
 import org.kie.api.builder.Results;
 import org.kie.api.runtime.KieContainer;
 import org.slf4j.Logger;
@@ -29,6 +31,7 @@ public class DroolsEngineService {
   private final RuleExecutor ruleExecutor;
   private final RuleStorage ruleStorage;
   private final TimeoutConfig timeoutConfig;
+  private final KieRepository kieRepository;
 
   // Metrics
   private final MeterRegistry meterRegistry;
@@ -48,12 +51,14 @@ public class DroolsEngineService {
       RuleCompiler ruleCompiler,
       RuleExecutor ruleExecutor,
       KieContainer kieContainer,
+      KieRepository kieRepository,
       RuleStorage ruleStorage,
       TimeoutConfig timeoutConfig,
       MeterRegistry meterRegistry) {
     this.ruleCompiler = ruleCompiler;
     this.ruleExecutor = ruleExecutor;
     this.kieContainer = kieContainer;
+    this.kieRepository = kieRepository;
     this.ruleStorage = ruleStorage;
     this.timeoutConfig = timeoutConfig;
     this.meterRegistry = meterRegistry;
@@ -165,9 +170,12 @@ public class DroolsEngineService {
       return false;
     }
 
+    ReleaseId newReleaseId = compilationResult.getReleaseId();
+    ReleaseId oldReleaseId;
     rulesLock.writeLock().lock();
     try {
-      Results updateResults = kieContainer.updateToVersion(compilationResult.getReleaseId());
+      oldReleaseId = kieContainer.getReleaseId();
+      Results updateResults = kieContainer.updateToVersion(newReleaseId);
       if (updateResults.hasMessages(Message.Level.ERROR)) {
         log.error(
             "Failed to apply rule update: {}",
@@ -206,12 +214,30 @@ public class DroolsEngineService {
       log.info(
           "Successfully loaded {} rules at release {}",
           rules.size(),
-          compilationResult.getReleaseId().getVersion());
-      return true;
-
+          newReleaseId.getVersion());
     } finally {
       rulesLock.writeLock().unlock();
     }
+
+    // Outside the write lock: evict the previous KieModule from the singleton KieRepository.
+    // KieContainer.updateToVersion() does NOT auto-clean prior modules in Drools 10.2.0; without
+    // explicit removal each refresh accumulates a KieModule + ProjectClassLoader + the compiled
+    // rule bytecode in the repo (verified against the 10.2.0 source). The repository's internal
+    // lock is independent of rulesLock — keep this outside the write lock to avoid lock inversion.
+    if (oldReleaseId != null && !oldReleaseId.equals(newReleaseId)) {
+      try {
+        kieRepository.removeKieModule(oldReleaseId);
+        log.debug("Evicted prior KieModule {} from KieRepository", oldReleaseId.getVersion());
+      } catch (Exception e) {
+        // Eviction failure is not fatal — the swap already succeeded. Log and continue.
+        log.warn(
+            "Failed to evict prior KieModule {} from KieRepository: {}",
+            oldReleaseId.getVersion(),
+            e.getMessage());
+      }
+    }
+
+    return true;
   }
 
   /**

@@ -107,7 +107,13 @@ class RuleExecutionIntegrationTest {
 
     droolsEngineService =
         new DroolsEngineService(
-            ruleCompiler, ruleExecutor, emptyContainer, noOpStorage, timeoutConfig, meterRegistry);
+            ruleCompiler,
+            ruleExecutor,
+            emptyContainer,
+            kieServices.getRepository(),
+            noOpStorage,
+            timeoutConfig,
+            meterRegistry);
   }
 
   private KieContainer createEmptyKieContainer() {
