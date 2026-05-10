@@ -114,6 +114,13 @@ EOF
   printf '%s,"{""%s"": true}"\n' "${rid}" "${key}" >> "${csv}"
 }
 
+# --- The 5 templates above cover the LHS shapes of the original 10 cookbook entries.
+#     Below: 7 templates matching the 7 cookbook patterns added in Phase 1 (2026-05-10).
+#     This gives 12 distinct templates total. The plan called for "17 patterns equally
+#     distributed"; the 5 above each cover ~2 cookbook entries with identical RETE shape,
+#     so 12 templates still hits the spirit of the plan (every distinct pattern in the
+#     cookbook is stressed at scale; no single shape dominates the corpus). ---
+
 # Style 5: multi-condition. Two non-null guards plus a numeric comparison.
 # Matches the validation.customer.credit + multi-condition shipping shapes.
 corpus::_emit_multi() {
@@ -143,13 +150,215 @@ EOF
   printf '%s,"{""%s"": 50.0, ""%s"": 75.0}"\n' "${rid}" "${k1}" "${k2}" >> "${csv}"
 }
 
-# Registry: list of emitter function names. Phase 1 will append 12 more entries here.
+# Style 6: accumulate (sum aggregation over a list). Mirrors pricing.bundle.accumulate.
+corpus::_emit_accumulate() {
+  local n="${1}" out_dir="${2}" csv="${3}"
+  local rid="synth.acc.$(printf '%04d' "${n}")"
+  local key="acc_items_${n}"
+  local fpath="${out_dir}/synthetic/acc/${rid}.drl"
+  mkdir -p "$(dirname "${fpath}")"
+  cat > "${fpath}" <<EOF
+package com.company.rules.synthetic.acc
+
+import java.util.Map
+import java.util.List
+
+rule "synthetic-acc-${n}"
+when
+    \$data : Map(this["${key}"] != null)
+    \$total : Number(doubleValue > 50.0)
+        from accumulate(
+            \$i : Map() from ((List) \$data.get("${key}")),
+            sum( ((Number) \$i.get("price")).doubleValue() )
+        )
+then
+    \$data.put("fired_${key}", true);
+    \$data.put("acc_total_${n}", \$total.doubleValue());
+end
+EOF
+  printf '%s,"{""%s"": [{""price"": 30}, {""price"": 40}]}"\n' "${rid}" "${key}" >> "${csv}"
+}
+
+# Style 7: exists (any-element trigger). Mirrors inventory.warning.exists.
+corpus::_emit_exists() {
+  local n="${1}" out_dir="${2}" csv="${3}"
+  local rid="synth.exists.$(printf '%04d' "${n}")"
+  local key="exists_items_${n}"
+  local fpath="${out_dir}/synthetic/exists/${rid}.drl"
+  mkdir -p "$(dirname "${fpath}")"
+  cat > "${fpath}" <<EOF
+package com.company.rules.synthetic.exists
+
+import java.util.Map
+import java.util.List
+
+rule "synthetic-exists-${n}"
+when
+    \$data : Map(this["${key}"] != null)
+    exists Map( ((Number) this["level"]).intValue() < 5 )
+        from ((List) \$data.get("${key}"))
+then
+    \$data.put("fired_${key}", true);
+end
+EOF
+  printf '%s,"{""%s"": [{""level"": 10}, {""level"": 3}]}"\n' "${rid}" "${key}" >> "${csv}"
+}
+
+# Style 8: not (absence guard). Mirrors validation.cart.notempty.
+corpus::_emit_notempty() {
+  local n="${1}" out_dir="${2}" csv="${3}"
+  local rid="synth.notempty.$(printf '%04d' "${n}")"
+  local key="not_items_${n}"
+  local fpath="${out_dir}/synthetic/notempty/${rid}.drl"
+  mkdir -p "$(dirname "${fpath}")"
+  cat > "${fpath}" <<EOF
+package com.company.rules.synthetic.notempty
+
+import java.util.Map
+import java.util.List
+
+rule "synthetic-not-${n}"
+when
+    \$data : Map(this["${key}"] != null)
+    not Map( this["${key}"] != null,
+             ((List) this["${key}"]).size() > 0 )
+then
+    \$data.put("fired_${key}", true);
+end
+EOF
+  printf '%s,"{""%s"": []}"\n' "${rid}" "${key}" >> "${csv}"
+}
+
+# Style 9: salience (priority override). Mirrors pricing.loyalty.salience.
+corpus::_emit_salience() {
+  local n="${1}" out_dir="${2}" csv="${3}"
+  local rid="synth.sal.$(printf '%04d' "${n}")"
+  local kflag="sal_flag_${n}"
+  local kamt="sal_amt_${n}"
+  local fpath="${out_dir}/synthetic/sal/${rid}.drl"
+  mkdir -p "$(dirname "${fpath}")"
+  cat > "${fpath}" <<EOF
+package com.company.rules.synthetic.sal
+
+import java.util.Map
+
+rule "synthetic-sal-${n}"
+salience 100
+when
+    \$data : Map(this["${kflag}"] == true,
+                this["${kamt}"] != null)
+then
+    double amt = ((Number) \$data.get("${kamt}")).doubleValue();
+    \$data.put("fired_${kflag}", true);
+    \$data.put("sal_discounted_${n}", amt * 0.85);
+end
+EOF
+  printf '%s,"{""%s"": true, ""%s"": 100.0}"\n' "${rid}" "${kflag}" "${kamt}" >> "${csv}"
+}
+
+# Style 10: compound &&/|| LHS with matches. Mirrors validation.email.compound.
+corpus::_emit_compound() {
+  local n="${1}" out_dir="${2}" csv="${3}"
+  local rid="synth.comp.$(printf '%04d' "${n}")"
+  local kemail="comp_email_${n}"
+  local ktype="comp_type_${n}"
+  local fpath="${out_dir}/synthetic/comp/${rid}.drl"
+  mkdir -p "$(dirname "${fpath}")"
+  cat > "${fpath}" <<EOF
+package com.company.rules.synthetic.comp
+
+import java.util.Map
+
+rule "synthetic-comp-${n}"
+when
+    \$data : Map(
+        this["${kemail}"] != null,
+        ( this["${ktype}"] == "internal" && this["${kemail}"] matches ".*@company\\\\.com\$" )
+        ||
+        ( this["${ktype}"] == "external" && this["${kemail}"] matches ".+@.+\\\\..+" )
+    )
+then
+    \$data.put("fired_${kemail}", true);
+end
+EOF
+  printf '%s,"{""%s"": ""x@company.com"", ""%s"": ""internal""}"\n' \
+    "${rid}" "${kemail}" "${ktype}" >> "${csv}"
+}
+
+# Style 11: temporal (date math via java.time). Mirrors seasonal.expiry.temporal.
+corpus::_emit_temporal() {
+  local n="${1}" out_dir="${2}" csv="${3}"
+  local rid="synth.tmp.$(printf '%04d' "${n}")"
+  local kcur="tmp_current_${n}"
+  local kexp="tmp_expiry_${n}"
+  local fpath="${out_dir}/synthetic/tmp/${rid}.drl"
+  mkdir -p "$(dirname "${fpath}")"
+  cat > "${fpath}" <<EOF
+package com.company.rules.synthetic.tmp
+
+import java.util.Map
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+
+rule "synthetic-tmp-${n}"
+when
+    \$data : Map(this["${kcur}"] != null,
+                this["${kexp}"] != null)
+then
+    LocalDate cur =
+        LocalDate.parse((String) \$data.get("${kcur}"), DateTimeFormatter.ISO_LOCAL_DATE);
+    LocalDate exp =
+        LocalDate.parse((String) \$data.get("${kexp}"), DateTimeFormatter.ISO_LOCAL_DATE);
+    \$data.put("fired_${kcur}", !cur.isAfter(exp));
+end
+EOF
+  printf '%s,"{""%s"": ""2026-05-10"", ""%s"": ""2026-12-31""}"\n' \
+    "${rid}" "${kcur}" "${kexp}" >> "${csv}"
+}
+
+# Style 12: forall (universal quantification). Mirrors validation.cart.forall.
+corpus::_emit_forall() {
+  local n="${1}" out_dir="${2}" csv="${3}"
+  local rid="synth.fa.$(printf '%04d' "${n}")"
+  local key="fa_items_${n}"
+  local fpath="${out_dir}/synthetic/fa/${rid}.drl"
+  mkdir -p "$(dirname "${fpath}")"
+  cat > "${fpath}" <<EOF
+package com.company.rules.synthetic.fa
+
+import java.util.Map
+import java.util.List
+
+rule "synthetic-fa-${n}"
+when
+    \$data : Map(this["${key}"] != null)
+    forall (
+        \$item : Map() from ((List) \$data.get("${key}"))
+        Map( this == \$item, ((Number) this["level"]).intValue() > 0 )
+            from ((List) \$data.get("${key}"))
+    )
+then
+    \$data.put("fired_${key}", true);
+end
+EOF
+  printf '%s,"{""%s"": [{""level"": 10}, {""level"": 20}]}"\n' "${rid}" "${key}" >> "${csv}"
+}
+
+# Registry: 12 templates total — 5 covering original 10 cookbook patterns + 7 covering
+# the patterns added in Phase 1 (2026-05-10).
 _corpus_templates=(
   "corpus::_emit_simple"
   "corpus::_emit_string"
   "corpus::_emit_int"
   "corpus::_emit_bool"
   "corpus::_emit_multi"
+  "corpus::_emit_accumulate"
+  "corpus::_emit_exists"
+  "corpus::_emit_notempty"
+  "corpus::_emit_salience"
+  "corpus::_emit_compound"
+  "corpus::_emit_temporal"
+  "corpus::_emit_forall"
 )
 
 # ---------------------------------------------------------------------------

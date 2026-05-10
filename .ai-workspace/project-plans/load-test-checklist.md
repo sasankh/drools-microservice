@@ -83,7 +83,7 @@ Each rule:
 ## Phase 2 — Corpus generation + stack boot
 
 - [ ] `scripts/lib/corpus.sh` invoked with `RULE_COUNT=1000`
-  - [ ] 1,000 synthetic `.drl` files generated, **equally distributed across all 17 cookbook patterns** (~58 per pattern × 17 = 986, padded to 1,000 round-robin)
+  - [ ] 1,000 synthetic `.drl` files generated, **equally distributed across 12 templates** (5 covering the original 10 cookbook entries — same RETE-shape collapses — plus 7 covering the Phase 1 patterns); ~83 per template × 12 = 996, padded to 1,000 round-robin
   - [ ] Uploaded to LocalStack S3 in parallel
   - [ ] `rule-ids.csv` emitted for JMeter consumption
 - [ ] Verify with `awslocal s3 ls s3://local-rules/ --recursive | wc -l` → 1,000 (orchestrator clears the bucket before populating to ensure exact count)

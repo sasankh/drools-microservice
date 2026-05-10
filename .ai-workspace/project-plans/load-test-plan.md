@@ -126,13 +126,15 @@ RULE_COUNT=5000 SOAK_MIN=240 ./scripts/run-load-test.sh   # scale up
 
 ### The corpus generator: `scripts/lib/corpus.sh`
 
-Templates from the (now 17) curated `sample-rules/` patterns. Produces 1,000 unique synthetic rules where:
-- Each rule's LHS shape mirrors one of the existing patterns, **equally distributed across all 17 patterns** for maximum RETE-network variety
+Templates from the curated `sample-rules/` patterns. Produces N unique synthetic rules distributed equally across 12 distinct templates. Per-rule properties:
+- Each rule's LHS shape mirrors one of the cookbook patterns
 - Marker keys are unique per rule for predictable test inputs
 - Output keys are unique per rule for verifiable test results
 - All upload to LocalStack S3 in parallel
 
-Equal-split distribution: ~58 rules per pattern × 17 patterns = 986, padded to 1,000 by adding 14 more rules round-robin across the patterns. Best variety for the load test (every Drools pattern in the cookbook gets stressed at scale; no single hot path dominates).
+**Template count = 12** (5 covering the existing 10 cookbook entries + 7 covering the patterns added in Phase 1). The plan originally called for 17 templates matching every cookbook entry one-for-one, but the existing 10 cookbook entries collapse into ~5 distinct LHS shapes from the RETE engine's perspective (e.g. `simple-discount`, `holiday-discount`, and `seasonal.holiday.discount` are all "boolean+amount" shapes — splitting them into 3 templates wouldn't add RETE variety). 12 templates therefore hits the spirit of "equal split across all distinct cookbook patterns" without redundant cosmetic splits.
+
+Equal-split distribution at 1,000 rules: ~83 rules per template × 12 templates = 996, padded to 1,000 by adding 4 more rules round-robin across the templates.
 
 ---
 
