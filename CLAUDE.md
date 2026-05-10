@@ -15,7 +15,22 @@ The full documentation corpus is in `project-documentation/`. See [`project-docu
 
 The legacy consolidated context file at `.ai-workspace/ai-initial-context/ai-initial-context-latest.md` is no longer the primary reference — the structured `project-documentation/` corpus supersedes it.
 
-## ⚠️ Important: Security Hardening Complete (2026-02-26)
+## ⚠️ Important: Recent change log (most recent first)
+
+### Load test + sample-rules expansion + rule-loading rework (2026-05-10)
+- **Drools 10 rule-loading rework**: `DroolsEngineService` now holds a **single long-lived `KieContainer`** updated in place via `KieContainer.updateToVersion(ReleaseId)`, with an explicit `KieRepository.removeKieModule(oldReleaseId)` after each swap (Drools 10 does **not** auto-clean). Replaces the earlier two-container atomic-swap-with-`dispose()` pattern. See [ADR-003 2026-05-10 update](project-documentation/36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal).
+- **LOADING-marker bug fix**: latent at 10-rule scale (sub-ms compile); surfaced at 1000 rules (~46s compile) as a 1.5% error rate during refresh windows. Fixed in [`DroolsEngineService.loadOrReplaceRule`](src/main/java/com/company/drools/core/engine/DroolsEngineService.java).
+- **Sample-rules cookbook 10 → 17**: added 7 rules covering `accumulate`, `exists`, `not`, `salience`, regex, temporal, and accumulate-with-collect patterns. All under [`sample-rules/`](sample-rules/); cookbook in [`19-sample-rules-cookbook.md`](project-documentation/19-sample-rules-cookbook.md).
+- **Load test orchestrator**: `scripts/run-load-test.sh` runs the full Phase 0–8 suite end-to-end (1000 rules, JMeter, mixed-workload soak). Findings in [`project-documentation/39-load-test-findings.md`](project-documentation/39-load-test-findings.md).
+- **Test count**: 589 → 598; **test files**: 44 → 45.
+
+### Stack modernization (2026-05-09)
+- **Java 17 → 25 LTS** (Maven Enforcer Plugin range `[25,26)`).
+- **Spring Boot 3.2.5 → 3.5.3**.
+- **Drools 8.44.0 → 10.2.0** (forced a refactor of rule-loading because `CompilationResult.getKieContainer()` was removed; led to the 2026-05-10 work above).
+- Closed deferred security finding #30 (outdated dependencies). See [ADR-013](project-documentation/36-architecture-decision-records.md#adr-013-java-17--25--spring-boot-modernization-2026-05-09) and [ADR-014](project-documentation/36-architecture-decision-records.md#adr-014-drools-844--102-as-part-of-stack-modernization).
+
+### Security Hardening Complete (2026-02-26)
 
 **39/42 security findings addressed** across 9 phases. Key changes:
 
@@ -28,9 +43,9 @@ The legacy consolidated context file at `.ai-workspace/ai-initial-context/ai-ini
 7. **Path Traversal Protection** — Defense-in-depth in LocalFileStorage and S3RuleStorage
 8. **Non-blocking Compilation** — Rule compilation outside write lock in DroolsEngineService
 
-### Previous Critical Fixes (2026-02-19)
-- **Java 17 Enforcement**: Maven Enforcer Plugin
-- **Memory Leak Fixed**: KieContainer disposal prevents OOM
+### Earlier Critical Fixes (2026-02-19)
+- **Java 17 Enforcement** (later upgraded to Java 25 on 2026-05-09)
+- **Memory Leak Fixed**: original atomic-swap KieContainer disposal prevented OOM (superseded 2026-05-10 by Drools 10 `updateToVersion` + `KieRepository.removeKieModule`)
 - **Memory Monitoring**: `GET /admin/memory/info` endpoint
 
 See [`project-documentation/14-security-architecture.md`](project-documentation/14-security-architecture.md) and [`project-documentation/30-runbooks-and-monitoring.md`](project-documentation/30-runbooks-and-monitoring.md) for full details.
@@ -41,7 +56,7 @@ This is a Drools Rule Engine Microservice designed for high-performance business
 
 **Tech Stack**: Java 25 (enforced), Spring Boot 3.5.3, Drools 10.2.0, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
 
-**Health Status**: 9/10 - 589 tests, 96%/90% coverage, 39/42 security fixes complete
+**Health Status**: 9/10 - 598 tests, 96%/90% coverage (pre-modernization baseline), 39/42 security fixes complete, load-tested at 1000 rules
 
 ## Common Commands
 
@@ -219,7 +234,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 ## Development Workflow
 
-1. **Current Status**: 39/42 security findings addressed (Phases 1–9 complete, 2026-02-26); 589 tests; 96% instruction / 90% branch coverage; documentation rebuild complete (2026-05-08, 39 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
+1. **Current Status**: 39/42 security findings addressed (Phases 1–9 complete, 2026-02-26); stack modernized 2026-05-09 (Java 25, Spring Boot 3.5.3, Drools 10.2.0); Drools 10 rule-loading rework + sample-rules expansion + 1000-rule load test 2026-05-10; 598 tests; 96% / 90% coverage (pre-modernization baseline); documentation rebuild 2026-05-08 with refreshes 2026-05-09 + 2026-05-10 (40 numbered docs in [`project-documentation/`](project-documentation/) including new [`39-load-test-findings.md`](project-documentation/39-load-test-findings.md)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
 
 2. **One-Command Development Environment**: Complete automated setup with validation
    ```bash
@@ -229,7 +244,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
    # Or manual setup
    docker-compose up -d
    
-   # Initialize LocalStack S3 with 10 sample rules
+   # Initialize LocalStack S3 with 17 sample rules
    ./init-localstack.sh
    
    # Validate LocalStack setup
@@ -302,25 +317,28 @@ All seven phases are shipped:
 3. ✅ Production Readiness (Security, Performance, Monitoring)
 4. ✅ Testing & Documentation
 5. ✅ Deployment & Infrastructure
-6. ✅ Critical Fixes — Java 17 enforcement, memory leak, monitoring (2026-02-19)
+6. ✅ Critical Fixes — original Java 17 enforcement, memory-leak hardening, memory monitoring (2026-02-19)
 7. ✅ Security Hardening — 39/42 findings, Phases 1–9 (2026-02-26)
+8. ✅ Stack Modernization — Java 17→25, Spring Boot 3.2.5→3.5.3, Drools 8.44.0→10.2.0 (2026-05-09)
+9. ✅ Drools 10 rule-loading rework + sample-rules expansion (10→17) + 1000-rule load test (2026-05-10)
 
 Current snapshot:
 - **Health Score**: 9/10
-- **Test Coverage**: 96.2% instruction / 89.7% branch (589 tests)
+- **Test Coverage**: 96.2% instruction / 89.7% branch (598 tests; coverage is the pre-modernization JaCoCo baseline — roughly preserved, not yet re-run)
 - **Security**: 39/42 findings addressed
-- **Performance**: 100–1000 RPS target, P99 < 100ms cached / < 500ms cache miss
+- **Performance**: 100–1000 RPS target, P99 < 100ms cached / < 500ms cache miss (load-tested at 1000 rules — see [`39-load-test-findings.md`](project-documentation/39-load-test-findings.md))
 
-For the canonical narrative — phase history, ADRs, performance targets, testing strategy, runbooks — see [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md) and the 39 numbered docs it indexes.
+For the canonical narrative — phase history, ADRs, performance targets, testing strategy, runbooks — see [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md) and the 40 numbered docs it indexes.
 
 ## Important Project Files
 
-- [`project-documentation/`](project-documentation/) — full 39-doc corpus, the canonical reference
+- [`project-documentation/`](project-documentation/) — full 40-doc corpus, the canonical reference
 - [`set-java-env.sh`](set-java-env.sh) — Java 25 environment setup script
 - [`docker-build-test.sh`](docker-build-test.sh) — automated Docker build and validation
 - [`setup-dev-environment.sh`](setup-dev-environment.sh) — one-command local dev setup
 - [`init-localstack.sh`](init-localstack.sh) — LocalStack bootstrap (reads from `sample-rules/`)
-- [`sample-rules/`](sample-rules/) — 10 sample DRL files (single source of truth)
+- [`sample-rules/`](sample-rules/) — 17 sample DRL files (single source of truth: 10 original + 7 added 2026-05-10 covering accumulate/exists/not/salience/regex/temporal/accumulate-with-collect patterns)
+- [`scripts/run-load-test.sh`](scripts/run-load-test.sh) — load-test orchestrator (Phase 0–8, 1000 rules, JMeter)
 - `gc-logs/`, `heap-dumps/` — runtime diagnostics output (gitignored content)
 - [`.ai-workspace/snap-memory/`](.ai-workspace/snap-memory/) — session memory files for `snap-memory` AI workflow
 
