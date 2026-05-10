@@ -438,7 +438,8 @@ class DroolsEngineServiceTest {
     }
 
     @Test
-    @DisplayName("loadRules with compile failure preserves prior ACTIVE rules (no spurious downgrade)")
+    @DisplayName(
+        "loadRules with compile failure preserves prior ACTIVE rules (no spurious downgrade)")
     void testLoadRules_CompilationFailure_PreservesPriorActive() {
       // Load rule successfully first so it's ACTIVE and present in loadedRules.
       Rule rule = RuleTestUtils.createSimpleRule("preserved.rule");
@@ -497,7 +498,8 @@ class DroolsEngineServiceTest {
     }
 
     @Test
-    @DisplayName("loadRules handles invalid DRL gracefully (returns false, leaves engine state untouched)")
+    @DisplayName(
+        "loadRules handles invalid DRL gracefully (returns false, leaves engine state untouched)")
     void testLoadRules_InvalidDRL_FailsGracefully() {
       Rule invalidRule = RuleTestUtils.createInvalidRule("invalid.drl.rule");
       String errorMsg = "Compilation errors: missing package declaration";
@@ -526,8 +528,7 @@ class DroolsEngineServiceTest {
     void testLoadRules_UpdatesContainerInPlace_NoSwap() {
       Rule rule = RuleTestUtils.createSimpleRule("update.test.rule");
       ReleaseId newReleaseId = mock(ReleaseId.class);
-      RuleCompiler.CompilationResult result =
-          RuleCompiler.CompilationResult.success(newReleaseId);
+      RuleCompiler.CompilationResult result = RuleCompiler.CompilationResult.success(newReleaseId);
       when(ruleCompiler.compileRules(List.of(rule))).thenReturn(result);
 
       service.loadRules(List.of(rule));
@@ -547,8 +548,7 @@ class DroolsEngineServiceTest {
         Rule rule = RuleTestUtils.createSimpleRule("refresh.rule." + i);
         ReleaseId releaseId = mock(ReleaseId.class, "release-" + i);
         releaseIds.add(releaseId);
-        RuleCompiler.CompilationResult result =
-            RuleCompiler.CompilationResult.success(releaseId);
+        RuleCompiler.CompilationResult result = RuleCompiler.CompilationResult.success(releaseId);
         when(ruleCompiler.compileRules(List.of(rule))).thenReturn(result);
 
         service.loadRules(List.of(rule));
@@ -771,8 +771,7 @@ class DroolsEngineServiceTest {
     void testLoadRules_UpdateToVersionError_ReturnsFalse() {
       Rule rule = RuleTestUtils.createSimpleRule("update.error.rule");
       ReleaseId newReleaseId = mock(ReleaseId.class);
-      RuleCompiler.CompilationResult result =
-          RuleCompiler.CompilationResult.success(newReleaseId);
+      RuleCompiler.CompilationResult result = RuleCompiler.CompilationResult.success(newReleaseId);
       when(ruleCompiler.compileRules(List.of(rule))).thenReturn(result);
 
       // Override the default no-error stub for this test only.

@@ -109,10 +109,7 @@ public class DroolsEngineService {
       // Execute the rule with configured timeout
       RuleExecutor.ExecutionResult result =
           ruleExecutor.executeRule(
-              kieContainer,
-              ruleId,
-              inputData,
-              timeoutConfig.getRuleExecutionTimeoutSeconds());
+              kieContainer, ruleId, inputData, timeoutConfig.getRuleExecutionTimeoutSeconds());
 
       // Update execution statistics and metrics
       if (result.isSuccess()) {
@@ -179,8 +176,7 @@ public class DroolsEngineService {
       Results updateResults = kieContainer.updateToVersion(newReleaseId);
       if (updateResults.hasMessages(Message.Level.ERROR)) {
         log.error(
-            "Failed to apply rule update: {}",
-            updateResults.getMessages(Message.Level.ERROR));
+            "Failed to apply rule update: {}", updateResults.getMessages(Message.Level.ERROR));
         // KieBase remains at the previous version — Drools guarantees no partial swap on error.
         // Same reasoning as compile-failure path above: don't mutate ACTIVE metadata.
         return false;
@@ -206,9 +202,7 @@ public class DroolsEngineService {
       }
 
       log.info(
-          "Successfully loaded {} rules at release {}",
-          rules.size(),
-          newReleaseId.getVersion());
+          "Successfully loaded {} rules at release {}", rules.size(), newReleaseId.getVersion());
     } finally {
       rulesLock.writeLock().unlock();
     }
@@ -236,13 +230,13 @@ public class DroolsEngineService {
 
   /**
    * Replace (or add) a single rule, preserving all other currently-loaded rules. Reads the current
-   * loaded rule set, swaps in the new rule, and re-runs the standard {@link #loadRules} path so
-   * the resulting KieBase contains both the new rule and all the unchanged ones. Fixes the bug
-   * where calling loadRules with a single-rule list discarded all other rules.
+   * loaded rule set, swaps in the new rule, and re-runs the standard {@link #loadRules} path so the
+   * resulting KieBase contains both the new rule and all the unchanged ones. Fixes the bug where
+   * calling loadRules with a single-rule list discarded all other rules.
    *
    * <p>Holds the write lock for the full snapshot+compile+update sequence so concurrent merges
-   * cannot lose each other's updates. The lock is reentrant, so the inner {@link #loadRules}
-   * call re-acquires it without deadlock. Rule-execution reads block until the merge completes.
+   * cannot lose each other's updates. The lock is reentrant, so the inner {@link #loadRules} call
+   * re-acquires it without deadlock. Rule-execution reads block until the merge completes.
    */
   public boolean loadOrReplaceRule(Rule rule) {
     rulesLock.writeLock().lock();

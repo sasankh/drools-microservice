@@ -108,11 +108,11 @@ public class GlobalExceptionHandler {
   }
 
   /**
-   * Map malformed-JSON request bodies to 400 INVALID_INPUT instead of letting them fall through
-   * to the generic 500 catch-all. {@link HttpMessageNotReadableException} wraps Jackson parse
-   * failures (JsonParseException, JsonMappingException, MismatchedInputException, etc.), so a
-   * single handler covers all read-side JSON errors. The raw parser message is logged but never
-   * echoed to the client — it can leak fragments of the input.
+   * Map malformed-JSON request bodies to 400 INVALID_INPUT instead of letting them fall through to
+   * the generic 500 catch-all. {@link HttpMessageNotReadableException} wraps Jackson parse failures
+   * (JsonParseException, JsonMappingException, MismatchedInputException, etc.), so a single handler
+   * covers all read-side JSON errors. The raw parser message is logged but never echoed to the
+   * client — it can leak fragments of the input.
    */
   @ExceptionHandler(HttpMessageNotReadableException.class)
   public ResponseEntity<RuleExecutionResponse> handleMalformedJson(

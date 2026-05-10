@@ -51,8 +51,7 @@ public class RuleCompiler {
       }
 
       long versionNumber = versionCounter.incrementAndGet();
-      ReleaseId releaseId =
-          kieServices.newReleaseId(GROUP_ID, ARTIFACT_ID, "1.0." + versionNumber);
+      ReleaseId releaseId = kieServices.newReleaseId(GROUP_ID, ARTIFACT_ID, "1.0." + versionNumber);
 
       KieFileSystem kieFileSystem = kieServices.newKieFileSystem();
       kieFileSystem.generateAndWritePomXML(releaseId);

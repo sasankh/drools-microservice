@@ -31,9 +31,9 @@ import org.mockito.Mockito;
 
 /**
  * End-to-end integration tests for rule-refresh semantics, focused on the loadOrReplaceRule path
- * (which the AdminController single-rule-refresh endpoint now calls). Compiles real DRL through
- * the real {@link RuleCompiler} and executes through {@link RuleExecutor} — no mocks for the
- * engine, compiler, or executor.
+ * (which the AdminController single-rule-refresh endpoint now calls). Compiles real DRL through the
+ * real {@link RuleCompiler} and executes through {@link RuleExecutor} — no mocks for the engine,
+ * compiler, or executor.
  */
 @DisplayName("Rule Refresh Integration Tests")
 class RuleRefreshIntegrationTest {
