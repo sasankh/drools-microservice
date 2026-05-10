@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, operators, partners, AI agents |
 | **Purpose** | Single-page reference for every error code the service emits — what triggers it, what the response looks like, how to fix it |
-| **Last verified against** | [`GlobalExceptionHandler.java`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java), [`RateLimitingFilter.java`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java), [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java), [`RequestSizeValidationFilter.java`](../src/main/java/com/company/drools/api/filter/RequestSizeValidationFilter.java) on 2026-05-08 |
+| **Last verified against** | [`GlobalExceptionHandler.java`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java), [`RateLimitingFilter.java`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java), [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java), [`RequestSizeValidationFilter.java`](../src/main/java/com/company/drools/api/filter/RequestSizeValidationFilter.java) on 2026-05-10 |
 | **Related docs** | [10-api-reference.md](10-api-reference.md), [11-integration-guide.md](11-integration-guide.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md), [31-troubleshooting.md](31-troubleshooting.md) |
 
 ---
@@ -67,7 +67,7 @@ curl -X POST http://localhost:8080/execute-rule \
   "error": {
     "code": "RULE_NOT_FOUND",
     "message": "Rule not found: nonexistent.rule",
-    "timestamp": "2026-05-08T08:57:10Z"
+    "timestamp": "2026-05-10T08:57:10Z"
   }
 }
 ```

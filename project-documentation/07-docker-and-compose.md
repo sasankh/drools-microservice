@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, operators |
 | **Purpose** | Line-by-line walkthrough of `Dockerfile` and `docker-compose.yml` so a reader understands every flag, env var, healthcheck, and volume |
-| **Last verified against** | [`Dockerfile`](../Dockerfile), [`docker-compose.yml`](../docker-compose.yml) on 2026-05-08 |
+| **Last verified against** | [`Dockerfile`](../Dockerfile), [`docker-compose.yml`](../docker-compose.yml) on 2026-05-10 |
 | **Related docs** | [03-tech-stack.md](03-tech-stack.md), [05-environments-and-profiles.md](05-environments-and-profiles.md), [06-deployment.md](06-deployment.md), [24-jvm-optimization.md](24-jvm-optimization.md) |
 
 ---
@@ -22,7 +22,7 @@ The Dockerfile and compose file together encode dozens of decisions about JVM tu
 ### Stage 1: Build (lines 1–13)
 
 ```dockerfile
-FROM maven:3.9-eclipse-temurin-17 AS build
+FROM maven:3.9-eclipse-temurin-25 AS build
 WORKDIR /app
 
 # Cache dependencies by copying pom.xml first

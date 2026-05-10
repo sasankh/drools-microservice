@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, operators |
 | **Purpose** | The 4 Spring profiles (`local`, `dev`, `prod`, `docker`): what each one overrides, when to use which, and the full diff table |
-| **Last verified against** | [`application.yml`](../src/main/resources/application.yml) lines 165–350 on 2026-05-08 |
+| **Last verified against** | [`application.yml`](../src/main/resources/application.yml) lines 165–350 on 2026-05-10 |
 | **Related docs** | [06-deployment.md](06-deployment.md), [09-environment-variables-reference.md](09-environment-variables-reference.md), [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md) |
 
 ---

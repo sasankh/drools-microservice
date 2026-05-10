@@ -4,14 +4,14 @@
 |---|---|
 | **Audience** | Developers, AI agents inspecting test coverage |
 | **Purpose** | Test suite map, how to run tests, how to add new ones, and the test cases that prove the most important behaviors |
-| **Last verified against** | All `src/test/java/com/company/drools/**/*.java` on 2026-05-08 (44 test files, 589 `@Test`/`@ParameterizedTest` annotations) |
+| **Last verified against** | All `src/test/java/com/company/drools/**/*.java` on 2026-05-10 (45 test files, 598 `@Test`/`@ParameterizedTest` annotations) |
 | **Related docs** | [27-development-setup.md](27-development-setup.md), [16-drl-sandboxing.md](16-drl-sandboxing.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
 
 ## TL;DR
 
-- **44 test files**, **589 tests**, ~96.2% instruction / ~89.7% branch coverage (JaCoCo).
+- **45 test files**, **598 tests**, ~96.2% instruction / ~89.7% branch coverage (JaCoCo, pre-modernization baseline; coverage roughly preserved post-modernization but JaCoCo not yet re-run).
 - Run all: `mvn test`
 - Run one: `mvn test -Dtest=DroolsEngineServiceTest`
 - Coverage report: `mvn test jacoco:report` → `target/site/jacoco/index.html`
@@ -22,7 +22,7 @@
 
 ## Test inventory by package
 
-Counts are `@Test` + `@ParameterizedTest` annotations per file (verified 2026-05-08).
+Counts are `@Test` + `@ParameterizedTest` annotations per file (verified 2026-05-10).
 
 ### `api/controller/` — 64 tests across 4 files
 
@@ -97,7 +97,7 @@ Counts are `@Test` + `@ParameterizedTest` annotations per file (verified 2026-05
 | File | Tests | What it proves |
 |---|---:|---|
 | [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) | 23 | Every sandbox rule: import allowlist/blocklist, blocked classes, blocked methods, eval() rejection, static imports rejected |
-| [`DroolsEngineServiceTest.java`](../src/test/java/com/company/drools/core/engine/DroolsEngineServiceTest.java) | 22 | Rule lookup, atomic-swap, KieContainer disposal, TOCTOU-safe lookup |
+| [`DroolsEngineServiceTest.java`](../src/test/java/com/company/drools/core/engine/DroolsEngineServiceTest.java) | 22 | Rule lookup, `KieContainer.updateToVersion` swap (post-2026-05-10 pattern), `KieRepository.removeKieModule` cleanup, TOCTOU-safe lookup |
 | [`RuleCompilerTest.java`](../src/test/java/com/company/drools/core/engine/RuleCompilerTest.java) | 8 | DRL compilation, sanitizer integration, error reporting |
 | [`RuleExecutorTest.java`](../src/test/java/com/company/drools/core/engine/RuleExecutorTest.java) | 10 | Async execution, timeout + future.cancel(true), maxRuleFirings cap |
 
@@ -219,8 +219,8 @@ These are claims that are **proven by tests** — when this doc says "X is enfor
 | Blocked imports rejected | `DrlSanitizerTest` (`ImportBlocking` nested) | various |
 | Allowed imports accepted | `DrlSanitizerTest` (`ImportAllowlist` nested) | various |
 | Static imports rejected | `DrlSanitizerTest` | dedicated test |
-| KieContainer disposed on refresh | `DroolsEngineServiceTest` | `testAtomicSwapDisposesOldContainer` (representative) |
-| Atomic-swap rule loading | `DroolsEngineServiceTest` | tested in load/refresh paths |
+| Old `KieModule` removed from `KieRepository` on refresh | `DroolsEngineServiceTest` | post-2026-05-10 cleanup test (representative) |
+| `KieContainer.updateToVersion` rule loading | `DroolsEngineServiceTest` | tested in load/refresh paths |
 | TOCTOU-safe lookup | `DroolsEngineServiceTest` | tested via concurrent access |
 | `maxRuleFirings = 10000` cap | `RuleExecutorTest` | bounded execution test |
 | Timeout calls `future.cancel(true)` | `RuleExecutorTest` | timeout test |

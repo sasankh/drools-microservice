@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Everyone — the doc you reach for when you have one specific question |
 | **Purpose** | Quick answers to the questions most people actually ask, with links to full coverage |
-| **Last verified** | 2026-05-08 against running stack |
+| **Last verified** | 2026-05-10 against running stack |
 
 ---
 
@@ -44,7 +44,7 @@ curl -sX POST http://localhost:8080/execute-rule \
   -d '{"rule_id":"pricing.discount.simple","data":{"amount":100}}' | jq
 ```
 
-All 10 sample rules with examples: [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md).
+All 17 sample rules with examples: [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md).
 
 ### What's the JSON field name — `ruleId` or `rule_id`?
 
@@ -343,9 +343,9 @@ The 8081 port is for management — typically firewalled to internal networks in
 
 See [04-architecture.md](04-architecture.md).
 
-### How does atomic-swap work for rule refresh?
+### How does rule refresh work without blocking readers?
 
-New `KieContainer` is compiled OUTSIDE the write lock. Then a brief lock acquires, swaps the reference, disposes old container, releases. Readers are never blocked during the (potentially slow) compile. See [ADR-003](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal) and [04-architecture.md](04-architecture.md).
+The full rule set is compiled into a new versioned `KieModule` **outside** the write lock. Then a brief write lock acquires, calls `KieContainer.updateToVersion(newReleaseId)` (Drools 10's in-place version swap), and releases. The old `KieModule` is then explicitly removed from the `KieRepository` (Drools 10 does **not** auto-clean — verified by load test 2026-05-10). Readers are never blocked during the (potentially slow) compile. See [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal), [04-architecture.md](04-architecture.md), and [39-load-test-findings.md](39-load-test-findings.md).
 
 ---
 
@@ -410,7 +410,7 @@ Default heap: 512m-2048m. Production sizing: depends on rule count and complexit
 
 ### What's the cache hit rate?
 
-Default LRU size 100 rules. With 10 sample rules and any sustained traffic, ~95% hit rate. Larger rule sets or higher refresh frequency reduce this.
+Default LRU size 100 rules. With 17 sample rules and any sustained traffic, ~95% hit rate. Larger rule sets (e.g., the 1000-rule load test) or higher refresh frequency reduce this — see [39-load-test-findings.md](39-load-test-findings.md).
 
 ---
 

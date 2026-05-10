@@ -446,18 +446,29 @@ curl -s http://localhost:8080/admin/memory/info | jq '.heap'
 - Heap usage increases by 10-100MB per refresh
 - Eventually leads to OOM (exit code 137)
 
-**Root Cause**: KieContainer not disposed (FIXED in 2026-02-19)
+**Root Cause history**:
+- Fixed in 2026-02-19 by adding `KieContainer.dispose()` to a two-container atomic-swap.
+- Re-engineered on 2026-05-10 (Drools 10 migration): the service now holds a **single long-lived `KieContainer`** that is updated in place via `KieContainer.updateToVersion(ReleaseId)`. Old `KieModule`s are explicitly removed from the `KieRepository` after the swap (Drools 10 does **not** auto-clean them — verified by load test 2026-05-10).
 
-**Solution**: Ensure using latest code with KieContainer disposal:
+**Solution**: Ensure using latest code with the post-2026-05-10 pattern:
 ```java
-// DroolsEngineService.java lines 164-178
-KieContainer oldContainer = currentKieContainer;
-currentKieContainer = compilationResult.getKieContainer();
+// DroolsEngineService.loadRules — current pattern
+ReleaseId newReleaseId = ruleCompiler.compile(allRules);  // outside write lock
+ReleaseId oldReleaseId = currentReleaseId;
 
-if (oldContainer != null && oldContainer != currentKieContainer) {
-    oldContainer.dispose();  // Critical!
+writeLock.lock();
+try {
+    kieContainer.updateToVersion(newReleaseId);   // in-place version swap
+    currentReleaseId = newReleaseId;
+} finally {
+    writeLock.unlock();
+}
+
+if (oldReleaseId != null && !oldReleaseId.equals(newReleaseId)) {
+    kieRepository.removeKieModule(oldReleaseId);  // critical — prevents KieModule pile-up
 }
 ```
+See [04-architecture.md](04-architecture.md), [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal), and [39-load-test-findings.md](39-load-test-findings.md).
 
 **Verification**:
 ```bash

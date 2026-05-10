@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | All readers — developers, architects, operators, external integrators, AI agents |
 | **Purpose** | Answer "what is this project, why does it exist, and what does it do?" in five minutes |
-| **Last verified against code** | 2026-05-08 |
+| **Last verified against code** | 2026-05-10 (post-modernization, post-load-test) |
 | **Related docs** | [02-project-structure.md](02-project-structure.md), [03-tech-stack.md](03-tech-stack.md), [04-architecture.md](04-architecture.md), [10-api-reference.md](10-api-reference.md) |
 
 ---
@@ -32,7 +32,7 @@ This service externalizes business rules into a dedicated execution layer. Engin
 | **Execute a rule** | `POST /execute-rule` with `{"rule_id":"...","data":{...}}`. Service fires matching rules against the data Map and returns the modified data. | [`RuleExecutionController`](../src/main/java/com/company/drools/api/controller/RuleExecutionController.java), [`DroolsEngineService`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java) |
 | **Load rules from S3** | At startup or on `POST /admin/refresh-rules`, all `.drl` files under the bucket are fetched, sandbox-checked, and compiled. | [`S3RuleStorage`](../src/main/java/com/company/drools/storage/S3RuleStorage.java), [`RuleCompiler`](../src/main/java/com/company/drools/core/engine/RuleCompiler.java) |
 | **Sandbox dangerous DRL** | Every rule is scanned by `DrlSanitizer` before compilation. Blocks `eval()`, dangerous classes (Runtime, ClassLoader, Thread, etc.), and unauthorized imports. | [`DrlSanitizer`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java); see [16-drl-sandboxing.md](16-drl-sandboxing.md) |
-| **Cache compiled rules** | Compiled `KieBase` objects are held in a `KieContainer` (atomic-swap on refresh). Rule content is cached in a thread-safe LocalLRUCache; Redis is bean-wired but dormant by default. | [`LocalLRUCache`](../src/main/java/com/company/drools/cache/LocalLRUCache.java) |
+| **Cache compiled rules** | Compiled `KieBase` lives in a single long-lived `KieContainer` updated in place via `KieContainer.updateToVersion(ReleaseId)` on refresh (Drools 10 incremental-update pattern). Rule content is cached in a thread-safe LocalLRUCache; Redis is bean-wired but dormant by default. | [`LocalLRUCache`](../src/main/java/com/company/drools/cache/LocalLRUCache.java) |
 | **Authenticate admin endpoints** | When `ADMIN_API_KEY` is set, `/admin/*` requires `X-Admin-API-Key` header. Empty key = open in dev (warning logged). | [`AdminAuthFilter`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java); see [15-admin-authentication.md](15-admin-authentication.md) |
 | **Rate limit clients** | Per-client multi-tier identification (X-API-Key → Bearer → X-Client-Id → IP). 1000 req/min, 10000 req/hour. Admin endpoints exempt. | [`RateLimitingFilter`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java); see [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) |
 | **Set security headers** | 7 headers on every response (CSP, HSTS, X-Frame-Options, etc.). | [`SecurityHeadersFilter`](../src/main/java/com/company/drools/api/filter/SecurityHeadersFilter.java); see [14-security-architecture.md](14-security-architecture.md) |
@@ -51,17 +51,18 @@ This service externalizes business rules into a dedicated execution layer. Engin
 | Cache hit rate | > 90% | ~95% (L1 LRU) | LocalLRUCache stats |
 | Startup time | < 60 s | ~1.3 s | Boot logs |
 | Docker image size | < 400 MB | ~347 MB | `docker images` |
-| Memory stability | Indefinite | ✅ Stable | KieContainer disposal verified [DroolsEngineService.java:165-194](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java#L165-L194) |
+| Memory stability | Indefinite | ✅ Stable — 1 MB heap drift over 15-min mixed-workload soak with 98 refresh ops at 1000 rules | Load test 2026-05-10; see [39-load-test-findings.md](39-load-test-findings.md) |
 
 ## Production readiness
 
 The service is **production-ready** as of 2026-02-26:
 
-- **39 of 42 security findings closed** across 9 security phases. The 3 not closed: 1 doc-only, 2 explicitly skipped per user (Redis auth/TLS — defer until production deploy; dependency-version sweep — defer pending compatibility test).
-- **589 tests** across 44 test files. **96.2% instruction / 89.7% branch** coverage (JaCoCo). All passing.
+- **39 of 42 security findings closed** across 9 security phases.
+- **598 tests** across 45 test files. All passing (1 pre-existing testcontainers env error in `S3StorageIntegrationTest`, unrelated).
 - **Docker integration test plan**: 30 checks across 9 steps, all passing as of last run.
-- **Memory leak fixed** (2026-02-19): KieContainer disposal verified.
+- **Memory leak fixed** (2026-02-19, hardened 2026-05-10): KieContainer lifecycle now uses Drools 10's `updateToVersion` + explicit `KieRepository.removeKieModule(oldReleaseId)` cleanup. Verified leak-free under sustained refresh load (1 MB drift / 98 refreshes — see [39-load-test-findings.md](39-load-test-findings.md)).
 - **Java 25 enforced** at build time via Maven Enforcer Plugin (bumped from Java 17 on 2026-05-09 — see [ADR-013](36-architecture-decision-records.md#adr-013-java-17--25--spring-boot-modernization-2026-05-09)).
+- **Load tested at 1,000 rules** on 2026-05-10: P99=9 ms baseline, safe-RPS=500, 0 errors across ~197K execute requests. See [39-load-test-findings.md](39-load-test-findings.md). One architectural bug (LOADING-marker premature state) discovered + fixed during the run.
 
 ## Non-goals (what this is NOT)
 
@@ -75,7 +76,7 @@ The service is **production-ready** as of 2026-02-26:
 
 | Item | Why deferred | Planned in |
 |---|---|---|
-| JMeter performance test suite | Phase 4.3 deferred; current load testing is ad hoc | Future |
+| JMeter performance test suite | Closed 2026-05-10 — see `scripts/run-load-test.sh` orchestrator + [39-load-test-findings.md](39-load-test-findings.md) | Done |
 | Redis auth/TLS (`requirepass`, TLS connector) | Skipped per user — not needed for current local/dev posture | Production deploy |
 | Dependency version sweep | Closed 2026-05-09 via stack modernization (Java 17→25, Spring Boot 3.2.5→3.5.3, Drools 8.44.0→10.2.0) — see [ADR-013](36-architecture-decision-records.md#adr-013-java-17--25--spring-boot-modernization-2026-05-09) | Done |
 | Rule versioning / rollback semantics | Currently relies on S3 versioning + manual refresh | Roadmap |
@@ -86,7 +87,7 @@ The service is **production-ready** as of 2026-02-26:
 
 ## How a rule actually executes (one paragraph for newcomers)
 
-A client sends `POST /execute-rule` with a JSON body. Spring filters check headers, rate, size, and admin auth (in that order). The controller validates the request via `@ValidRuleId` and `@ValidRuleData` annotations. `DroolsEngineService` looks up the compiled `KieBase` for the requested `rule_id` (atomic, lock-free read). `RuleExecutor` opens a fresh `KieSession` (stateless, thread-isolated), inserts the data Map, calls `fireAllRules(maxRuleFirings=10000)`, harvests the modified Map, and disposes the session. The result and timing return as JSON. Total path on a cached hit: typically 1–40 ms.
+A client sends `POST /execute-rule` with a JSON body. Spring filters check headers, rate, size, and admin auth (in that order). The controller validates the request via `@ValidRuleId` and `@ValidRuleData` annotations. `DroolsEngineService` checks the rule's metadata is `ACTIVE` and obtains a fresh `KieSession` from the long-lived `KieContainer` (which holds the current `KieBase` for the entire rule set). `RuleExecutor` inserts the data Map, calls `fireAllRules(maxRuleFirings=10000)`, harvests the modified Map, and disposes the session. The result and timing return as JSON. Total path on a cached hit: typically 1–40 ms (P99=9 ms measured at 50 RPS with 1000 rules).
 
 ## How to use this corpus
 

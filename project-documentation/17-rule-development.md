@@ -926,14 +926,14 @@ S3 Structure:
 ### Project-specific guides
 - [16-drl-sandboxing.md](16-drl-sandboxing.md) — full sandbox allowlist/blocklist (must read before authoring)
 - [18-rule-id-and-storage-layout.md](18-rule-id-and-storage-layout.md) — rule ID format and S3 path mapping
-- [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) — all 10 sample rules with verified curl examples
+- [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) — all 17 sample rules with verified curl examples
 - [20-rule-generation-prompt.md](20-rule-generation-prompt.md) / [21](21-rule-generation-prompt-enhanced.md) / [22](22-rule-generation-prompt-concise.md) — AI rule generation prompts
 
 ### Examples in repo
-- [`sample-rules/`](../sample-rules/) — 10 production-ready sample rules
-- [`src/test/java/com/company/drools/`](../src/test/java/com/company/drools/) — 44 test files documenting actual behavior
+- [`sample-rules/`](../sample-rules/) — 17 production-ready sample rules
+- [`src/test/java/com/company/drools/`](../src/test/java/com/company/drools/) — 45 test files documenting actual behavior
 
 ---
 
-**Last Updated**: 2026-02-26
-**Version**: 1.1.0
+**Last Updated**: 2026-05-10
+**Version**: 1.2.0

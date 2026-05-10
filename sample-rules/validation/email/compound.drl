@@ -1,0 +1,26 @@
+package com.company.rules.validation.email
+
+import java.util.Map
+
+// Compound LHS: combine multiple sub-conditions using explicit && / || operators inside
+// a single fact-pattern's constraint list (rather than the implicit-AND you get from comma-
+// separating constraints). The Drools-keyword `and` / `or` operators combine WHOLE patterns
+// (e.g. `(Map(...) and Map(...))`); for compound logic INSIDE a single Map's constraints
+// you use the Java-style && and || operators.
+//
+// Substituted for the originally-planned EVAL pattern after Phase 0 found that
+// DrlSanitizer.java:102 blocks the EVAL keyword for security (arbitrary expression injection
+// risk). Compound LHS achieves the same expressive power without that keyword — it uses
+// Drools' built-in matches regex operator and explicit boolean operators.
+rule "Compound Email Validation"
+when
+    $data : Map(
+        this["email"] != null,
+        ( this["customerType"] == "internal" && this["email"] matches ".*@company\\.com$" )
+        ||
+        ( this["customerType"] == "external" && this["email"] matches ".+@.+\\..+" )
+    )
+then
+    $data.put("emailValidationResult", "VALID");
+    $data.put("validationMethod", "compound-lhs");
+end
