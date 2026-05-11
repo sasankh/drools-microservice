@@ -33,7 +33,7 @@ Write all current context you have at that moment to:
 **Write it as-is — do not compact or summarize.** Include everything you currently know:
 - What the Drools Rule Engine Microservice is
 - Current phase statuses (what's complete, what's in progress, what's next)
-- Full technology stack (Java 25, Spring Boot 3.5.3, Drools 10.2.0, AWS S3, Redis, Docker)
+- Full technology stack (Java 17, Spring Boot 3.x, Drools 8.44.0, AWS S3, Redis, Docker)
 - Repository structure (files, what each does)
 - Implementation details for completed phases (Phase 1-5 details, key notes, gotchas)
 - Architecture decisions (storage abstraction, caching strategy, security hardening)
