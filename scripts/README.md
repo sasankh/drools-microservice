@@ -6,6 +6,8 @@ Two scripts cover different use cases:
 |---|---|---|---|
 | [`e2e-load-test.sh`](#e2e-load-testsh) | Quick E2E health check + 5-min load test | ~10 min | After any code change, before merging |
 | [`run-load-test.sh`](#run-load-testsh) | Full regression harness (JMeter, 1000 rules, soak) | ~5–6 hours | After Drools/Spring Boot bumps, production readiness gates |
+| [`test-localstack.sh`](#helpers) | Validates LocalStack S3 bucket and uploaded rules | < 1 min | After `init-localstack.sh` to confirm S3 state |
+| [`docker-build-test.sh`](#helpers) | Builds Docker image and validates health checks | ~5 min | After Dockerfile or dependency changes |
 
 ---
 
@@ -44,6 +46,30 @@ Exits non-zero if any check fails. Auto-disables rate limiting in `docker-compos
 - Docker Desktop running
 - `curl`, `python3`, `bc` (all standard on macOS)
 - No JMeter needed
+
+---
+
+## Helpers
+
+### test-localstack.sh
+
+Validates that LocalStack S3 is correctly initialised — bucket exists, all 17 sample rules are present, and the app can reach them.
+
+```bash
+./scripts/test-localstack.sh
+```
+
+Run after `./init-localstack.sh` (or after `docker compose up -d`) to confirm S3 state before starting development.
+
+### docker-build-test.sh
+
+Builds the Docker image and runs a series of health and smoke checks — confirms image size, container startup, health endpoint, and basic rule execution.
+
+```bash
+./scripts/docker-build-test.sh
+```
+
+Run after Dockerfile changes, dependency updates, or a JVM/base-image bump to confirm the image still works end-to-end.
 
 ---
 

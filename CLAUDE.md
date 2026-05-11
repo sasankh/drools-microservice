@@ -116,7 +116,7 @@ docker-compose up -d
 docker build -t drools-rule-engine .
 
 # Test Docker build and validation
-./docker-build-test.sh
+./scripts/docker-build-test.sh
 
 # View application logs
 docker-compose logs -f app
@@ -276,7 +276,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
    ./init-localstack.sh
    
    # Validate LocalStack setup
-   ./test-localstack.sh
+   ./scripts/test-localstack.sh
    
    # Check all services status
    docker-compose ps
@@ -297,7 +297,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 4. **Docker Validation**: Comprehensive testing and validation
    ```bash
    # Build and test Docker image
-   ./docker-build-test.sh
+   ./scripts/docker-build-test.sh
 
    # Manual Docker validation steps
    docker build -t drools-rule-engine:latest .
@@ -363,7 +363,7 @@ For the canonical narrative — phase history, ADRs, performance targets, testin
 
 - [`project-documentation/`](project-documentation/) — full 40-doc corpus, the canonical reference
 - [`set-java-env.sh`](set-java-env.sh) — Java 25 environment setup script
-- [`docker-build-test.sh`](docker-build-test.sh) — automated Docker build and validation
+- [`docker-build-test.sh`](scripts/docker-build-test.sh) — automated Docker build and validation
 - [`setup-dev-environment.sh`](setup-dev-environment.sh) — one-command local dev setup
 - [`init-localstack.sh`](init-localstack.sh) — LocalStack bootstrap (reads from `sample-rules/`)
 - [`sample-rules/`](sample-rules/) — 17 sample DRL files (single source of truth: 10 original + 7 added 2026-05-10 covering accumulate/exists/not/salience/regex/temporal/accumulate-with-collect patterns)

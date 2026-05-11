@@ -213,10 +213,10 @@ run_integration_tests() {
     echo -e "${BLUE}🧪 Running integration tests...${NC}"
     
     # Test LocalStack setup
-    if [ -f "./test-localstack.sh" ]; then
+    if [ -f "./scripts/test-localstack.sh" ]; then
         log "Running LocalStack tests"
-        chmod +x ./test-localstack.sh
-        ./test-localstack.sh
+        chmod +x ./scripts/test-localstack.sh
+        ./scripts/test-localstack.sh
         
         if [ $? -eq 0 ]; then
             echo -e "${GREEN}✅ LocalStack integration tests passed${NC}"
@@ -283,7 +283,7 @@ show_completion_status() {
     echo "   • Setup log:          ${LOG_FILE}"
     echo "   • Sample rules:       ./sample-rules/"
     echo "   • Docker compose:     ./docker-compose.yml"
-    echo "   • LocalStack test:    ./test-localstack.sh"
+    echo "   • LocalStack test:    ./scripts/test-localstack.sh"
     echo ""
     
     # Show container status

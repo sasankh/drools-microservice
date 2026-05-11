@@ -152,7 +152,7 @@ mvn spring-boot:run -Dspring.profiles.active=dev
 docker build -t drools-rule-engine:latest .
 
 # Run comprehensive Docker validation
-./docker-build-test.sh
+./scripts/docker-build-test.sh
 
 # Run the container
 docker run -p 8080:8080 -p 8081:8081 \
@@ -728,7 +728,7 @@ docker-compose up -d
 ./init-localstack.sh
 
 # Test LocalStack integration
-./test-localstack.sh
+./scripts/test-localstack.sh
 
 # View all services status
 docker-compose ps
@@ -1026,7 +1026,7 @@ mvn spring-boot:run
 docker build -t drools-rule-engine:latest .
 
 # Test Docker build (validates image and health checks)
-./docker-build-test.sh
+./scripts/docker-build-test.sh
 
 # Run with environment variables
 docker run -p 8080:8080 -p 8081:8081 \
@@ -1180,7 +1180,7 @@ docker build --no-cache -t drools-rule-engine:latest .
 docker info
 
 # Verify Dockerfile syntax
-./docker-build-test.sh
+./scripts/docker-build-test.sh
 ```
 
 #### 2. Container startup issues

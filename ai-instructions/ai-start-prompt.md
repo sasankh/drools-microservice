@@ -239,7 +239,7 @@ When auto-compact or manual compact (`/compact` command) happens:
 - Understand existing architecture before modifying
 - Follow established patterns (factory, abstraction layers)
 - Update documentation if changing APIs or configuration
-- Test with Docker: `./docker-build-test.sh`
+- Test with Docker: `./scripts/docker-build-test.sh`
 - Run code formatting: `mvn spotless:apply`
 
 ### When Deploying
@@ -320,8 +320,8 @@ drools-microservice/
 ├── scripts/                  # Automation scripts
 │   ├── setup-dev-environment.sh # One-command setup
 │   ├── init-localstack.sh   # LocalStack initialization
-│   ├── test-localstack.sh   # LocalStack validation
-│   └── docker-build-test.sh # Docker validation
+│   ├── test-localstack.sh   # LocalStack validation (moved to scripts/)
+│   └── docker-build-test.sh # Docker validation (moved to scripts/)
 │
 ├── Dockerfile                # Multi-stage Docker build (347MB)
 ├── docker-compose.yml        # Dev stack (LocalStack + Redis + App)
