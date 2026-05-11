@@ -44,7 +44,7 @@ The Drools Rule Engine Microservice is a high-performance, cloud-native business
 
 - **Stateless Design**: Each request is independent, enabling horizontal scaling
 - **Polyglot Rule Storage**: Rules stored as .drl files in S3 with hierarchical organization
-- **Multi-Tier Caching**: S3 → Redis → LRU → Compiled KieBase for optimal performance
+- **Multi-Tier Caching**: Refresh path: S3 → Redis (L2, DRL text) → LocalLRU (L1, DRL text); Execution path: compiled KieBases in a single long-lived KieContainer
 - **API Architecture**: All API endpoints on port 8080, Actuator on port 8081
 - **Memory Stable**: Proper resource disposal prevents memory leaks and OOM errors
 - **Cloud-Native**: Containerized, 12-factor app compliant, AWS-ready
@@ -95,12 +95,14 @@ The Drools Rule Engine Microservice is a high-performance, cloud-native business
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    CACHING LAYER                                 │
-│  ┌────────────┐    ┌────────────┐    ┌────────────┐            │
-│  │ LRU Cache  │ ←→ │   Redis    │ ←→ │ Compiled   │            │
-│  │ (L1 Fast)  │    │ (L2 Shared)│    │ KieBase    │            │
-│  │  In-Memory │    │  Optional  │    │  Cache     │            │
-│  └────────────┘    └────────────┘    └────────────┘            │
+│              REFRESH / STARTUP PATH (DRL text only)              │
+│  ┌────────────┐    ┌────────────┐    ┌────────────────────────┐ │
+│  │ LocalLRU   │ ←→ │   Redis    │ ←→ │ DroolsEngineService    │ │
+│  │ (L1, DRL)  │    │ (L2, DRL)  │    │ loadedRules +          │ │
+│  │  In-Memory │    │  Optional  │    │ kieContainer (compiled) │ │
+│  └────────────┘    └────────────┘    └────────────────────────┘ │
+│  Note: LocalLRU and Redis store raw DRL text. Compiled KieBases  │
+│  live in kieContainer only. Execution bypasses LRU/Redis.        │
 └─────────────────────────────────────────────────────────────────┘
                               ▲
                               │
@@ -436,48 +438,56 @@ File Path: "./rules/pricing/discount/vip.drl"
 
 #### Caching Architecture
 
+**Execution path** (POST /execute-rule — LRU and Redis are NOT consulted):
 ```
 Request for Rule ID
     ↓
-┌──────────────────────────────────────────────┐
-│  L1: LRU Cache (In-Memory, Fast)             │
-│  - Size: 100 rules (default)                 │
-│  - Eviction: Least Recently Used             │
-│  - Latency: < 1ms                            │
-│  - Scope: Single JVM instance                │
-└──────────────────────────────────────────────┘
-    │ Miss
+DroolsEngineService.loadedRules (ConcurrentHashMap — all loaded rules in memory)
+    ↓ rule found → kieContainer.newKieSession()
+RuleExecutor.fireAllRules()
+    ↓
+Response
+```
+
+**Refresh / startup path** (POST /admin/refresh-rules, startup warm-up):
+```
+S3 (source of truth)
     ↓
 ┌──────────────────────────────────────────────┐
-│  L2: Redis Cache (Shared, Optional)          │
+│  L2: Redis Cache (DRL text, optional)        │
+│  - Stores raw .drl source text only          │
 │  - TTL: 1 hour (default)                     │
-│  - Latency: 1-5ms                            │
 │  - Scope: All instances (shared)             │
 │  - Circuit breaker: Fallback to S3 on error  │
 └──────────────────────────────────────────────┘
-    │ Miss
-    ↓
+    ↓ (also populates)
 ┌──────────────────────────────────────────────┐
-│  L3: S3 Storage (Source of Truth)            │
-│  - Latency: 50-200ms                         │
-│  - Durability: 99.999999999%                 │
-│  - Result cached in L2 and L1                │
+│  L1: LocalLRUCache (DRL text, per-instance)  │
+│  - Stores raw .drl source text only          │
+│  - Size: LRU_CACHE_MAX_SIZE entries (def 100)│
+│  - Eviction: Least Recently Used             │
+│  - Latency: < 1ms (in-memory lookup)         │
 └──────────────────────────────────────────────┘
+    ↓ (compiled into)
+DroolsEngineService.kieContainer
+    All rules compiled simultaneously, no eviction
 ```
 
-#### LRUCacheService (L1 Cache)
+#### LocalLRUCache (L1, DRL text cache)
 
 **Implementation**:
-- `LinkedHashMap` with access-order and size limit
-- Thread-safe with `Collections.synchronizedMap`
-- LRU eviction policy (removes least recently used)
+- `LinkedHashMap<String, Rule>` with access-order and size limit
+- Stores raw DRL source text + metadata — **not compiled KieBases**
+- Thread-safe with explicit write lock (required on `get()` — see ADR-004)
+- LRU eviction policy (removes least recently accessed DRL text entry)
 
 **Configuration**:
-- `LRU_CACHE_MAX_SIZE`: Maximum entries (default: 100)
+- `LRU_CACHE_MAX_SIZE`: Maximum DRL text entries cached (default: 100)
 
 **Performance**:
-- Hit rate: ~80-90% in production workloads
+- Memory: ~10 KB per entry (DRL text) — 100 entries ≈ 1 MB total
 - Latency: < 1ms (in-memory lookup)
+- **Not in the execution hot path** — only consulted during refresh/warm-up
 
 **Cache Invalidation**:
 - Manual: `/admin/refresh-rules` clears cache

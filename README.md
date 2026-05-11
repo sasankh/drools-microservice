@@ -1136,29 +1136,36 @@ curl http://localhost:8080/admin/rules | jq '.rules[].avg_execution_time_ms'
 
 ### Rule Capacity & Memory Sizing
 
-There are two limits to understand: the **LRU cache cap** (how many compiled rules stay hot in memory) and the **heap limit** (how many can fit before GC pressure becomes a problem).
+Understanding the two distinct caching layers helps answer this correctly.
 
-**LRU cache cap** — controlled by `LRU_CACHE_MAX_SIZE` (default `100`). Rules beyond this are evicted and re-compiled on next access. Raise this freely; the only real constraint is heap.
+**Two separate caching layers:**
 
-**Heap capacity** — compiled `KieBase` objects vary in size by rule complexity. With the default `-Xmx2048m` (2 GB):
+| Layer | What it stores | Used when | Memory impact |
+|---|---|---|---|
+| `LocalLRUCache` / Redis | Raw DRL source text (`Rule` objects, ~10 KB each) | Refresh and startup warm-up only | Negligible — 100 entries ≈ 1 MB |
+| `DroolsEngineService.kieContainer` | All compiled `KieBase` objects simultaneously | Every rule execution | Significant — grows with rule count |
 
-| Rule complexity | Approx compiled KieBase size | Comfortable fit in 2 GB heap |
-|---|---|---|
-| Simple (1–2 conditions) | ~0.5 MB | ~1,500–2,000 rules |
-| Medium (accumulate, joins) | ~2–3 MB | ~400–600 rules |
-| Complex (forall, multi-join, salience chains) | ~5–10 MB | ~150–300 rules |
+**Key point:** `LRU_CACHE_MAX_SIZE` controls how many DRL text strings are cached before eviction to Redis/S3. It has no effect on compiled rules — all loaded rules are always compiled in the `KieContainer` simultaneously. There is no eviction of compiled rules.
 
-**Load-test baseline (2026-05-11):** 1,000 synthetic rules compiled in ~46s, heap settled at ~47 MB post-GC, peak during compilation ~400–600 MB.
+**Real capacity limit = heap / compiled-rule size.** Only `-Xmx` matters.
 
-To increase capacity, raise both `LRU_CACHE_MAX_SIZE` and `-Xmx` together:
+**Load-test baseline (2026-05-11):** 1,000 synthetic rules compiled in ~46s, heap settled at **~47 MB post-GC** (~47 KB/rule average), peak during compilation ~400–600 MB.
+
+For complex rules (forall, accumulate, multi-join patterns) compiled size is higher — estimate 1–5 MB per complex rule based on pattern density. Measure with your actual rules using the memory endpoint:
 
 ```bash
-# Example: 500 complex rules on a 4 vCPU / 8 GB instance
-LRU_CACHE_MAX_SIZE=500
+curl http://localhost:8080/admin/memory/info | jq '.heap.usedMB'
+# Load N rules, take the difference — divide by N for per-rule cost
+```
+
+To increase rule capacity, raise `-Xmx`:
+
+```bash
+# Example: large rule set on an 8 GB instance
 JAVA_OPTS="-Xms1g -Xmx6g -XX:+UseG1GC"
 ```
 
-S3 storage has no rule count limit — only the JVM heap constrains what is compiled and cached locally per instance.
+S3 storage has no rule count limit — only the JVM heap constrains how many compiled rules fit per instance.
 
 ### Alerting
 

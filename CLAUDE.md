@@ -190,8 +190,9 @@ com.company.drools/
 1. **Rule Storage**: Rules are stored as .drl files in S3 with hierarchical organization (e.g., `pricing/discount/black-friday.drl`)
 
 2. **Caching Strategy**: 
-   - S3 → Redis (optional) → Local LRU Cache → Rule Execution
-   - Compiled KieBase objects cached locally for performance
+   - Refresh/startup path: S3 → Redis (optional, L2) → LocalLRUCache (L1, DRL text only)
+   - Execution path: DroolsEngineService.kieContainer (all compiled rules, no eviction)
+   - LocalLRUCache and Redis store raw DRL source text only — compiled KieBases live exclusively in the single long-lived KieContainer
 
 3. **API Design**:
    - Main API on port 8080 (`/execute-rule`)

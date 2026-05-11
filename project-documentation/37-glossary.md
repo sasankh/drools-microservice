@@ -97,7 +97,7 @@ The dot-separated identifier for a rule. Format: `{domain}.{category}.{specific}
 The storage backend, controlled by `RULE_SOURCE` env var. Three values: `local` (in-memory), `file` (filesystem), `s3` (AWS S3 / LocalStack). Default `local`.
 
 ### LRU cache
-The in-process `Map`-based cache of compiled rules (`LocalLRUCache`). `@Primary` Spring bean. Uses **write lock on `get()`** because `LinkedHashMap` with `accessOrder=true` mutates internally on access (see ADR-004).
+The in-process `Map`-based cache of **DRL source text** (`LocalLRUCache`). `@Primary` Spring bean. Stores raw `.drl` content + metadata (`Rule` objects, ~10 KB each) — **not compiled KieBases**. Used during rule refresh and startup warm-up only; the execution hot path bypasses it entirely (goes directly to `DroolsEngineService.kieContainer`). Uses **write lock on `get()`** because `LinkedHashMap` with `accessOrder=true` mutates internally on access (see ADR-004).
 
 ### `RedisRuleCache`
 Distributed cache using Redis. Bean exists but is **dormant by default** because `LocalLRUCache` is `@Primary`. Activated when `REDIS_ENABLED=true` AND another bean is no longer marked primary. See ADR-005.
