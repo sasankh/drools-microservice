@@ -330,6 +330,29 @@
                     </includes>
                 </configuration>
             </plugin>
+
+            <!-- OWASP Dependency Check -->
+            <plugin>
+                <groupId>org.owasp</groupId>
+                <artifactId>dependency-check-maven</artifactId>
+                <version>12.1.1</version>
+                <configuration>
+                    <!-- Fail build if any dependency has a CVSS score >= 7 (HIGH) -->
+                    <failBuildOnCVSS>7</failBuildOnCVSS>
+                    <!-- Skip test-scoped dependencies -->
+                    <skipTestScope>true</skipTestScope>
+                    <!-- HTML + JSON reports in target/dependency-check -->
+                    <outputDirectory>${project.build.directory}/dependency-check</outputDirectory>
+                    <formats>
+                        <format>HTML</format>
+                        <format>JSON</format>
+                    </formats>
+                    <!-- Suppress known false positives -->
+                    <suppressionFiles>
+                        <suppressionFile>dependency-check-suppressions.xml</suppressionFile>
+                    </suppressionFiles>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 </project>
