@@ -119,7 +119,7 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 |---|---|
 | Total documentation files | **40** (including this one) |
 | Total Java source files | 57 |
-| Total test files | 44 |
+| Total test files | 45 |
 | Total tests (`@Test` + `@ParameterizedTest`) | **597** |
 | Test coverage (instruction / branch) | 96.2% / 89.7% |
 | Sample rules in `sample-rules/` | 17 |

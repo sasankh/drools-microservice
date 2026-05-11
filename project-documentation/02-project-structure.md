@@ -159,7 +159,7 @@ The `application.yml` is the most-referenced config file in the codebase. See [0
 
 ### `src/test/java/com/company/drools/`
 
-44 test files, 597 tests passing (1 pre-existing testcontainers env error, unrelated). Coverage roughly preserved from the 96.2% / 89.7% pre-modernization baseline.
+45 test files, 597 tests passing (1 pre-existing testcontainers env error, unrelated). Coverage roughly preserved from the 96.2% / 89.7% pre-modernization baseline.
 
 ```
 src/test/java/com/company/drools/

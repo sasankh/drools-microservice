@@ -4,7 +4,7 @@ A high-performance business rule execution microservice built with Spring Boot a
 
 > ## 📚 Full documentation
 >
-> The full documentation lives in [`project-documentation/`](project-documentation/) — 39 docs covering architecture, APIs, security, deployment, operations, and rule authoring.
+> The full documentation lives in [`project-documentation/`](project-documentation/) — 40 docs covering architecture, APIs, security, deployment, operations, and rule authoring.
 >
 > **Start here**: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md) — the entry point with role-based reading paths.
 >
@@ -572,7 +572,7 @@ done
 
 Rules are written in Drools (.drl) format and stored with hierarchical organization:
 
-#### Rule Structure (10 Sample Rules Included)
+#### Rule Structure (17 Sample Rules Included)
 ```
 sample-rules/                          # Single source of truth for all .drl files
 ├── pricing/
@@ -751,7 +751,7 @@ docker-compose ps
    # Or upload manually:
    aws --endpoint-url=http://localhost:4566 s3 sync sample-rules/ s3://local-rules/
 
-   # Verify rules uploaded (should show 10 .drl files)
+   # Verify rules uploaded (should show 17 .drl files)
    aws --endpoint-url=http://localhost:4566 s3 ls s3://local-rules/ --recursive
    ```
 
@@ -894,7 +894,7 @@ docker-compose down
 
 #### Docker Image Details
 
-- **Base Image**: Amazon Corretto 17 Alpine (JDK)
+- **Base Image**: Amazon Corretto 25 Alpine (JDK)
 - **Final Image Size**: ~347MB (optimized multi-stage build)
 - **Security**: Runs as non-root user (`appuser`)
 - **Health Checks**: Built-in HTTP health endpoint monitoring
@@ -1057,7 +1057,7 @@ docker-compose down && docker-compose up -d
 docker-compose logs app
 
 # Local development - check Java version
-java -version  # Should be 17+
+java -version  # Should be 25
 
 # Check if ports are available
 lsof -i :8080
@@ -1133,5 +1133,5 @@ docker-compose exec app jstat -gc 1
 
 For support and questions:
 - Create an issue in this repository
-- Check the [project documentation](project-documentation/00-system-overview.md) — entry point for all 39 docs
+- Check the [project documentation](project-documentation/00-system-overview.md) — entry point for all 40 docs
 - Review the [troubleshooting guide](project-documentation/31-troubleshooting.md) and [FAQ](project-documentation/35-faq.md)

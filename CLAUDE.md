@@ -9,13 +9,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. `ai-instructions/ai-initial-context-instructions.md` — how to handle the `ai-context-update` command
 
 ### Project documentation (the canonical reference)
-3. **`project-documentation/00-system-overview.md`** — entry point for all 39 docs. Has role-based reading paths.
+3. **`project-documentation/00-system-overview.md`** — entry point for all 40 docs. Has role-based reading paths.
 
 The full documentation corpus is in `project-documentation/`. See [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md) for the index and reading paths by role.
 
 The legacy consolidated context file at `.ai-workspace/ai-initial-context/ai-initial-context-latest.md` is no longer the primary reference — the structured `project-documentation/` corpus supersedes it.
 
 ## ⚠️ Important: Recent change log (most recent first)
+
+### Sonar quality gates cleared (2026-05-11)
+- **Maintainability**: 178 → 0 open issues (Waves 4A–4D: AssertJ modernization, parameterized tests, constructor injection, unused fields, cognitive complexity, ReDoS hotspots)
+- **Reliability**: 5 → 0 (BLOCKER fixed: KieSession try-with-resources; S2142 InterruptedException handling; S2583 dead branch; S6813 constructor injection for validators)
+- **Security hotspots**: 2 resolved — `CorsConfig` regex ReDoS (S5852) and `DrlSanitizer` IMPORT_PATTERN possessive quantifiers
+- **Quality Gate**: OK on all three conditions (new_coverage 89.7%, new_violations 0, no duplications)
+- **Test count**: 597 (down 1 from parameterized test consolidation in Wave 4B)
 
 ### Tooling: SonarQube MCP wired into Claude Code (2026-05-10)
 This repo supports a SonarQube MCP server, but **`.mcp.json` is gitignored** because it holds a SonarQube token. Each developer creates their own. To set it up:
@@ -43,7 +50,7 @@ Docker must be running; the MCP launches `mcp/sonarqube` per session. See [`.env
 - **LOADING-marker bug fix**: latent at 10-rule scale (sub-ms compile); surfaced at 1000 rules (~46s compile) as a 1.5% error rate during refresh windows. Fixed in [`DroolsEngineService.loadOrReplaceRule`](src/main/java/com/company/drools/core/engine/DroolsEngineService.java).
 - **Sample-rules cookbook 10 → 17**: added 7 rules covering `accumulate`, `exists`, `not`, `salience`, regex, temporal, and accumulate-with-collect patterns. All under [`sample-rules/`](sample-rules/); cookbook in [`19-sample-rules-cookbook.md`](project-documentation/19-sample-rules-cookbook.md).
 - **Load test orchestrator**: `scripts/run-load-test.sh` runs the full Phase 0–8 suite end-to-end (1000 rules, JMeter, mixed-workload soak). Findings in [`project-documentation/39-load-test-findings.md`](project-documentation/39-load-test-findings.md).
-- **Test count**: 589 → 598; **test files**: 44 → 45.
+- **Test count**: 589 → 598 (load test session) → 597 (Sonar Wave 4B parameterized consolidation); **test files**: 45.
 
 ### Stack modernization (2026-05-09)
 - **Java 17 → 25 LTS** (Maven Enforcer Plugin range `[25,26)`).
@@ -77,7 +84,7 @@ This is a Drools Rule Engine Microservice designed for high-performance business
 
 **Tech Stack**: Java 25 (enforced), Spring Boot 3.5.3, Drools 10.2.0, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
 
-**Health Status**: 9/10 - 598 tests, 96%/90% coverage (pre-modernization baseline), 39/42 security fixes complete, load-tested at 1000 rules
+**Health Status**: 9/10 - 597 tests, 96%/90% coverage (pre-modernization baseline), 39/42 security fixes complete, load-tested at 1000 rules, Sonar QG OK (0 maintainability / 0 reliability / 0 security issues)
 
 ## Common Commands
 
@@ -255,7 +262,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 ## Development Workflow
 
-1. **Current Status**: 39/42 security findings addressed (Phases 1–9 complete, 2026-02-26); stack modernized 2026-05-09 (Java 25, Spring Boot 3.5.3, Drools 10.2.0); Drools 10 rule-loading rework + sample-rules expansion + 1000-rule load test 2026-05-10; 598 tests; 96% / 90% coverage (pre-modernization baseline); documentation rebuild 2026-05-08 with refreshes 2026-05-09 + 2026-05-10 (40 numbered docs in [`project-documentation/`](project-documentation/) including new [`39-load-test-findings.md`](project-documentation/39-load-test-findings.md)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
+1. **Current Status**: 39/42 security findings addressed (Phases 1–9 complete, 2026-02-26); stack modernized 2026-05-09 (Java 25, Spring Boot 3.5.3, Drools 10.2.0); Drools 10 rule-loading rework + sample-rules expansion + 1000-rule load test 2026-05-10; Sonar Wave 4 (maintainability 178→0, reliability 5→0, 2 security hotspots resolved) 2026-05-11; 597 tests; 96% / 90% coverage (pre-modernization baseline); documentation rebuild 2026-05-08 with refreshes through 2026-05-11 (40 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
 
 2. **One-Command Development Environment**: Complete automated setup with validation
    ```bash
@@ -332,7 +339,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 ## Implementation Status
 
-All seven phases are shipped:
+All phases shipped:
 1. ✅ Core Infrastructure (Spring Boot + Drools)
 2. ✅ Storage & Caching (S3 + Redis)
 3. ✅ Production Readiness (Security, Performance, Monitoring)
@@ -342,10 +349,11 @@ All seven phases are shipped:
 7. ✅ Security Hardening — 39/42 findings, Phases 1–9 (2026-02-26)
 8. ✅ Stack Modernization — Java 17→25, Spring Boot 3.2.5→3.5.3, Drools 8.44.0→10.2.0 (2026-05-09)
 9. ✅ Drools 10 rule-loading rework + sample-rules expansion (10→17) + 1000-rule load test (2026-05-10)
+10. ✅ Sonar quality gates — Maintainability 178→0, Reliability 5→0, Security hotspots 2→0 (2026-05-11)
 
 Current snapshot:
 - **Health Score**: 9/10
-- **Test Coverage**: 96.2% instruction / 89.7% branch (598 tests; coverage is the pre-modernization JaCoCo baseline — roughly preserved, not yet re-run)
+- **Test Coverage**: 96.2% instruction / 89.7% branch (597 tests; coverage is the pre-modernization JaCoCo baseline — roughly preserved, not yet re-run)
 - **Security**: 39/42 findings addressed
 - **Performance**: 100–1000 RPS target, P99 < 100ms cached / < 500ms cache miss (load-tested at 1000 rules — see [`39-load-test-findings.md`](project-documentation/39-load-test-findings.md))
 

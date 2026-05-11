@@ -4,14 +4,14 @@
 |---|---|
 | **Audience** | Developers, AI agents inspecting test coverage |
 | **Purpose** | Test suite map, how to run tests, how to add new ones, and the test cases that prove the most important behaviors |
-| **Last verified against** | All `src/test/java/com/company/drools/**/*.java` on 2026-05-11 (44 test files, 597 `@Test`/`@ParameterizedTest` annotations) |
+| **Last verified against** | All `src/test/java/com/company/drools/**/*.java` on 2026-05-11 (45 test files, 597 `@Test`/`@ParameterizedTest` annotations) |
 | **Related docs** | [27-development-setup.md](27-development-setup.md), [16-drl-sandboxing.md](16-drl-sandboxing.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
 
 ## TL;DR
 
-- **44 test files**, **597 tests**, ~96.2% instruction / ~89.7% branch coverage (JaCoCo, pre-modernization baseline; coverage roughly preserved post-modernization but JaCoCo not yet re-run).
+- **45 test files**, **597 tests**, ~96.2% instruction / ~89.7% branch coverage (JaCoCo, pre-modernization baseline; coverage roughly preserved post-modernization but JaCoCo not yet re-run).
 - Run all: `mvn test`
 - Run one: `mvn test -Dtest=DroolsEngineServiceTest`
 - Coverage report: `mvn test jacoco:report` → `target/site/jacoco/index.html`
