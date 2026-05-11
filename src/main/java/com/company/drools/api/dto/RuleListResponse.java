@@ -72,15 +72,12 @@ public class RuleListResponse {
     @JsonProperty("avg_execution_time_ms")
     private double avgExecutionTimeMs;
 
-    @JsonProperty("cached")
-    private boolean cached;
-
     @JsonProperty("version")
     private String version;
 
     public RuleInfo() {}
 
-    @SuppressWarnings("java:S107") // DTO constructor — 8 fields represent distinct rule state
+    @SuppressWarnings("java:S107") // DTO constructor — 7 fields represent distinct rule state
     public RuleInfo(
         String ruleId,
         String status,
@@ -88,7 +85,6 @@ public class RuleListResponse {
         Instant lastModified,
         long executionCount,
         double avgExecutionTimeMs,
-        boolean cached,
         String version) {
       this.ruleId = ruleId;
       this.status = status;
@@ -96,7 +92,6 @@ public class RuleListResponse {
       this.lastModified = lastModified;
       this.executionCount = executionCount;
       this.avgExecutionTimeMs = avgExecutionTimeMs;
-      this.cached = cached;
       this.version = version;
     }
 
@@ -147,14 +142,6 @@ public class RuleListResponse {
 
     public void setAvgExecutionTimeMs(double avgExecutionTimeMs) {
       this.avgExecutionTimeMs = avgExecutionTimeMs;
-    }
-
-    public boolean isCached() {
-      return cached;
-    }
-
-    public void setCached(boolean cached) {
-      this.cached = cached;
     }
 
     public String getVersion() {

@@ -6,9 +6,7 @@ import com.company.drools.api.dto.RefreshRuleResponse;
 import com.company.drools.api.dto.RefreshRulesResponse;
 import com.company.drools.api.dto.RuleListResponse;
 import com.company.drools.api.validation.ValidRuleId;
-import com.company.drools.cache.CacheStatistics;
-import com.company.drools.cache.RedisRuleCache;
-import com.company.drools.cache.RuleCache;
+import com.company.drools.cache.RuleRefreshPublisher;
 import com.company.drools.common.LogSanitizer;
 import com.company.drools.config.ThreadPoolConfig;
 import com.company.drools.core.engine.DroolsEngineService;
@@ -55,11 +53,22 @@ public class AdminController {
   private static final String ENDPOINT_ADMIN_HEALTH = "/admin/health";
   private static final String ENDPOINT_ADMIN_THREAD_POOLS = "/admin/thread-pools";
 
+  private static final String METRIC_CACHE_HIT = "drools.cache.hit";
+  private static final String METRIC_CACHE_MISS = "drools.cache.miss";
+  private static final String TAG_LAYER = "layer";
+  private static final String LAYER_REDIS = "redis";
+
   private final DroolsEngineService droolsEngineService;
   private final StorageFactory storageFactory;
-  private final RuleCache ruleCache;
   private final MeterRegistry meterRegistry;
   private final ThreadPoolConfig threadPoolConfig;
+
+  /**
+   * Optional pub/sub publisher; present only when {@code redis.enabled=true &&
+   * redis.pubsub.enabled=true}. After a successful refresh, we publish an event so sibling ECS
+   * tasks update their kieContainer.
+   */
+  @Nullable private final RuleRefreshPublisher refreshPublisher;
 
   @Value("${drools.rule-source:memory}")
   private String ruleSource;
@@ -82,22 +91,22 @@ public class AdminController {
   public AdminController(
       DroolsEngineService droolsEngineService,
       StorageFactory storageFactory,
-      RuleCache ruleCache,
       MeterRegistry meterRegistry,
       ThreadPoolConfig threadPoolConfig,
       @Nullable RedisConnectionFactory redisConnectionFactory,
       @Nullable S3Client s3Client,
       @Nullable @Qualifier("s3CircuitBreaker") CircuitBreaker s3CircuitBreaker,
-      @Nullable @Qualifier("redisCircuitBreaker") CircuitBreaker redisCircuitBreaker) {
+      @Nullable @Qualifier("redisCircuitBreaker") CircuitBreaker redisCircuitBreaker,
+      @Nullable RuleRefreshPublisher refreshPublisher) {
     this.droolsEngineService = droolsEngineService;
     this.storageFactory = storageFactory;
-    this.ruleCache = ruleCache;
     this.meterRegistry = meterRegistry;
     this.threadPoolConfig = threadPoolConfig;
     this.redisConnectionFactory = redisConnectionFactory;
     this.s3Client = s3Client;
     this.s3CircuitBreaker = s3CircuitBreaker;
     this.redisCircuitBreaker = redisCircuitBreaker;
+    this.refreshPublisher = refreshPublisher;
   }
 
   /** Enhanced health check endpoint with component status. */
@@ -135,7 +144,7 @@ public class AdminController {
       // Check Redis health if enabled
       if (redisEnabled) {
         ComponentHealth redisHealth = checkRedisHealth();
-        components.put("redis", redisHealth);
+        components.put(LAYER_REDIS, redisHealth);
         // Redis being down is not critical if local cache works
       }
 
@@ -240,17 +249,20 @@ public class AdminController {
   private ComponentHealth checkCacheHealth() {
     Map<String, Object> details = new HashMap<>();
     try {
-      details.put("enabled", ruleCache.isEnabled());
-      details.put("size", ruleCache.size());
-      details.put("max_size", ruleCache.maxSize());
+      details.put("enabled", redisEnabled);
+      details.put("mode", redisEnabled ? LAYER_REDIS : "off");
 
-      if (ruleCache.isEnabled()) {
-        CacheStatistics stats = ruleCache.getStatistics();
+      if (redisEnabled) {
+        // Pull hit/miss counters from the metrics registry — they're maintained by
+        // RedisCachedRuleStorage. Total counts are cumulative since process start.
+        double hits = counterValue(METRIC_CACHE_HIT, TAG_LAYER, LAYER_REDIS);
+        double misses = counterValue(METRIC_CACHE_MISS, TAG_LAYER, LAYER_REDIS);
+        double total = hits + misses;
         Map<String, Object> statsMap = new HashMap<>();
-        statsMap.put("hits", stats.getHits());
-        statsMap.put("misses", stats.getMisses());
-        statsMap.put("evictions", stats.getEvictions());
-        statsMap.put("hit_rate", String.format("%.2f%%", stats.getHitRate() * 100));
+        statsMap.put("hits", (long) hits);
+        statsMap.put("misses", (long) misses);
+        statsMap.put(
+            "hit_rate", total == 0 ? "0.00%" : String.format("%.2f%%", (hits / total) * 100));
         details.put("statistics", statsMap);
       }
 
@@ -259,6 +271,11 @@ public class AdminController {
       details.put(STATUS_ERROR, e.getMessage());
       return new ComponentHealth(STATUS_DOWN, details);
     }
+  }
+
+  private double counterValue(String name, String... tags) {
+    var counter = meterRegistry.find(name).tags(tags).counter();
+    return counter == null ? 0.0 : counter.count();
   }
 
   private ComponentHealth checkRedisHealth() {
@@ -277,11 +294,7 @@ public class AdminController {
         connection.close();
       }
       details.put("connected", true);
-
-      // Get Redis info if it's RedisRuleCache
-      if (ruleCache instanceof RedisRuleCache) {
-        details.put("cache_type", "RedisRuleCache");
-      }
+      details.put("cache_decorator", "RedisCachedRuleStorage");
 
       return new ComponentHealth(STATUS_UP, details);
     } catch (Exception e) {
@@ -332,12 +345,13 @@ public class AdminController {
   }
 
   private double calculateCacheHitRate() {
-    if (!ruleCache.isEnabled()) {
+    if (!redisEnabled) {
       return 0.0;
     }
-
-    CacheStatistics stats = ruleCache.getStatistics();
-    return stats.getHitRate();
+    double hits = counterValue(METRIC_CACHE_HIT, TAG_LAYER, LAYER_REDIS);
+    double misses = counterValue(METRIC_CACHE_MISS, TAG_LAYER, LAYER_REDIS);
+    double total = hits + misses;
+    return total == 0 ? 0.0 : hits / total;
   }
 
   /** Get basic system info. */
@@ -408,12 +422,11 @@ public class AdminController {
     int rulesFailed = 0;
 
     try {
-      // Load rules from storage
+      // Invalidate Redis cache (no-op when disabled) BEFORE re-reading from storage,
+      // so getAllRules() repopulates Redis with fresh DRL text from S3.
       RuleStorage storage = storageFactory.createRuleStorage();
+      storage.refreshCache();
       List<Rule> rules = storage.getAllRules();
-
-      // Clear cache before reloading
-      ruleCache.clear();
 
       // Reload rules into engine
       boolean success = droolsEngineService.loadRules(rules);
@@ -421,9 +434,10 @@ public class AdminController {
       if (success) {
         rulesLoaded = rules.size();
 
-        // Warm up cache with new rules
-        if (ruleCache.isEnabled()) {
-          ruleCache.warmUp(rules);
+        // Notify sibling ECS tasks via Redis pub/sub so they update their kieContainers.
+        // No-op when pub/sub is disabled (publisher is null).
+        if (refreshPublisher != null) {
+          refreshPublisher.publishBulkRefresh();
         }
 
         log.info("Successfully refreshed {} rules", rulesLoaded);
@@ -460,8 +474,10 @@ public class AdminController {
               ? currentMetadata.getLastModified().atZone(java.time.ZoneOffset.UTC).toInstant()
               : null;
 
-      // Load rule from storage
+      // Invalidate the single Redis key (no-op when Redis disabled), then re-fetch from
+      // storage. The decorator repopulates Redis on the way back.
       RuleStorage storage = storageFactory.createRuleStorage();
+      storage.refreshRule(ruleId);
       Optional<Rule> ruleOpt = storage.getRule(ruleId);
 
       if (ruleOpt.isEmpty()) {
@@ -472,9 +488,6 @@ public class AdminController {
 
       Rule rule = ruleOpt.get();
 
-      // Remove from cache
-      ruleCache.remove(ruleId);
-
       // Reload rule into engine. loadOrReplaceRule merges the new rule into the current loaded
       // set before recompiling, so other rules continue to fire after a single-rule refresh.
       // (Previously this called loadRules(List.of(rule)) which silently replaced the entire
@@ -482,8 +495,10 @@ public class AdminController {
       boolean success = droolsEngineService.loadOrReplaceRule(rule);
 
       if (success) {
-        // Add back to cache
-        ruleCache.put(rule);
+        // Notify sibling ECS tasks so they refresh their own kieContainer.
+        if (refreshPublisher != null) {
+          refreshPublisher.publishRefresh(ruleId);
+        }
 
         long compilationTime = System.currentTimeMillis() - startTime;
         Instant currentVersion =
@@ -525,7 +540,6 @@ public class AdminController {
                   entry -> {
                     String ruleId = entry.getKey();
                     RuleMetadata metadata = entry.getValue();
-                    boolean cached = ruleCache.contains(ruleId);
 
                     return new RuleListResponse.RuleInfo(
                         ruleId,
@@ -541,7 +555,6 @@ public class AdminController {
                             : null,
                         metadata.getExecutionCount(),
                         metadata.getAverageExecutionTimeMs(),
-                        cached,
                         metadata.getVersion());
                   })
               .toList();

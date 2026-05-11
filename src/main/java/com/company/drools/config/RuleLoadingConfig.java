@@ -1,6 +1,5 @@
 package com.company.drools.config;
 
-import com.company.drools.cache.RuleCache;
 import com.company.drools.core.engine.DroolsEngineService;
 import com.company.drools.core.model.Rule;
 import com.company.drools.storage.RuleStorage;
@@ -19,7 +18,7 @@ public class RuleLoadingConfig {
 
   @Bean
   public ApplicationRunner loadRulesOnStartup(
-      DroolsEngineService droolsEngineService, StorageFactory storageFactory, RuleCache ruleCache) {
+      DroolsEngineService droolsEngineService, StorageFactory storageFactory) {
     return args -> {
       log.info("Loading rules on application startup...");
 
@@ -35,16 +34,6 @@ public class RuleLoadingConfig {
               "Successfully loaded {} rules. Active rules: {}",
               rules.size(),
               droolsEngineService.getActiveRulesCount());
-
-          // Warm up the cache with loaded rules
-          if (ruleCache.isEnabled() && !rules.isEmpty()) {
-            log.info("Warming up cache with {} rules...", rules.size());
-            ruleCache.warmUp(rules);
-            log.info("Cache warm-up complete. Cache size: {}", ruleCache.size());
-          } else if (!ruleCache.isEnabled()) {
-            log.info("Cache is disabled, skipping cache warm-up");
-          }
-
         } else {
           log.error("Failed to load some or all rules");
         }

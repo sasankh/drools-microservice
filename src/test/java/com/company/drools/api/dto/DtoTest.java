@@ -242,9 +242,9 @@ class DtoTest {
       List<RuleListResponse.RuleInfo> rules =
           List.of(
               new RuleListResponse.RuleInfo(
-                  "rule1", "ACTIVE", Instant.now(), Instant.now(), 10, 5.0, true, "1.0"),
+                  "rule1", "ACTIVE", Instant.now(), Instant.now(), 10, 5.0, "1.0"),
               new RuleListResponse.RuleInfo(
-                  "rule2", "ACTIVE", Instant.now(), Instant.now(), 5, 3.0, false, "1.1"));
+                  "rule2", "ACTIVE", Instant.now(), Instant.now(), 5, 3.0, "1.1"));
 
       RuleListResponse response = new RuleListResponse(rules);
       assertThat(response.getTotalRules()).isEqualTo(2);
@@ -299,7 +299,7 @@ class DtoTest {
     void testFullConstructor() {
       Instant now = Instant.now();
       RuleListResponse.RuleInfo info =
-          new RuleListResponse.RuleInfo("rule1", "ACTIVE", now, now, 100, 5.5, true, "2.0");
+          new RuleListResponse.RuleInfo("rule1", "ACTIVE", now, now, 100, 5.5, "2.0");
 
       assertThat(info.getRuleId()).isEqualTo("rule1");
       assertThat(info.getStatus()).isEqualTo("ACTIVE");
@@ -307,7 +307,6 @@ class DtoTest {
       assertThat(info.getLastModified()).isEqualTo(now);
       assertThat(info.getExecutionCount()).isEqualTo(100);
       assertThat(info.getAvgExecutionTimeMs()).isEqualTo(5.5);
-      assertThat(info.isCached()).isTrue();
       assertThat(info.getVersion()).isEqualTo("2.0");
     }
 
@@ -323,13 +322,12 @@ class DtoTest {
       info.setLastModified(now);
       info.setExecutionCount(50);
       info.setAvgExecutionTimeMs(3.3);
-      info.setCached(false);
       info.setVersion("1.0");
 
       assertThat(info.getRuleId()).isEqualTo("r1");
       assertThat(info.getStatus()).isEqualTo("INACTIVE");
       assertThat(info.getExecutionCount()).isEqualTo(50);
-      assertThat(info.isCached()).isFalse();
+      assertThat(info.getVersion()).isEqualTo("1.0");
     }
   }
 
