@@ -85,68 +85,62 @@ public class RuleDataValidator implements ConstraintValidator<ValidRuleData, Map
   }
 
   private boolean isValidValue(String key, Object value, ConstraintValidatorContext context) {
-    if (value == null) {
-      return true; // Null values are allowed
+    if (value == null) return true;
+    if (value instanceof String strValue) return isValidStringValue(key, strValue, context);
+    if (value instanceof Number numValue) return isValidNumberValue(key, numValue, context);
+    if (value instanceof Boolean) return true;
+    return isValidOtherValue(key, value, context);
+  }
+
+  private boolean isValidStringValue(
+      String key, String strValue, ConstraintValidatorContext context) {
+    if (strValue.length() > validationConfig.getDataMaxStringLength()) {
+      addViolation(
+          context,
+          "String value too long for key '"
+              + key
+              + "' (max "
+              + validationConfig.getDataMaxStringLength()
+              + " characters)");
+      return false;
     }
-
-    // String validation
-    if (value instanceof String strValue) {
-
-      if (strValue.length() > validationConfig.getDataMaxStringLength()) {
-        addViolation(
-            context,
-            "String value too long for key '"
-                + key
-                + "' (max "
-                + validationConfig.getDataMaxStringLength()
-                + " characters)");
-        return false;
-      }
-
-      if (!SAFE_STRING_PATTERN.matcher(strValue).matches()) {
-        addViolation(context, "String value contains unsafe characters for key '" + key + "'");
-        return false;
-      }
-
-      if (containsDangerousPattern(strValue)) {
-        addViolation(
-            context, "String value contains potentially dangerous content for key '" + key + "'");
-        return false;
-      }
+    if (!SAFE_STRING_PATTERN.matcher(strValue).matches()) {
+      addViolation(context, "String value contains unsafe characters for key '" + key + "'");
+      return false;
     }
-    // Number validation
-    else if (value instanceof Number numValue) {
-
-      if (Math.abs(numValue.longValue()) > validationConfig.getDataMaxNumberValue()) {
-        addViolation(
-            context,
-            "Number value too large for key '"
-                + key
-                + "' (max "
-                + validationConfig.getDataMaxNumberValue()
-                + ")");
-        return false;
-      }
+    if (containsDangerousPattern(strValue)) {
+      addViolation(
+          context, "String value contains potentially dangerous content for key '" + key + "'");
+      return false;
     }
-    // Boolean is always safe
-    else if (value instanceof Boolean) {
-      // Boolean values are safe
-    }
-    // Collections and other types
-    else {
-      // For safety, convert to string and validate
-      String strValue = value.toString();
-      if (strValue.length() > validationConfig.getDataMaxStringLength()) {
-        addViolation(context, "Value too long when converted to string for key '" + key + "'");
-        return false;
-      }
+    return true;
+  }
 
-      if (containsDangerousPattern(strValue)) {
-        addViolation(context, "Value contains potentially dangerous content for key '" + key + "'");
-        return false;
-      }
+  private boolean isValidNumberValue(
+      String key, Number numValue, ConstraintValidatorContext context) {
+    if (Math.abs(numValue.longValue()) > validationConfig.getDataMaxNumberValue()) {
+      addViolation(
+          context,
+          "Number value too large for key '"
+              + key
+              + "' (max "
+              + validationConfig.getDataMaxNumberValue()
+              + ")");
+      return false;
     }
+    return true;
+  }
 
+  private boolean isValidOtherValue(String key, Object value, ConstraintValidatorContext context) {
+    String strValue = value.toString();
+    if (strValue.length() > validationConfig.getDataMaxStringLength()) {
+      addViolation(context, "Value too long when converted to string for key '" + key + "'");
+      return false;
+    }
+    if (containsDangerousPattern(strValue)) {
+      addViolation(context, "Value contains potentially dangerous content for key '" + key + "'");
+      return false;
+    }
     return true;
   }
 
