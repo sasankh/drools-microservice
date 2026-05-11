@@ -1,44 +1,43 @@
-# Redis-only DRL Cache Deployment Plan
+# Redis DRL Cache + Pub/Sub Deployment Plan
 
 **Status:** Draft — not yet started
 **Created:** 2026-05-11
 **Owner:** TBD
-**Driver:** Eliminate dead-code cache layer + provide real multi-instance / cross-service DRL caching via Redis with a feature flag
+**Driver:** Eliminate dead-code cache layer; provide real multi-instance DRL caching via Redis with a feature flag; ensure compiled-state convergence across ECS tasks via Redis Pub/Sub.
 
 ---
 
 ## 1. Context & motivation
 
-### 1.1 The problem
+### 1.1 The two problems
 
-A forensic trace of the current `cache/` package revealed:
-- `LocalLRUCache` (`@Primary` `RuleCache` bean) and `RedisRuleCache` (`@ConditionalOnProperty("redis.enabled")`) are **dead code**.
-- `.get()` on either is never called from production code paths.
-- They are written to during refresh (`warmUp`, `put`, `clear`) and queried only for their own observability endpoints (`/admin/cache/stats`, `cached` boolean in `/admin/rules`, `cache` section of `/admin/health`).
-- "Cache hit rate ~95%" reported in docs is statistically true but operationally meaningless — the cache is never on the read path.
+**Problem A — Dead cache.** Forensic trace revealed both `LocalLRUCache` and `RedisRuleCache` are dead code. `.get()` never called in production. Written to during refresh, queried only for their own observability endpoints. "Cache hit rate ~95%" is statistically true but operationally meaningless.
 
-### 1.2 Why this matters
+**Problem B — Multi-instance compiled-state divergence.** With 3–5 ECS tasks behind an ALB, when one task receives `POST /admin/refresh-rules/{id}`, only that task recompiles its `kieContainer`. Other tasks keep serving the stale compiled rule until they themselves refresh. Redis cache alone does not solve this because execution reads from `kieContainer` (compiled), not Redis (DRL text).
 
-- **Production scale target**: 3–5 ECS tasks × 10,000+ rules. Each task independently fetches all rules from S3 on cold start and on `/admin/refresh-rules`. With the dead cache, multi-instance setups don't share fetch work.
-- **Cross-service ambition**: Other services should be able to read the same rule corpus from Redis without re-fetching from S3. Today they can't reliably do so because the writer's invalidation story is broken.
-- **Architectural integrity**: The misleading `RuleCache` abstraction (parallel to `RuleStorage`) creates confusion when reading the code. A new contributor will assume the cache is on the hot path; it isn't.
+### 1.2 Why both matter
+
+- 3–5 ECS tasks × 10,000+ rules: each task fetches all rules from S3 on cold start and refresh. With dead cache, no fetch sharing.
+- Cross-service consumers want to read `drools:rule:*` from Redis but today's invalidation is broken.
+- Multi-task ALB deployments serve inconsistent rule outputs after a single-rule refresh until all tasks happen to refresh — could be hours or never.
 
 ### 1.3 Solution
 
-Replace the dead `RuleCache` layer with a **decorator on `RuleStorage`** that implements a real read-through cache against Redis, feature-flagged. `LocalLRUCache` is removed (already proven valueless — its data is a subset of `loadedRules`, and execution never reads from it).
+Two coordinated changes in one plan:
+
+1. **Redis cache decorator** on `RuleStorage` (feature-flagged on `REDIS_ENABLED`). Replaces dead `RuleCache` abstraction.
+2. **Redis Pub/Sub** for cross-task refresh fan-out. When task A refreshes, B and C self-refresh within seconds.
 
 ### 1.4 Expected outcome
 
-- Redis is a **functional L1 cache** when enabled, not a write-only sink.
-- Multi-instance ECS deployments share rule fetches: only the first instance hits S3, others hit Redis.
-- Cross-service consumers can read `drools:rule:{id}` keys with a clear staleness bound (15 min TTL ceiling + immediate invalidation on writer refresh).
-- Approximately ~600 LOC of dead code removed; ~250 LOC of real cache code added.
-- Redis can be turned **fully off** (`REDIS_ENABLED=false`) for dev/local/single-instance, falling back to S3 direct.
+- Redis is a real, used cache. Cross-instance DRL fetch shared.
+- Cross-task compiled-state converges within ~1 sec for single-rule refresh (~7 min for bulk, gated by compile time per task).
+- ~600 LOC of dead code removed; ~500 LOC of real cache + pub/sub added.
+- Feature-flagged: `REDIS_ENABLED=false` reverts to direct-S3 single-instance behaviour.
 
 ### 1.5 What this does *not* fix
 
-- Compilation cost (~46s per 1,000 rules; ~7 min per 10,000 rules). Redis caches DRL text only; rules still compile per-instance after every refresh. The compile-cost fix is the **kjar plan** (separate document).
-- This plan is independent of and complementary to kjar deployment.
+Compilation cost (~46s per 1,000 rules; ~7 min per 10,000 rules). Pub/sub fan-out triggers a 7-min compile on each task simultaneously when bulk refresh fires. The compile-cost fix is the **kjar plan** (separate document, independent and complementary).
 
 ---
 
@@ -47,15 +46,16 @@ Replace the dead `RuleCache` layer with a **decorator on `RuleStorage`** that im
 | Component | File | Behaviour |
 |---|---|---|
 | `RuleCache` interface | `src/main/java/com/company/drools/cache/RuleCache.java` | API consumers think there's a tiered cache. There isn't. |
-| `LocalLRUCache` | `src/main/java/com/company/drools/cache/LocalLRUCache.java` | `@Primary`, max 100 entries, `LinkedHashMap` write-locked on `get()` (ADR-004). `.get()` never called in production. |
-| `RedisRuleCache` | `src/main/java/com/company/drools/cache/RedisRuleCache.java` | `@ConditionalOnProperty("redis.enabled")`. Bean created when on but never injected (LRU is `@Primary`). |
-| `CacheStatistics` | `src/main/java/com/company/drools/cache/CacheStatistics.java` | Counters for hits/misses/evictions on a cache that isn't read. |
+| `LocalLRUCache` | `src/main/java/com/company/drools/cache/LocalLRUCache.java` | `@Primary`, max 100 entries, write-locked `get()`. `.get()` never called in production. |
+| `RedisRuleCache` | `src/main/java/com/company/drools/cache/RedisRuleCache.java` | `@ConditionalOnProperty("redis.enabled")`. Bean created but never injected (LRU is `@Primary`). |
+| `CacheStatistics` | `src/main/java/com/company/drools/cache/CacheStatistics.java` | Counters for a cache that isn't read. |
 | `@Autowired RuleCache ruleCache` | `AdminController.java:60–85`, `RuleLoadingConfig.java:22` | Used for `.warmUp()`, `.clear()`, `.put()`, `.contains()`, `.getStatistics()`. No `.get()` calls. |
 | Refresh flow | `AdminController.java:401–447` | `storage.getAllRules()` → `droolsEngineService.loadRules(rules)` → `ruleCache.warmUp(rules)` (dead write). |
 | Execution flow | `DroolsEngineService.executeRule()` → `RuleExecutor.execute()` | Reads `loadedRules` (ConcurrentHashMap) + `kieContainer`. Never touches `RuleCache`. |
 | Existing env vars | `application.yml:127–129` | `REDIS_ENABLED:false`, `REDIS_URL:redis://localhost:6379`, `REDIS_TTL_MINUTES:60` |
 | Key naming today | `RedisRuleCache.java` (constant) | `drools:rule:{ruleId}` |
-| Circuit breaker | `RedisRuleCache.java:72-85, 126-134` + `CircuitBreakerConfig.java` | Wraps `get()`/`put()`. Will be preserved verbatim in the new decorator. |
+| Circuit breaker | `RedisRuleCache.java:72-85, 126-134` + `CircuitBreakerConfig.java` | Wraps `get()`/`put()`. Will be preserved in new decorator + publisher. |
+| Cross-task coordination | None today | No mechanism. Refresh on task A does not propagate to B/C. |
 
 ---
 
@@ -64,24 +64,57 @@ Replace the dead `RuleCache` layer with a **decorator on `RuleStorage`** that im
 ### 3.1 Architecture diagram
 
 ```
-REDIS_ENABLED=false:                          REDIS_ENABLED=true:
-┌─────────────────────┐                        ┌────────────────────────────┐
-│ DroolsEngineService │                        │    DroolsEngineService     │
-│ (loadedRules,       │                        │ (loadedRules, kieContainer)│
-│  kieContainer)      │                        └─────────────┬──────────────┘
-└──────────┬──────────┘                                      │
-           │ RuleStorage bean                                │ RuleStorage bean
-           ▼                                                 ▼
-┌─────────────────────┐                        ┌────────────────────────────┐
-│   S3RuleStorage     │                        │  RedisCachedRuleStorage    │
-│   (direct, L3)      │                        │  (read-through L1)         │
-└─────────────────────┘                        └─────────────┬──────────────┘
-                                                             │ miss / write
-                                                             ▼
-                                               ┌────────────────────────────┐
-                                               │       S3RuleStorage        │
-                                               │       (delegate, L3)       │
-                                               └────────────────────────────┘
+REDIS_ENABLED=false (single instance):
+
+┌────────────────────┐
+│ DroolsEngineService│
+│ (loadedRules,      │
+│  kieContainer)     │
+└─────────┬──────────┘
+          │
+          ▼
+┌────────────────────┐
+│   S3RuleStorage    │
+└────────────────────┘
+
+
+REDIS_ENABLED=true (3 ECS tasks A, B, C):
+
+┌─────────┐  ┌─────────┐  ┌─────────┐
+│ Task A  │  │ Task B  │  │ Task C  │
+│ D.E.S   │  │ D.E.S   │  │ D.E.S   │
+│ +pubsub │  │ +pubsub │  │ +pubsub │
+└────┬────┘  └────┬────┘  └────┬────┘
+     │            │            │
+     └────────────┼────────────┘    each task has own kieContainer
+                  │
+                  ▼
+   ┌──────────────────────────────────┐
+   │     RedisCachedRuleStorage       │  decorator each task instantiates
+   │  (read-through over RedisTemplate)│
+   └──────────────┬───────────────────┘
+                  │  miss / write
+                  ▼
+       ┌────────────────────┐
+       │   S3RuleStorage    │
+       └────────────────────┘
+
+Pub/sub fan-out when task A refreshes:
+
+   Task A.AdminController.refresh()
+        │
+        │ 1. storage.refreshRule(id)      [DEL drools:rule:{id} in Redis]
+        │ 2. storage.getRule(id)          [S3 fetch, repopulates Redis]
+        │ 3. droolsEngineService.loadOrReplaceRule()
+        │ 4. publisher.publishRefresh(id) [PUBLISH drools:rule:events]
+        ▼
+  ╔════════════════════════════════════╗
+  ║   Redis channel: drools:rule:events ║
+  ╚════════════════════════════════════╝
+        │
+        ├─── SUBSCRIBE Task A (skip self) ───┐
+        ├─── SUBSCRIBE Task B → refresh own kieContainer
+        └─── SUBSCRIBE Task C → refresh own kieContainer
 ```
 
 ### 3.2 New class: `RedisCachedRuleStorage`
@@ -90,21 +123,22 @@ REDIS_ENABLED=false:                          REDIS_ENABLED=true:
 
 **Implements:** `RuleStorage`
 
-**Constructor (Spring constructor injection):**
-- `RuleStorage delegate` — wraps `S3RuleStorage` (or `LocalFileStorage`, or whatever is configured as the source)
-- `RedisTemplate<String, Rule> redisTemplate` — reused from existing `RedisConfig`
-- `@Qualifier("redisCircuitBreaker") CircuitBreaker redisCircuitBreaker` — reused from existing `CircuitBreakerConfig`
-- `Duration ttl` — from `redis.drl-rules.ttl-minutes` config
-- `String keyPrefix` — from `redis.drl-rules.key-prefix` config (default `drools:rule:`)
-- `MeterRegistry meterRegistry` — for metrics
-- `@ConditionalOnProperty(name = "redis.enabled", havingValue = "true")`
+**Constructor:**
+- `RuleStorage delegate` — wraps `S3RuleStorage` / `LocalFileStorage` / `InMemoryRuleStorage`
+- `RedisTemplate<String, Rule> redisTemplate`
+- `@Qualifier("redisCircuitBreaker") CircuitBreaker redisCircuitBreaker`
+- `Duration ttl` from `redis.drl-rules.ttl-minutes`
+- `String keyPrefix` from `redis.drl-rules.key-prefix`
+- `MeterRegistry meterRegistry`
+
+**Annotation:** `@ConditionalOnProperty(name = "redis.enabled", havingValue = "true")`
 
 ### 3.3 Read-through behaviour
 
 #### `Optional<Rule> getRule(String ruleId)`
 ```
 1. key = keyPrefix + ruleId
-2. Wrap with circuit breaker:
+2. With circuit breaker:
    a. rule = redisTemplate.opsForValue().get(key)
    b. if rule != null:
         meterRegistry.counter("drools.cache.hit", "layer", "redis").increment()
@@ -113,90 +147,149 @@ REDIS_ENABLED=false:                          REDIS_ENABLED=true:
    meterRegistry.counter("drools.cache.miss", "layer", "redis").increment()
    Optional<Rule> result = delegate.getRule(ruleId)
 4. If result.isPresent():
-   Wrap with circuit breaker:
+   With circuit breaker:
      redisTemplate.opsForValue().set(key, result.get(), ttl)
 5. Return result
 ```
+Circuit-open: skip Redis steps, pure delegate.
 
-If circuit breaker is open during step 2: skip to step 3 (fall through to delegate). Same for step 4: best-effort write, no propagation of cache write failures.
-
-#### `List<Rule> getAllRules()` — bulk SCAN strategy
-
+#### `List<Rule> getAllRules()` — bulk SCAN + MGET
 ```
-1. Get full key set from delegate's getRuleIds() — authoritative list of "what rules should exist"
-2. existing = new HashMap<String, Rule>()
-3. With circuit breaker:
-   Use SCAN with MATCH=keyPrefix+"*" and COUNT=1000 to iterate
-   For each found key: existing[ruleId] = redisTemplate.opsForValue().get(key)
-4. missing = expectedRuleIds - existing.keys()
-5. If missing.isEmpty():
-   meterRegistry.counter("drools.cache.bulk.hit").increment()
+1. expectedIds = delegate.getRuleIds()
+2. With circuit breaker:
+   a. SCAN MATCH keyPrefix+"*" COUNT 1000
+   b. MGET batched (1000 keys per call) → existing map
+3. missing = expectedIds - existing.keys()
+4. If missing.isEmpty():
+   counter("drools.cache.bulk.hit").increment()
    return existing.values()
-6. Cache partial-miss:
-   meterRegistry.counter("drools.cache.bulk.miss", "missing_count", missing.size()).increment()
-   List<Rule> freshRules = delegate.getAllRulesByIds(missing)
-     (or delegate.getAllRules() if more efficient — depends on S3 API)
-7. For each freshRule:
-   redisTemplate.opsForValue().set(keyPrefix + freshRule.id, freshRule, ttl)
-   existing[freshRule.id] = freshRule
-8. Return existing.values()
+5. counter("drools.cache.bulk.miss", "count", missing.size()).increment()
+6. freshRules = delegate.getAllRulesByIds(missing)
+7. Pipeline SET each with TTL
+8. Return existing + fresh
 ```
 
-**Edge case:** If `delegate.getRuleIds()` is itself expensive (S3 LIST is ~50–100ms), cache it too with a shorter TTL (e.g. 1 min) to amortize across rapid refresh calls.
+#### `saveRule`, `deleteRule` — write-through
+```
+saveRule(rule):
+  delegate.saveRule(rule)
+  if success: redisTemplate.opsForValue().set(keyPrefix+rule.id, rule, ttl)
 
-#### `void saveRule(Rule rule)` — write-through
-```
-1. delegate.saveRule(rule)   // S3 PUT first
-2. On success:
-   With circuit breaker:
-     redisTemplate.opsForValue().set(keyPrefix + rule.ruleId, rule, ttl)
-```
-
-#### `void deleteRule(String ruleId)` — write-through delete
-```
-1. delegate.deleteRule(ruleId)   // S3 DELETE first
-2. On success:
-   With circuit breaker:
-     redisTemplate.delete(keyPrefix + ruleId)
+deleteRule(id):
+  delegate.deleteRule(id)
+  if success: redisTemplate.delete(keyPrefix+id)
 ```
 
-#### `boolean ruleExists(String ruleId)`
+#### `refreshCache()`, `refreshRule(id)` — invalidation
 ```
-1. With circuit breaker:
-     Boolean exists = redisTemplate.hasKey(keyPrefix + ruleId)
-     if exists is Boolean.TRUE: return true
-2. Fall through to delegate.ruleExists(ruleId)
+refreshCache():
+  SCAN keyPrefix+"*" → DEL in pipeline (with CB)
+  delegate.refreshCache()
+
+refreshRule(id):
+  DEL keyPrefix+id (with CB)
+  delegate.refreshRule(id)
 ```
-Note: don't populate cache on a `hasKey` true — we don't have the Rule object yet.
 
-#### `long getTotalRuleCount()` / `List<String> getRuleIds()`
-- These need authoritative answers (S3 truth), not what's in cache (which may be partial)
-- Always delegate to underlying storage
+#### Authoritative methods
+- `getTotalRuleCount()` / `getRuleIds()` → always delegate (S3 truth)
+- `ruleExists(id)` → check Redis EXISTS first (fast), fall through to delegate
 
-#### `void refreshCache()` (existing interface method)
-- This is the entry point AdminController uses on `/admin/refresh-rules`
-- New behaviour: `SCAN MATCH keyPrefix+* | DEL` to clear cache, then delegate's `refreshCache()`
+### 3.4 New class: `RuleRefreshPublisher`
 
-#### `void refreshRule(String ruleId)` (existing interface method)
-- `DEL keyPrefix+ruleId`, then `delegate.refreshRule(ruleId)`
+**Location:** `src/main/java/com/company/drools/cache/RuleRefreshPublisher.java`
 
-### 3.4 Failure modes
+**Annotation:** `@Component @ConditionalOnExpression("${redis.enabled:false} && ${redis.pubsub.enabled:true}")`
 
-| Failure | Behaviour |
-|---|---|
-| Redis down (timeout, conn refused) | Circuit breaker opens after N failures. Reads fall through to delegate. Writes silently dropped (best-effort). Service continues. |
-| Redis returns null on hit (entry deleted between SCAN and GET) | Treat as miss. Re-fetch from delegate. |
-| `SCAN` returns more keys than expected (stale prefix entries) | Trust delegate's `getRuleIds()` as authoritative. Extra Redis keys live until TTL expires. |
-| `set` with TTL fails after delegate write succeeded | Logged WARN, next read repopulates. Acceptable. |
-| Circuit breaker config missing (env var typo) | Spring fails on startup with clear error message. |
+**Methods:**
+```java
+public void publishRefresh(String ruleId)      // single rule
+public void publishBulkRefresh()                // all rules
+public void publishDelete(String ruleId)        // rule removed
+```
 
-### 3.5 Stampede prevention
+**Behaviour:**
+- Builds `RefreshEvent` with current `instanceId` (UUID `@Bean`)
+- `redisTemplate.convertAndSend(channel, event)` wrapped in circuit breaker
+- Fire-and-forget — failure logs WARN, doesn't propagate
+- Metric: `drools.refresh.published{event=<type>}`
 
-When N tasks start simultaneously with empty Redis, all hit S3. Decision: **accept it.** Reasons:
-- S3 handles thousands of req/s per prefix
-- Each task fetches once per cold start (not repeated)
-- Adding `SETNX`-based single-leader complexity is not justified for 5-task scale
-- Documented as acceptable in plan; revisit if scaling to 50+ tasks
+### 3.5 New class: `RuleRefreshSubscriber`
+
+**Location:** `src/main/java/com/company/drools/cache/RuleRefreshSubscriber.java`
+
+**Annotation:** Same conditional as publisher.
+
+**Implements:** `MessageListener` (Spring Data Redis)
+
+**Wired via:** `RedisMessageListenerContainer` in `RedisConfig`
+
+**`onMessage(Message message, byte[] pattern)`:**
+1. Deserialize to `RefreshEvent`
+2. If `event.sourceInstanceId.equals(this.instanceId)`:
+   - counter `drools.refresh.skipped_self`.increment()
+   - return
+3. counter `drools.refresh.received{event=<type>}`.increment()
+4. Switch on event type:
+   - `RULE_REFRESHED`:
+     - `Optional<Rule> rule = storage.getRule(event.ruleId)` — reads Redis (already populated by publisher), fast
+     - `droolsEngineService.loadOrReplaceRule(rule.get())` — KieBase swap
+   - `RULE_REFRESHED_BULK`:
+     - `List<Rule> rules = storage.getAllRules()` — reads Redis bulk
+     - `droolsEngineService.loadRules(rules)` — full recompile (~7 min at 10k)
+   - `RULE_DELETED`:
+     - `droolsEngineService.removeRule(event.ruleId)` (or full reload omitting that rule)
+5. Log: instance-id, event type, rule-id (if any), duration
+
+### 3.6 New class: `RefreshEvent` DTO
+
+**Location:** `src/main/java/com/company/drools/cache/RefreshEvent.java`
+
+```java
+public record RefreshEvent(
+    EventType event,
+    String ruleId,
+    String sourceInstanceId,
+    Instant timestamp
+) {
+  public enum EventType {
+    RULE_REFRESHED,
+    RULE_REFRESHED_BULK,
+    RULE_DELETED
+  }
+}
+```
+
+JSON-serialised via Jackson.
+
+### 3.7 Instance ID
+
+**Location:** new `@Bean` in `DroolsConfig.java` or new `InstanceIdConfig`:
+
+```java
+@Bean
+public String droolsInstanceId() {
+  return UUID.randomUUID().toString();
+}
+```
+
+Each task instance gets its own UUID at startup. Used for self-message dedupe.
+
+### 3.8 Failure modes
+
+| Failure | Behaviour | Recovery |
+|---|---|---|
+| Redis cache down (CB open) | Reads fall through to S3; writes silently dropped | Service continues; breaker auto-closes when Redis returns |
+| Pub/sub publish fails | Local refresh succeeded; siblings miss the event | Operator can re-trigger; or AUTO_REFRESH backstop |
+| Pub/sub subscriber connection dropped | Spring auto-reconnects; missed messages lost | Document. Optional v2 backstop: Redis checkpoint key |
+| Subscriber refresh fails | Log ERROR, stays stale on this task | Re-trigger refresh; alerting |
+| Bulk-refresh stampede across N tasks | All N tasks recompile simultaneously (CPU/memory spike) | Document. v2: jitter |
+| Self-message race | Subscriber receives own publish. Self-ID check filters | Already handled |
+| Operator triggers refresh mid-compile | Task A is compiling; event fires; B and C start compiling too | Acceptable — single-rule compiles are ~50ms |
+
+### 3.9 Stampede prevention
+
+Decision: **accept it.** S3 handles parallel reads; pub/sub bulk fan-out at 10k rules causes simultaneous compile spike — mitigated by kjar plan.
 
 ---
 
@@ -204,87 +297,99 @@ When N tasks start simultaneously with empty Redis, all hit S3. Decision: **acce
 
 ### 4.1 New files
 
-#### `src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java` (~250 LOC)
-See section 3.2–3.3 above for behavioural spec.
+#### Production
+- `src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java` (~280 LOC)
+- `src/main/java/com/company/drools/cache/RuleRefreshPublisher.java` (~90 LOC)
+- `src/main/java/com/company/drools/cache/RuleRefreshSubscriber.java` (~140 LOC)
+- `src/main/java/com/company/drools/cache/RefreshEvent.java` (~50 LOC, record)
+- `src/main/java/com/company/drools/config/InstanceIdConfig.java` (~20 LOC)
 
-#### `src/test/java/com/company/drools/storage/RedisCachedRuleStorageTest.java` (~250 LOC, ~10 tests)
-- Test: `getRule` cache hit returns Redis value, doesn't call delegate
-- Test: `getRule` cache miss falls through to delegate, populates Redis with TTL
-- Test: `getRule` Redis circuit breaker open — falls through to delegate, doesn't crash
-- Test: `getAllRules` bulk SCAN returns complete set from cache when warm
-- Test: `getAllRules` partial cache — fetches missing from delegate, populates
-- Test: `saveRule` write-through writes Redis after delegate succeeds
-- Test: `saveRule` delegate fails — Redis not touched
-- Test: `deleteRule` deletes Redis key after delegate succeeds
-- Test: `refreshCache` clears all `drools:rule:*` keys then delegates
-- Test: `refreshRule(id)` deletes specific key then delegates
+#### Tests
+- `src/test/java/com/company/drools/storage/RedisCachedRuleStorageTest.java` (~300 LOC, ~12 tests)
+- `src/test/java/com/company/drools/cache/RuleRefreshPublisherTest.java` (~120 LOC, ~6 tests)
+- `src/test/java/com/company/drools/cache/RuleRefreshSubscriberTest.java` (~180 LOC, ~8 tests)
+- `src/test/java/com/company/drools/cache/RefreshEventTest.java` (~50 LOC, ~3 tests)
+- `src/test/java/com/company/drools/integration/RedisCachedStorageIntegrationTest.java` (~250 LOC, ~6 tests with Testcontainers)
+- `src/test/java/com/company/drools/integration/RedisPubSubIntegrationTest.java` (~200 LOC, ~5 tests with Testcontainers)
 
 ### 4.2 Deleted files
 
-| File | Lines | Reason |
-|---|---|---|
-| `src/main/java/com/company/drools/cache/RuleCache.java` | ~70 | Interface superseded by `RuleStorage` decorator |
-| `src/main/java/com/company/drools/cache/LocalLRUCache.java` | ~290 | Dead code, no longer needed |
-| `src/main/java/com/company/drools/cache/RedisRuleCache.java` | ~280 | Replaced by `RedisCachedRuleStorage` |
-| `src/main/java/com/company/drools/cache/CacheStatistics.java` | ~120 | Only used by deleted caches |
-| `src/test/java/com/company/drools/cache/LocalLRUCacheTest.java` | ~14 tests | LRU gone |
-| `src/test/java/com/company/drools/cache/RedisRuleCacheTest.java` | ~10 tests | Class gone |
-| `src/test/java/com/company/drools/cache/CacheStatisticsTest.java` | ~5 tests | Class gone |
-
-**Verify before deleting `CacheStatistics`:** grep for any usage outside the cache package. If anything else references it, either keep + repurpose or migrate consumers.
+| File | Reason |
+|---|---|
+| `src/main/java/com/company/drools/cache/RuleCache.java` | Interface superseded by `RuleStorage` decorator |
+| `src/main/java/com/company/drools/cache/LocalLRUCache.java` | Dead code |
+| `src/main/java/com/company/drools/cache/RedisRuleCache.java` | Replaced by `RedisCachedRuleStorage` |
+| `src/main/java/com/company/drools/cache/CacheStatistics.java` | Only used by deleted caches (verify) |
+| `src/test/java/com/company/drools/cache/LocalLRUCacheTest.java` | LRU gone |
+| `src/test/java/com/company/drools/cache/RedisRuleCacheTest.java` | Class gone |
+| `src/test/java/com/company/drools/cache/CacheStatisticsTest.java` | Class gone |
 
 ### 4.3 Modified files
 
 #### `src/main/java/com/company/drools/storage/StorageFactory.java`
-
-Add a `@Bean` method that wraps the chosen `RuleStorage` with `RedisCachedRuleStorage` when `REDIS_ENABLED=true`:
-
 ```java
 @Bean
 @Primary
 public RuleStorage primaryRuleStorage(
     StorageFactory factory,
-    @Autowired(required = false) RedisCachedRuleStorage redisCacheDecorator,
+    @Autowired(required = false) RedisCachedRuleStorage redisDecorator,
     @Value("${redis.enabled:false}") boolean redisEnabled) {
-  RuleStorage base = factory.createStorage();   // S3RuleStorage / LocalFileStorage / InMemoryRuleStorage
-  if (redisEnabled && redisCacheDecorator != null) {
-    redisCacheDecorator.setDelegate(base);
-    return redisCacheDecorator;
+  RuleStorage base = factory.createStorage();
+  if (redisEnabled && redisDecorator != null) {
+    redisDecorator.setDelegate(base);
+    return redisDecorator;
   }
   return base;
 }
 ```
 
-Alternative: `RedisCachedRuleStorage` takes the delegate via constructor when enabled — simpler. Decide during implementation.
+#### `src/main/java/com/company/drools/config/RedisConfig.java`
+Add:
+```java
+@Bean
+@ConditionalOnExpression("${redis.enabled:false} && ${redis.pubsub.enabled:true}")
+public RedisMessageListenerContainer redisMessageListenerContainer(
+    RedisConnectionFactory cf,
+    RuleRefreshSubscriber subscriber,
+    @Value("${redis.refresh.channel:drools:rule:events}") String channel) {
+  RedisMessageListenerContainer container = new RedisMessageListenerContainer();
+  container.setConnectionFactory(cf);
+  container.addMessageListener(subscriber, new PatternTopic(channel));
+  return container;
+}
+```
 
 #### `src/main/java/com/company/drools/api/controller/AdminController.java`
-- Remove `RuleCache ruleCache` field (line ~60)
-- Remove from constructor (line ~85)
-- Remove `ruleCache.warmUp()` calls (line 426)
-- Remove `ruleCache.clear()` calls (line 416)
-- Remove `ruleCache.put()` calls (line 486)
-- Remove `ruleCache.contains()` calls (line 528)
-- Replace `ruleCache.getStatistics()` calls (lines 248, 339) with Redis-aware stats helper
-- `/admin/rules` response: drop `cached` field OR rename to `in_redis` (only present when Redis enabled)
-- `/admin/cache/stats` endpoint: return Redis stats when enabled, 404 when disabled
-- `/admin/health` cache section: Redis-only when enabled, omitted when disabled
-- `/admin/refresh-rules` and `/admin/refresh-rules/{id}`: now invoke `storage.refreshCache()` / `refreshRule(id)` which the decorator handles (no separate cache clear call needed)
+- Remove `RuleCache ruleCache` field and constructor param
+- Remove `ruleCache.warmUp()`, `.clear()`, `.put()`, `.contains()` call sites
+- Replace `ruleCache.getStatistics()` with Redis-aware helper
+- Inject `RuleRefreshPublisher` (Optional, only when pubsub enabled)
+- After `loadRules()`/`loadOrReplaceRule()` succeeds:
+  - Single-rule refresh: `publisher.publishRefresh(ruleId)`
+  - Bulk refresh: `publisher.publishBulkRefresh()`
+  - Rule delete: `publisher.publishDelete(ruleId)`
+- `/admin/rules`: drop `cached` field (or rename `in_redis` only when enabled)
+- `/admin/cache/stats`: Redis stats when enabled, 404 when disabled
+- `/admin/health` cache section: Redis-only or omitted
 
 #### `src/main/java/com/company/drools/config/RuleLoadingConfig.java`
-- Remove `RuleCache ruleCache` constructor param (line ~22)
-- Remove the `if (ruleCache.isEnabled() && !rules.isEmpty()) { ruleCache.warmUp(rules); }` block (lines 40–44)
+- Remove `RuleCache ruleCache` injection and `warmUp()` block
 
 #### `src/main/java/com/company/drools/config/DroolsConfig.java`
-- No change. KieContainer build stays identical.
+- No change
 
 #### `src/main/resources/application.yml`
-Remove:
+Replace:
 ```yaml
 drools:
   cache:
-    lru-max-size: ${LRU_CACHE_MAX_SIZE:100}      # delete
+    lru-max-size: ${LRU_CACHE_MAX_SIZE:100}      # DELETE
+redis:
+  enabled: ${REDIS_ENABLED:false}
+  ttl-minutes: ${REDIS_TTL_MINUTES:60}            # DELETE
+  url: ${REDIS_URL:redis://localhost:6379}
 ```
-Reword Redis section:
+With:
 ```yaml
 redis:
   enabled: ${REDIS_ENABLED:false}
@@ -292,37 +397,26 @@ redis:
   drl-rules:
     ttl-minutes: ${REDIS_DRL_RULES_TTL_MINUTES:15}
     key-prefix: ${REDIS_DRL_RULES_KEY_PREFIX:drools:rule:}
+  pubsub:
+    enabled: ${REDIS_PUBSUB_ENABLED:true}
+    channel: ${REDIS_REFRESH_CHANNEL:drools:rule:events}
 ```
 
 #### `.env.example`
-- Remove `LRU_CACHE_MAX_SIZE`
-- Remove `REDIS_TTL_MINUTES`
+- Remove `LRU_CACHE_MAX_SIZE`, `REDIS_TTL_MINUTES`
 - Add `REDIS_DRL_RULES_TTL_MINUTES=15`
 - Add `REDIS_DRL_RULES_KEY_PREFIX=drools:rule:`
-- Keep `REDIS_ENABLED`, `REDIS_URL`
+- Add `REDIS_PUBSUB_ENABLED=true`
+- Add `REDIS_REFRESH_CHANNEL=drools:rule:events`
 
 #### `docker-compose.yml`
-- Remove `LRU_CACHE_MAX_SIZE` env entry
-- Add `REDIS_DRL_RULES_TTL_MINUTES=15` (optional, accepts default)
+- Remove `LRU_CACHE_MAX_SIZE`
+- Optionally add `REDIS_PUBSUB_ENABLED=true`
 
-#### Other env-var references
-- Search and replace `REDIS_TTL_MINUTES` → `REDIS_DRL_RULES_TTL_MINUTES` across:
-  - `application*.yml`
-  - `.env.example`
-  - `docker-compose*.yml`
-  - `project-documentation/09-environment-variables-reference.md`
-  - Any deployment scripts
-
-### 4.4 Test changes (beyond new RedisCachedRuleStorageTest)
-
-- `AdminControllerTest.java` — remove `RuleCache` mock; expect no calls to it
-- `RuleLoadingConfigTest.java` — remove `RuleCache` mock and warm-up expectations
-- `StorageFactoryTest.java` — add test for decorator wiring (Redis on/off)
-- `MetricsConfigTest.java` — verify the new `drools.cache.*` metrics shape
-- Integration tests:
-  - `RuleExecutionIntegrationTest`: no change (execution doesn't touch cache)
-  - `RuleRefreshIntegrationTest`: assert Redis is cleared on refresh, repopulated on next read
-  - New: `RedisCachedStorageIntegrationTest` (uses TestContainers Redis): full round-trip with real Redis
+#### `project-documentation/api-reference/openapi.yml`
+- Update `/admin/rules` schema (drop `cached` or rename)
+- Update `/admin/cache/stats` schema for Redis-only stats
+- Add new endpoint behaviour notes
 
 ---
 
@@ -332,111 +426,116 @@ redis:
 
 | Env var | Default | Description |
 |---|---|---|
-| `REDIS_DRL_RULES_TTL_MINUTES` | `15` | TTL for cached DRL Rule entries in Redis. Acts as safety net + cross-service freshness ceiling. |
-| `REDIS_DRL_RULES_KEY_PREFIX` | `drools:rule:` | Redis key prefix for rule entries. Namespaced to support future Redis uses by this service. |
+| `REDIS_DRL_RULES_TTL_MINUTES` | `15` | TTL for cached DRL Rule entries. Safety net + cross-service freshness ceiling. |
+| `REDIS_DRL_RULES_KEY_PREFIX` | `drools:rule:` | Redis key prefix. Namespaced for future uses. |
+| `REDIS_PUBSUB_ENABLED` | `true` | When `REDIS_ENABLED=true`, enables Pub/Sub fan-out. Set `false` to disable. |
+| `REDIS_REFRESH_CHANNEL` | `drools:rule:events` | Redis pub/sub channel name. |
 
 ### 5.2 Removed env vars
 
 | Env var | Reason |
 |---|---|
-| `REDIS_TTL_MINUTES` | Renamed to `REDIS_DRL_RULES_TTL_MINUTES`. Breaking change for operators who set it explicitly. |
+| `REDIS_TTL_MINUTES` | Renamed to `REDIS_DRL_RULES_TTL_MINUTES`. |
 | `LRU_CACHE_MAX_SIZE` | LocalLRUCache deleted. |
 
 ### 5.3 Unchanged env vars
 
-- `REDIS_ENABLED` — feature flag (default `false`)
-- `REDIS_URL` — Redis endpoint
-- `DROOLS_CB_REDIS_*` — circuit breaker config (preserved verbatim)
+- `REDIS_ENABLED`, `REDIS_URL`
+- `DROOLS_CB_REDIS_*` (circuit breaker config preserved)
 
-### 5.4 Migration note
+### 5.4 Migration
 
-Any environment that explicitly sets `REDIS_TTL_MINUTES` or `LRU_CACHE_MAX_SIZE` will silently fall back to defaults on first deploy with new code. Document in release notes.
+Operators with `REDIS_TTL_MINUTES` set: silently falls back to 15-min default. Document in release notes. Optional v1 backward-compat read:
+```java
+@Value("${redis.drl-rules.ttl-minutes:${redis.ttl-minutes:15}}")
+long ttlMinutes;
+```
+With WARN log when old var is used.
 
 ---
 
-## 6. Refresh strategy (hybrid invalidation)
+## 6. Refresh & invalidation strategy
 
-### 6.1 Full refresh: `POST /admin/refresh-rules`
+### 6.1 Full refresh `POST /admin/refresh-rules` (3-task ECS)
 
 ```
-1. Caller hits endpoint
+1. ALB routes to task A
 2. AdminController.refreshAllRules():
-   a. storage.refreshCache()   // RedisCachedRuleStorage clears `drools:rule:*` via SCAN+DEL
-   b. List<Rule> rules = storage.getAllRules()  // miss in Redis, fetches all from S3, repopulates Redis
-   c. droolsEngineService.loadRules(rules)  // compiles new KieBase, atomic swap
-3. Return summary (rules_loaded, rules_failed, duration_ms)
+   a. storage.refreshCache()        // SCAN drools:rule:* | DEL
+   b. List<Rule> rules = storage.getAllRules()  // S3 fetch, repopulates Redis
+   c. droolsEngineService.loadRules(rules)      // recompile A's kieContainer
+   d. publisher.publishBulkRefresh()            // event to drools:rule:events
+3. Tasks B and C receive event:
+   - Skip self-check
+   - storage.getAllRules() → reads from Redis (already warm)
+   - droolsEngineService.loadRules(rules) → recompile each's kieContainer
+4. Cross-task convergence: ~5 sec network + ~7 min compile per task at 10k
 ```
 
-Other ECS tasks: when their next refresh happens (or TTL expires on their reads), they fetch new rules from Redis. Cross-service consumers: see new rules on next access after writer's refresh.
-
-### 6.2 Single-rule refresh: `POST /admin/refresh-rules/{ruleId}`
+### 6.2 Single-rule refresh `POST /admin/refresh-rules/{ruleId}`
 
 ```
-1. storage.refreshRule(ruleId)   // RedisCachedRuleStorage deletes `drools:rule:{id}` then delegates
-2. Optional<Rule> rule = storage.getRule(ruleId)  // re-fetches from S3, repopulates Redis
-3. droolsEngineService.loadOrReplaceRule(rule.get())   // recompile KieBase with new rule
+1. ALB routes to task A
+2. AdminController.refreshRule(id):
+   a. storage.refreshRule(id)        // DEL drools:rule:{id}
+   b. storage.getRule(id)            // S3 fetch, repopulates Redis
+   c. droolsEngineService.loadOrReplaceRule(rule)  // ~50ms KieBase swap on A
+   d. publisher.publishRefresh(id)
+3. Tasks B and C receive event:
+   - storage.getRule(id) → Redis hit (~5ms)
+   - droolsEngineService.loadOrReplaceRule(rule)  // ~50ms KieBase swap
+4. Cross-task convergence: ~100ms — under 1 sec
 ```
 
-### 6.3 Bulk vs single trade-off
+### 6.3 TTL safety net
 
-- Single rule update during business hours: use single-rule refresh, fast (<1 sec for fetch + ~46 ms compile + ~1 sec kieContainer swap for 1 rule among 10k)
-- Schema-wide updates: use full refresh, slow (~7 min at 10k rules due to compilation)
-
-### 6.4 TTL safety net
-
-15-min TTL ensures:
-- Any missed invalidation (e.g., crashed admin call) self-heals within 15 min
-- Cross-service consumers have an upper bound on staleness even if writer never refreshes
+15-min TTL ensures missed pub/sub events self-heal within 15 min via Redis cache miss → S3 → fresh data on next read. Note: this doesn't repair compiled-state divergence (kieContainer doesn't refresh on Redis miss). For that, operator must re-trigger refresh OR enable AUTO_REFRESH as backstop.
 
 ---
 
 ## 7. Cross-service consumer contract
 
 ### 7.1 Key naming
+- `drools:rule:{ruleId}` (configurable via `REDIS_DRL_RULES_KEY_PREFIX`)
 
-- Default: `drools:rule:{ruleId}` (matches today's convention)
-- Configurable: `REDIS_DRL_RULES_KEY_PREFIX` env var lets operators choose a different prefix (e.g., `drools:stage:rule:` for environment-tagged keys)
+### 7.2 Pub/sub channel
+- `drools:rule:events` — consumers can subscribe to invalidate their own caches
+- JSON event format documented in section 3.6
 
-### 7.2 Value format
+### 7.3 Value format
+- `Rule` serialised via `Jackson2JsonRedisSerializer`
+- Schema-compatible with today's `RedisRuleCache`
 
-- JSON serialization of `Rule` object via `Jackson2JsonRedisSerializer<Rule>`
-- Fields: `ruleId`, `content` (DRL text), `metadata` (status, version, timestamps, etc.)
-- Schema compatibility maintained — same as today's `RedisRuleCache`
+### 7.4 Freshness contract
+- Stale entries cleared within seconds after `/admin/refresh-rules` (via DEL + pub/sub)
+- TTL ceiling 15 min if no events
+- Consumers should subscribe to pub/sub channel for instant invalidation
 
-### 7.3 Freshness guarantee
-
-- Writer service guarantees: stale entries cleared within seconds after `/admin/refresh-rules` completes (explicit DEL)
-- Worst-case staleness: 15 min (TTL) if writer doesn't refresh
-- Cross-service consumers should treat reads as best-effort: handle null gracefully (Redis miss = rule may exist in S3 but not yet cached)
-
-### 7.4 Out of scope (v1)
-
-- Pub/Sub notification channel for instant cross-service invalidation
+### 7.5 Out of scope (v1)
+- AWS SNS/SQS alternative
 - Multi-region replication
-- Per-environment key namespacing (achievable via `REDIS_DRL_RULES_KEY_PREFIX` if needed)
+- Per-environment key prefix templates
 
 ---
 
 ## 8. Backward compatibility & rollback
 
-### 8.1 Feature flag
+### 8.1 Feature flags
 
-- `REDIS_ENABLED=false` (default) → no Redis bean, no decorator, behaviour identical to today's "Redis disabled" mode
-- `REDIS_ENABLED=true` → wraps storage in `RedisCachedRuleStorage`
+- `REDIS_ENABLED=false` → no Redis bean, no decorator, no pub/sub. Direct-S3 mode.
+- `REDIS_ENABLED=true, REDIS_PUBSUB_ENABLED=false` → cache only, no cross-task sync.
+- `REDIS_ENABLED=true, REDIS_PUBSUB_ENABLED=true` → full feature.
 
-### 8.2 Rollback path
+### 8.2 Rollback
 
-If Redis caching causes prod issues:
-1. Set `REDIS_ENABLED=false` and restart tasks. Service immediately reverts to direct-S3 reads. No data loss (S3 is source of truth).
-2. Redis can be left running with stale data — it'll TTL out within 15 min.
+1. Toggle `REDIS_ENABLED=false` and restart ECS tasks. Immediate revert. No data loss (S3 source of truth).
+2. Or disable just pub/sub via `REDIS_PUBSUB_ENABLED=false` if pub/sub is the problem.
 3. Code-level rollback: deploy previous service jar tag.
 
 ### 8.3 Forward-compat
 
-If Redis schema needs to evolve (e.g., new fields on Rule):
-- Bump key prefix: `drools:rule:` → `drools:rule:v2:`
-- Old consumers continue reading `drools:rule:*`; new code reads `drools:rule:v2:*`
-- Drift naturally on TTL expiry
+- Bump key prefix `drools:rule:` → `drools:rule:v2:` for schema migrations
+- New event types added: subscribers ignore unknown types
 
 ---
 
@@ -444,93 +543,116 @@ If Redis schema needs to evolve (e.g., new fields on Rule):
 
 | Phase | Scope | Effort | Risk |
 |---|---|---|---|
-| 1. Build `RedisCachedRuleStorage` | New class + unit tests. Reuse existing `RedisTemplate` + circuit breaker beans. | 2 days | Low |
-| 2. Wire `StorageFactory` | Conditional bean wiring; integration test with both flag states. | 0.5 day | Low |
-| 3. Delete dead code | Remove `RuleCache` interface, `LocalLRUCache`, `RedisRuleCache`, `CacheStatistics`, related tests and autowire sites. | 1 day | Low — just deletion |
-| 4. Adapt `AdminController` + endpoints | Drop `RuleCache` injection, refactor `/admin/rules`, `/admin/cache/stats`, `/admin/health`. | 1 day | Medium — public API shape changes |
-| 5. Config + env var migration | Rename `REDIS_TTL_MINUTES` → `REDIS_DRL_RULES_TTL_MINUTES`, add `_KEY_PREFIX`, drop `LRU_CACHE_MAX_SIZE`. Update yml + docker-compose + .env.example. | 0.5 day | Low |
-| 6. Integration tests | TestContainers Redis: write-through, read-through, invalidation, circuit-breaker. Verify 597 tests still green minus the deleted ones. | 1.5 days | Medium |
-| 7. Documentation | README, CLAUDE.md, 04-architecture, 35-faq, 37-glossary, 36-ADR (new ADR-016 + supersede ADR-004 + ADR-005). | 1 day | Low |
-| 8. Load test | Re-run `scripts/run-load-test.sh` with `REDIS_ENABLED=true`. Verify multi-instance refresh savings and no regression. | 1 day | Low |
-| 9. Rollout | Stage soak 1 week → prod. Toggle `REDIS_ENABLED=true` in prod once verified in stage. | 1–2 weeks elapsed | Low |
+| 0. Pre-flight & audit | Audit `CacheStatistics`, `/admin/rules` consumers, env var usage | 0.5 day | Low |
+| 1. Build `RedisCachedRuleStorage` | New decorator class + unit tests | 2 days | Low |
+| 2. Build pub/sub publisher + subscriber | `RuleRefreshPublisher`, `RuleRefreshSubscriber`, `RefreshEvent`, `InstanceIdConfig`. Tests | 2 days | Medium |
+| 3. Wire `StorageFactory` + `RedisConfig` | Conditional decorator wiring; `RedisMessageListenerContainer` setup | 0.5 day | Low |
+| 4. Delete dead code | Remove `RuleCache` interface, `LocalLRUCache`, `RedisRuleCache`, `CacheStatistics`, tests, autowire sites | 1 day | Low |
+| 5. Adapt `AdminController` + endpoints | Drop `RuleCache` injection, wire publisher, refactor `/admin/rules`, `/admin/cache/stats`, `/admin/health` | 1 day | Medium |
+| 6. Config + env var migration | Rename, drop, add env vars | 0.5 day | Low |
+| 7. Integration tests | Testcontainers Redis: read-through, invalidation, pub/sub fan-out, circuit-breaker | 2 days | Medium |
+| 8. Documentation | README, CLAUDE.md, all relevant project-documentation files, OpenAPI, ADR-016 | 1.5 days | Low |
+| 9. Load test | Re-run `scripts/run-load-test.sh` with `REDIS_ENABLED=true` | 1.5 days | Medium |
+| 10. Phased rollout | Stage soak 1 week → prod | 1–2 weeks elapsed | Low |
+| 11. Backward-compat cleanup (optional) | Remove `REDIS_TTL_MINUTES` fallback after 1 release | 0.5 day | Low |
 
-**Total dev effort:** ~8.5 dev-days.
-**Calendar time:** 2–3 weeks including stage soak.
+**Total dev effort:** ~13 dev-days.
+**Calendar time:** 3–4 weeks including stage soak.
 
 ---
 
 ## 10. Risks & open questions
 
-### 10.1 Risk: AdminController API shape change
+### 10.1 Risk: Pub/sub message loss
+Redis pub/sub is fire-and-forget. Missed events cause silent divergence.
+**Mitigation:** Connect/disconnect logging, `subscriber.connected` gauge, optional AUTO_REFRESH backstop, v2 Redis Streams.
 
-`/admin/rules` response `cached` field is removed (or renamed). Any consumer that parses this field breaks.
+### 10.2 Risk: Bulk refresh stampede
+All N tasks compile simultaneously on bulk pub/sub event.
+**Mitigation:** Document. v2: random jitter. Real fix: kjar plan.
 
-**Mitigation:** Audit consumers (CI scripts, monitoring dashboards). For at least 1 release, keep the field but always return `false` with a deprecation note. Remove in v2.
+### 10.3 Risk: AdminController API shape change
+`/admin/rules` `cached` field removal breaks consumers.
+**Mitigation:** Phase 0 audit. Optional 1-release deprecation period.
 
-### 10.2 Risk: Env var rename `REDIS_TTL_MINUTES → REDIS_DRL_RULES_TTL_MINUTES`
+### 10.4 Risk: Env var rename silently uses defaults
+**Mitigation:** Release note + optional backward-compat with WARN log.
 
-Any deployment scripting that sets the old var will silently use the default.
+### 10.5 Risk: Bulk SCAN performance at 10k
+10k keys with N×GET = ~50s. MGET batched 1000 keys = ~5s.
+**Mitigation:** Use MGET + pipelining.
 
-**Mitigation:** Release note. Optionally, in v1 read both env vars with warning log when old one is set.
+### 10.6 Risk: Circuit breaker thrash
+Flaky Redis causes oscillation.
+**Mitigation:** Tune `DROOLS_CB_REDIS_*`. Validate during stage soak.
 
-### 10.3 Risk: Bulk SCAN performance
+### 10.7 Risk: Subscriber refresh failure on receiving task
+Silent staleness.
+**Mitigation:** ERROR log; `drools.refresh.failed` counter; alerting. v2 retry.
 
-At 10,000 rules, a full `SCAN MATCH drools:rule:*` produces 10,000 keys to GET. With Redis ~5ms per GET, that's ~50s — slower than expected for a refresh.
+### 10.8 Risk: Memory pressure on Redis at 10k rules
+10k × ~10 KB = ~100 MB.
+**Mitigation:** Document sizing. maxmemory policy.
 
-**Mitigation:** Use Redis `MGET` instead of N×GET. Or pipeline. Or accept 50s (still 9x faster than current 8min S3 compile).
+### 10.9 Open question: persistent event log
+Redis Streams instead of pub/sub for durability?
+**Recommendation:** v1 stays pub/sub. v2 evaluates streams.
 
-### 10.4 Risk: Circuit breaker thrash
-
-If Redis is intermittently slow, the breaker opens, falls through to S3 (slow), then breaker closes, reads from stale-ish Redis again. Could cause oscillation.
-
-**Mitigation:** Existing `DROOLS_CB_REDIS_*` tuning. Validate during stage soak.
-
-### 10.5 Risk: Memory pressure on Redis at 10k rules
-
-10,000 × ~10 KB JSON ≈ 100 MB Redis memory. Manageable on a `cache.t3.micro` (0.5 GB) but tight if memory is shared with other workloads.
-
-**Mitigation:** Document expected Redis memory per rule count. Provision accordingly.
-
-### 10.6 Open question: should `RedisCachedRuleStorage` cache `getRuleIds()` results too?
-
-`getRuleIds()` is called by bulk SCAN logic to determine expected set. If S3 LIST is slow (~100ms) and called frequently, cache it. But staleness matters — if S3 has a new rule, we want to see it.
-
-**Recommendation:** Don't cache `getRuleIds()` in v1. Revisit if it becomes a hot path.
-
-### 10.7 Open question: should `/admin/rules` `cached` field be kept as `in_redis`?
-
-Possible useful field for ops: "is this rule currently in Redis?". Costs: 1 Redis `EXISTS` per rule per listing call. Listing 10k rules = 10k EXISTS = ~50s if naive.
-
-**Recommendation:** Drop the field. Re-introduce via a dedicated `/admin/cache/keys` endpoint if needed.
+### 10.10 Open question: deduplication beyond instanceId
+**Recommendation:** Idempotent refresh is sufficient.
 
 ---
 
 ## 11. Critical files — summary
 
-### New
+### New (production)
 - `src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java`
-- `src/test/java/com/company/drools/storage/RedisCachedRuleStorageTest.java`
-- `src/test/java/com/company/drools/integration/RedisCachedStorageIntegrationTest.java`
-- `project-documentation/36-architecture-decision-records.md` — new ADR-016 entry
+- `src/main/java/com/company/drools/cache/RuleRefreshPublisher.java`
+- `src/main/java/com/company/drools/cache/RuleRefreshSubscriber.java`
+- `src/main/java/com/company/drools/cache/RefreshEvent.java`
+- `src/main/java/com/company/drools/config/InstanceIdConfig.java`
 
-### Modified
-- `src/main/java/com/company/drools/storage/StorageFactory.java` — conditional decorator wiring
-- `src/main/java/com/company/drools/api/controller/AdminController.java` — drop RuleCache; refactor stats/health endpoints
-- `src/main/java/com/company/drools/config/RuleLoadingConfig.java` — drop RuleCache injection
-- `src/main/resources/application.yml` — rename TTL env, drop LRU config
-- `.env.example` — env var rename
-- `docker-compose.yml` — env var rename
-- `scripts/docker-compose.loadtest.yml` — env var rename if present
-- `project-documentation/04-architecture.md` — replace caching layer section
-- `project-documentation/09-environment-variables-reference.md` — env var changes
-- `project-documentation/29-circuit-breakers-and-resilience.md` — update Redis section
-- `project-documentation/30-runbooks-and-monitoring.md` — Redis stats reflect actual behaviour now
-- `project-documentation/35-faq.md` — update LocalLRUCache/Redis FAQ entries
-- `project-documentation/37-glossary.md` — update LRU + Redis glossary entries
-- `project-documentation/01-project-overview.md` — caching strategy bullet
-- `README.md` — caching architecture section (and Rule Capacity if affected)
-- `CLAUDE.md` — caching strategy section
-- Test files: `AdminControllerTest`, `RuleLoadingConfigTest`, `StorageFactoryTest`, `MetricsConfigTest`, `RuleRefreshIntegrationTest`
+### New (tests)
+- `src/test/java/com/company/drools/storage/RedisCachedRuleStorageTest.java`
+- `src/test/java/com/company/drools/cache/RuleRefreshPublisherTest.java`
+- `src/test/java/com/company/drools/cache/RuleRefreshSubscriberTest.java`
+- `src/test/java/com/company/drools/cache/RefreshEventTest.java`
+- `src/test/java/com/company/drools/integration/RedisCachedStorageIntegrationTest.java`
+- `src/test/java/com/company/drools/integration/RedisPubSubIntegrationTest.java`
+
+### Modified (production)
+- `src/main/java/com/company/drools/storage/StorageFactory.java`
+- `src/main/java/com/company/drools/api/controller/AdminController.java`
+- `src/main/java/com/company/drools/config/RuleLoadingConfig.java`
+- `src/main/java/com/company/drools/config/RedisConfig.java`
+- `src/main/resources/application.yml`
+- `.env.example`
+- `docker-compose.yml`
+- `scripts/docker-compose.loadtest.yml`
+
+### Modified (tests)
+- `src/test/java/com/company/drools/api/controller/AdminControllerTest.java`
+- `src/test/java/com/company/drools/config/RuleLoadingConfigTest.java`
+- `src/test/java/com/company/drools/storage/StorageFactoryTest.java`
+- `src/test/java/com/company/drools/config/MetricsConfigTest.java`
+- `src/test/java/com/company/drools/integration/RuleRefreshIntegrationTest.java`
+
+### Modified (docs)
+- `README.md`
+- `CLAUDE.md`
+- `project-documentation/00-system-overview.md`
+- `project-documentation/01-project-overview.md`
+- `project-documentation/02-project-structure.md`
+- `project-documentation/04-architecture.md`
+- `project-documentation/09-environment-variables-reference.md`
+- `project-documentation/10-api-reference.md`
+- `project-documentation/29-circuit-breakers-and-resilience.md`
+- `project-documentation/30-runbooks-and-monitoring.md`
+- `project-documentation/31-troubleshooting.md`
+- `project-documentation/35-faq.md`
+- `project-documentation/36-architecture-decision-records.md` (ADR-016 new, ADR-004/005 superseded)
+- `project-documentation/37-glossary.md`
+- `project-documentation/api-reference/openapi.yml`
 
 ### Deleted
 - `src/main/java/com/company/drools/cache/RuleCache.java`
@@ -545,109 +667,243 @@ Possible useful field for ops: "is this rule currently in Redis?". Costs: 1 Redi
 
 ## 12. Verification — acceptance criteria
 
-1. **`REDIS_ENABLED=false`** end-to-end:
-   - Service boots without a Redis bean
-   - `/admin/health` does not show a cache section (or shows `cache: { enabled: false }`)
-   - `/admin/cache/stats` returns 404 (or 200 with `{enabled: false}`)
-   - 597 - deleted tests = ~573 tests pass
-   - Load test latency identical to today
-2. **`REDIS_ENABLED=true`** end-to-end:
-   - Service boots, `RedisCachedRuleStorage` injected as `RuleStorage` `@Primary`
-   - First refresh hits S3, repopulates Redis
-   - Second refresh (same instance, before TTL): reads from Redis (verify via metrics)
-   - New instance startup: reads from Redis when populated (verify via instrumented log)
-   - `/admin/cache/stats` returns Redis-only stats with non-zero hit count after warm
-   - `/admin/health` cache section shows Redis status
-3. **Redis-down failure mode** (kill Redis container with `REDIS_ENABLED=true`):
-   - Service continues serving execution requests
-   - Refresh succeeds (falls through to S3)
-   - Circuit breaker metric shows OPEN state
-   - When Redis comes back: breaker closes, reads resume from Redis
-4. **Refresh invalidation:**
-   - Populate Redis with rule v1 via refresh
-   - Replace rule in S3 with v2
-   - Call `/admin/refresh-rules`
-   - Verify `drools:rule:{id}` in Redis now holds v2 (not v1)
-   - Verify no `v1` content lingers
-5. **Cross-service freshness:**
-   - Instance A refreshes, Redis cleared and re-warmed
-   - Instance B reads from Redis (or external service reads `drools:rule:*`): sees v2
-   - TTL ceiling: even if A doesn't refresh, B reads stop returning stale entries after 15 min
-6. **Migration:**
-   - With old `REDIS_TTL_MINUTES=120` set: log warns "deprecated env var", uses 15-min default
-   - With new `REDIS_DRL_RULES_TTL_MINUTES=120`: actually uses 120
-7. **Load test** (`scripts/run-load-test.sh`):
-   - P99 execution latency: identical to baseline
-   - Refresh time with `REDIS_ENABLED=true` on second + tasks: <50% of `REDIS_ENABLED=false`
-   - No memory regression
-   - No new error patterns
-8. **Stage soak** (1 week):
-   - No new error patterns
-   - Cache hit rate stable (expected ~95%+ for warm cache)
-   - No incidents
+### 12.1 Disabled-mode regression (`REDIS_ENABLED=false`)
+- Service boots without Redis bean, decorator, publisher, subscriber
+- `/admin/health` cache section absent or shows `{enabled: false}`
+- `/admin/cache/stats` returns 404 or `{enabled: false}`
+- All remaining tests pass
+- Load test latency identical to today's baseline (157,754 req, 0 errors, ~518 RPS)
+
+### 12.2 Cache-only mode (`REDIS_ENABLED=true, REDIS_PUBSUB_ENABLED=false`)
+- `RedisCachedRuleStorage` injected as primary
+- Publisher and subscriber NOT created
+- First refresh hits S3 → repopulates Redis
+- Second refresh: Redis hits visible via metrics
+- `/admin/cache/stats` shows Redis-only stats
+- Redis down: circuit breaker opens, falls through to S3, service continues
+
+### 12.3 Full mode (`REDIS_ENABLED=true, REDIS_PUBSUB_ENABLED=true`)
+- All of 12.2 plus:
+- Publisher emits events after refresh
+- Subscriber receives and processes events from other instances
+- Self-message dedup works (skip_self counter)
+- Cross-task convergence: refresh on A → B's kieContainer updates within ~1 sec (single) or ~7 min (bulk)
+- Pub/sub disconnect/reconnect: subscriber auto-reconnects
+
+### 12.4 Refresh invalidation
+- Populate Redis with rule v1
+- Replace rule in S3 with v2
+- Call `/admin/refresh-rules`
+- Verify `drools:rule:{id}` in Redis now holds v2
+- Verify all 3 tasks' kieContainers serve v2 within 1 sec
+
+### 12.5 Cross-service freshness
+- Instance A refreshes → cross-service consumer sees v2 within seconds
+- TTL ceiling: stale reads stop after 15 min
+
+### 12.6 Migration
+- With old `REDIS_TTL_MINUTES=120`: log warns deprecated; uses 15-min default
+- With new `REDIS_DRL_RULES_TTL_MINUTES=120`: uses 120
+
+### 12.7 Load test
+- P99 execution latency: identical to baseline ±10%
+- Multi-task refresh: tasks 2 and 3 fetch from Redis, not S3
+- Pub/sub fan-out: refresh on one task → all 3 tasks converge < 1 sec for single rule
+- No memory regression, no new errors
+
+### 12.8 Stage soak (1 week)
+- Cache hit rate stable
+- Pub/sub event delivery rate stable
+- No incidents
+
+### 12.9 Code quality gates
+- All existing tests pass minus ~24 deleted
+- New tests: ~38, ≥85% line coverage on new files
+- `mvn compile spotbugs:check` clean
+- `mvn spotless:check` clean
+- SonarQube: 0 new blocker/critical issues
+- JaCoCo: branch coverage on new classes ≥ 80%
 
 ---
 
-## 13. Documentation impact
+## 13. Documentation impact — comprehensive
 
-- **README.md**
-  - Caching architecture section (currently in Performance Targets area): rewrite to describe Redis-only model
-  - Rule Capacity & Memory Sizing section: update to remove LRU references
-- **CLAUDE.md**
-  - Caching Strategy bullet: simplified to "Redis cache (optional) decorating S3"
-- **project-documentation/00-system-overview.md**
-  - Architecture overview: simpler caching tier
-- **project-documentation/04-architecture.md**
-  - Caching layer section: remove L1, simplify to Redis-or-direct
-  - Update diagrams
-- **project-documentation/29-circuit-breakers-and-resilience.md**
-  - Redis breaker description: now actually exercised
-- **project-documentation/35-faq.md**
-  - Update LRU + Redis FAQs (some entries become irrelevant)
-- **project-documentation/36-architecture-decision-records.md**
-  - **Mark ADR-004 (LocalLRUCache uses WRITE lock on `get()`) as Superseded** (cache deleted)
-  - **Mark ADR-005 (Redis bean exists but is dormant by default) as Superseded** (Redis now actually used)
-  - **Add ADR-016: Redis decorator pattern over RuleStorage** — captures the design decisions in this plan
-- **project-documentation/37-glossary.md**
-  - Remove "LRU cache" entry
-  - Update "RedisRuleCache" entry → "RedisCachedRuleStorage"
-- **project-documentation/01-project-overview.md**
-  - Caching strategy bullet: refresh
-- **project-documentation/09-environment-variables-reference.md**
-  - Env var changes
+### 13.1 New documentation
+
+- **ADR-016: Redis Decorator + Pub/Sub for Multi-instance DRL Cache** — in `36-architecture-decision-records.md`
+  - Status: Accepted
+  - Context: dead `RuleCache` + cross-task divergence
+  - Decision: `RedisCachedRuleStorage` decorator + Redis pub/sub
+  - Consequences: positive (real cache, multi-instance convergence, cross-service consumers), negative (env var renames, API shape change, new failure modes)
+  - Alternatives considered: SNS/SQS, auto-refresh, manual fan-out, status quo
+- **Mark ADR-004 (LocalLRUCache uses WRITE lock on `get()`) as Superseded** by ADR-016
+- **Mark ADR-005 (Redis bean exists but is dormant by default) as Superseded** by ADR-016
+
+### 13.2 Updated documentation
+
+| File | Section | Changes |
+|---|---|---|
+| `README.md` | Architecture / Caching / Performance | Replace LRU+Redis story. Update Rule Capacity. Add cross-task convergence section. |
+| `CLAUDE.md` | Caching Strategy | Simplified bullet: Redis cache + pub/sub when enabled. Add Recent change log entry. |
+| `00-system-overview.md` | Architecture overview | Updated caching diagram. |
+| `01-project-overview.md` | Caching strategy table | Updated to decorator + pub/sub. |
+| `02-project-structure.md` | Package list | Update `cache/` contents; add `RedisCachedRuleStorage` to `storage/`. |
+| `04-architecture.md` | Caching layer + diagrams | Replace L1/L2/L3 misdescription. Add pub/sub fan-out diagram. Multi-instance refresh sequence diagram. |
+| `09-environment-variables-reference.md` | Redis section | Add new env vars; remove old. |
+| `10-api-reference.md` | `/admin/rules`, `/admin/cache/stats` | Document new response shapes. |
+| `29-circuit-breakers-and-resilience.md` | Redis section | Now actually exercised; describe pub/sub circuit breaker. |
+| `30-runbooks-and-monitoring.md` | Cache + pub/sub | New runbook: Redis pub/sub event loss recovery. |
+| `31-troubleshooting.md` | Cache + pub/sub issues | New entries: cross-task divergence symptoms, pub/sub debugging. |
+| `35-faq.md` | LRU + Redis | Remove LRU. Update Redis. Add pub/sub FAQ. |
+| `37-glossary.md` | LRU, Redis | Remove LRU; rename Redis; add pub/sub terms. |
+| `api-reference/openapi.yml` | Schemas | Update affected endpoints. |
+
+### 13.3 New diagrams
+
+- Sequence: multi-task refresh with pub/sub fan-out (`04-architecture.md`)
+- Cache layer: Redis decorator (`04-architecture.md`)
+- Failure mode: Redis down circuit breaker fallback (`29-circuit-breakers.md`)
 
 ---
 
 ## 14. Metrics & observability
 
-### 14.1 New metrics (when `REDIS_ENABLED=true`)
-- `drools.cache.hit{layer=redis}` — counter
-- `drools.cache.miss{layer=redis}` — counter
-- `drools.cache.bulk.hit` / `drools.cache.bulk.miss` — counter
-- `drools.cache.read.duration{layer=redis}` — timer
-- `drools.cache.write.duration{layer=redis}` — timer
-- `drools.cache.invalidation{scope=bulk|single}` — counter
-- `drools.cache.size{layer=redis}` — gauge (sampled via SCAN COUNT, every N seconds)
+### 14.1 New metrics
+
+Cache:
+- `drools.cache.hit{layer=redis}` counter
+- `drools.cache.miss{layer=redis}` counter
+- `drools.cache.bulk.hit`, `drools.cache.bulk.miss{count=N}` counters
+- `drools.cache.read.duration{layer=redis}` timer
+- `drools.cache.write.duration{layer=redis}` timer
+- `drools.cache.invalidation{scope=bulk|single}` counter
+- `drools.cache.size{layer=redis}` gauge
+
+Pub/Sub:
+- `drools.refresh.published{event=...}` counter
+- `drools.refresh.received{event=...}` counter
+- `drools.refresh.skipped_self` counter
+- `drools.refresh.processing.duration{event=...}` timer
+- `drools.refresh.failed{layer=publisher|subscriber}` counter
+- `drools.refresh.subscriber.connected` gauge
 
 ### 14.2 Removed metrics
-- All `drools.cache.local.*` metrics (LRU is gone)
+- `drools.cache.local.*` — LocalLRUCache gone
 
 ### 14.3 Health check
-- `/admin/health` cache section shows Redis status when enabled, omitted when disabled
-- Redis connection check via simple `PING` (existing `RedisTemplate` capability)
+- `/admin/health`:
+  - `cache.redis.status` (UP/DOWN) when Redis enabled
+  - `cache.redis.size` (sampled key count)
+  - `pubsub.status` (UP/DOWN) when pub/sub enabled
+  - `pubsub.last_event_age_seconds`
+
+### 14.4 Logging
+
+- Publisher: `INFO` on publish, `WARN` on failure
+- Subscriber: `INFO` on event received/completion, `ERROR` on failure
+- Both: log `instance_id`, `event_type`, `rule_id`, `duration_ms`
 
 ---
 
-## 15. Recommendation summary
+## 15. Testing strategy
 
-- **Do it.** The current cache layer is dead weight that misleads readers and provides no benefit. Replacing it with a real read-through decorator is mostly subtractive (deleting > adding).
-- **Phase it.** Build the decorator + tests first. Don't touch execution path. Soak in stage before flipping prod.
-- **Keep `REDIS_ENABLED=false` as default.** Conservative; ECS tasks opt in.
-- **Coordinate with kjar plan.** Both are independent and complementary. Redis caching helps S3 fetch time; kjar eliminates compile time. Don't gate one on the other.
+### 15.1 Unit tests
+
+| Test class | Count | Coverage |
+|---|---|---|
+| `RedisCachedRuleStorageTest` | 12 | Read-through matrix, CB open/closed, write-through, invalidation |
+| `RuleRefreshPublisherTest` | 6 | Event construction, CB, instance ID |
+| `RuleRefreshSubscriberTest` | 8 | Deserialisation, self-dedup, event-type dispatch, error handling |
+| `RefreshEventTest` | 3 | JSON roundtrip, version compat |
+
+### 15.2 Integration tests (Testcontainers)
+
+- `RedisCachedStorageIntegrationTest`:
+  - Cold cache → S3 → populate → subsequent reads from Redis
+  - `getAllRules` bulk SCAN with N rules
+  - `refreshCache` SCAN+DEL clears all
+  - Circuit breaker engages on Redis kill mid-test
+  - Connection recovery after Redis restart
+- `RedisPubSubIntegrationTest`:
+  - Two Spring contexts (simulating 2 ECS tasks)
+  - Single-rule refresh on context A → context B updates within 1 sec
+  - Self-dedup verified
+  - Bulk event: both contexts recompile
+  - Subscriber disconnect/reconnect during event flight
+  - Malformed event: ERROR logged, subscriber alive
+
+### 15.3 Existing test impact
+
+| Test | Action |
+|---|---|
+| `AdminControllerTest` | Remove `RuleCache` mock; assert publisher called; new `/admin/cache/stats` shape |
+| `RuleLoadingConfigTest` | Remove `RuleCache` injection mock |
+| `StorageFactoryTest` | Test decorator wiring under both flag states |
+| `MetricsConfigTest` | Assert new metric names registered |
+| `RuleRefreshIntegrationTest` | Assert Redis cleared + repopulated; pub/sub event emitted |
+| `RuleExecutionIntegrationTest` | No change (execution doesn't touch cache) |
+| `LocalLRUCacheTest`, `RedisRuleCacheTest`, `CacheStatisticsTest` | Delete |
+
+### 15.4 Load test additions
+
+`scripts/run-load-test.sh` extensions:
+- New phase: multi-task pub/sub fan-out
+  - Boot 3 app containers
+  - Send rule refresh to one
+  - Measure time-to-converge across all 3
+  - Acceptance: < 2 sec single, < 7 min bulk at 10k
+
+### 15.5 Manual smoke tests
+
+`scripts/redis-pubsub-test.sh` (new):
+- Start compose with full mode
+- Refresh a rule via curl
+- Verify `redis-cli SUBSCRIBE drools:rule:events` shows event
+- Verify second container's metrics show subscriber received event
+- Verify both containers serve consistent rule output
+
+### 15.6 Quality gates
+
+| Gate | Threshold |
+|---|---|
+| Unit tests | All pass; `mvn test` clean |
+| Integration tests | All pass; `mvn verify` clean |
+| Coverage (JaCoCo) | New files ≥ 85% line, ≥ 80% branch |
+| SpotBugs | 0 new bugs |
+| Spotless | clean |
+| SonarQube | 0 new blocker/critical; new code coverage ≥ 80%; new violations 0 |
+| Load test regression | P99 within ±10% baseline |
+| Memory | No regression in heap usage at rest |
 
 ---
 
-## 16. Companion files
+## 16. Documentation deliverables (MUST complete before merging)
+
+Critical: this plan ships ONLY when documentation is updated. Doc work is part of the definition of done.
+
+- [ ] `README.md` updated — caching section, Rule Capacity, cross-task convergence section
+- [ ] `CLAUDE.md` updated — caching strategy bullet, Recent change log entry
+- [ ] All 14 affected project-documentation files updated (section 13.2)
+- [ ] OpenAPI spec updated for changed endpoints
+- [ ] ADR-016 added
+- [ ] ADR-004 and ADR-005 marked Superseded with links to ADR-016
+- [ ] New diagrams added to `04-architecture.md`
+- [ ] Migration guide drafted in `30-runbooks-and-monitoring.md`
+- [ ] FAQ updated: "Why does my second task serve stale rules?" → pub/sub explanation
+- [ ] Glossary updated: `RefreshEvent`, `RuleRefreshPublisher`, `RuleRefreshSubscriber`
+
+---
+
+## 17. Recommendation summary
+
+- **Do it.** Solves both the dead-cache problem AND the cross-task divergence problem.
+- **Phase carefully.** Build decorator + pub/sub independently with tests before wiring. Soak in stage 1 week.
+- **Keep `REDIS_ENABLED=false` as default** so dev/local stays simple. Production opts in.
+- **Coordinate with kjar plan.** Kjar eliminates compile cost; this plan eliminates fetch cost + adds cross-task sync. Together they cover 10k rules × 3-5 tasks.
+
+---
+
+## 18. Companion files
 
 - Detailed checklist: [`redis-cache-layering-checklist.md`](redis-cache-layering-checklist.md)
 - Cross-reference: [`kjar-precompilation-plan.md`](kjar-precompilation-plan.md)
