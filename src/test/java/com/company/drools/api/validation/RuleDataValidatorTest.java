@@ -5,10 +5,8 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
-import com.company.drools.config.ValidationConfig;
 import com.company.drools.testutil.ValidationConfigTestHelper;
 import jakarta.validation.ConstraintValidatorContext;
-import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -30,14 +28,8 @@ class RuleDataValidatorTest {
   private ConstraintValidatorContext context;
 
   @BeforeEach
-  void setUp() throws Exception {
-    validator = new RuleDataValidator();
-
-    // Inject ValidationConfig via reflection (normally done by Spring @Autowired)
-    ValidationConfig config = ValidationConfigTestHelper.createTestValidationConfig();
-    Field configField = RuleDataValidator.class.getDeclaredField("validationConfig");
-    configField.setAccessible(true);
-    configField.set(validator, config);
+  void setUp() {
+    validator = new RuleDataValidator(ValidationConfigTestHelper.createTestValidationConfig());
 
     // Mock ConstraintValidatorContext for violation reporting
     context = mock(ConstraintValidatorContext.class);

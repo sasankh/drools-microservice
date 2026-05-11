@@ -5,8 +5,6 @@ import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;
 import java.util.Map;
 import java.util.regex.Pattern;
-import org.springframework.beans.factory.annotation.Autowired;
-
 /** Validator for rule execution data payload */
 public class RuleDataValidator implements ConstraintValidator<ValidRuleData, Map<String, Object>> {
 
@@ -21,7 +19,11 @@ public class RuleDataValidator implements ConstraintValidator<ValidRuleData, Map
     Pattern.compile("(?i)exec\\s*\\(", Pattern.CASE_INSENSITIVE)
   };
 
-  @Autowired private ValidationConfig validationConfig;
+  private final ValidationConfig validationConfig;
+
+  public RuleDataValidator(ValidationConfig validationConfig) {
+    this.validationConfig = validationConfig;
+  }
 
   @Override
   public void initialize(ValidRuleData constraintAnnotation) {

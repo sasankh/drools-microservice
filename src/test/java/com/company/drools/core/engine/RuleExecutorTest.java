@@ -361,7 +361,7 @@ class RuleExecutorTest {
 
       // The result should not be an unhandled exception -- it should either succeed or fail
       assertThat(result).isNotNull();
-      verify(mockSession).dispose();
+      verify(mockSession).close();
 
       executor.shutdown();
     }

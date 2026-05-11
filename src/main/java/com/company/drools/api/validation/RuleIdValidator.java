@@ -4,15 +4,17 @@ import com.company.drools.config.ValidationConfig;
 import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;
 import java.util.regex.Pattern;
-import org.springframework.beans.factory.annotation.Autowired;
-
 /** Validator for rule ID format and length */
 public class RuleIdValidator implements ConstraintValidator<ValidRuleId, String> {
 
   // Pattern for valid rule IDs: alphanumeric, dots, dashes, underscores
   private static final Pattern RULE_ID_PATTERN = Pattern.compile("^[a-zA-Z0-9._-]+$");
 
-  @Autowired private ValidationConfig validationConfig;
+  private final ValidationConfig validationConfig;
+
+  public RuleIdValidator(ValidationConfig validationConfig) {
+    this.validationConfig = validationConfig;
+  }
 
   @Override
   public void initialize(ValidRuleId constraintAnnotation) {

@@ -121,8 +121,7 @@ public class GlobalExceptionHandler {
   @ExceptionHandler(HttpMessageNotReadableException.class)
   public ResponseEntity<RuleExecutionResponse> handleMalformedJson(
       HttpMessageNotReadableException ex) {
-    Throwable cause = ex.getMostSpecificCause();
-    String causeMessage = cause != null ? cause.getMessage() : ex.getMessage();
+    String causeMessage = ex.getMostSpecificCause().getMessage();
     log.warn("Malformed JSON in request body: {}", LogSanitizer.sanitizeMessage(causeMessage));
 
     RuleExecutionResponse response =
