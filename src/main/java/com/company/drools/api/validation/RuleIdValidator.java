@@ -4,6 +4,7 @@ import com.company.drools.config.ValidationConfig;
 import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;
 import java.util.regex.Pattern;
+
 /** Validator for rule ID format and length */
 public class RuleIdValidator implements ConstraintValidator<ValidRuleId, String> {
 

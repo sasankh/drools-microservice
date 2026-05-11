@@ -5,6 +5,7 @@ import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;
 import java.util.Map;
 import java.util.regex.Pattern;
+
 /** Validator for rule execution data payload */
 public class RuleDataValidator implements ConstraintValidator<ValidRuleData, Map<String, Object>> {
 
