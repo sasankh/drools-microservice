@@ -825,6 +825,29 @@ mvn test -Dtest=S3StorageIntegrationTest
 
 Run this whenever you want to verify the full stack is healthy — rules loading from S3, execution working, hot reload uninterrupted, memory stable.
 
+#### One-command option
+
+The script [`scripts/e2e-load-test.sh`](scripts/e2e-load-test.sh) runs the entire sequence below unattended:
+
+```bash
+# Full run (tears down stack at end)
+./scripts/e2e-load-test.sh
+
+# Keep stack running after test (useful for debugging)
+./scripts/e2e-load-test.sh --no-teardown
+
+# Skip docker compose build if image is already current
+./scripts/e2e-load-test.sh --skip-build
+```
+
+The script patches `docker-compose.yml` to disable rate limiting for the load test and restores it automatically on exit (even on failure or Ctrl-C). Exits non-zero if any check fails — CI-friendly.
+
+**Baseline from 2026-05-11**: 157,754 requests, **0 errors (0%)**, ~518 RPS, heap stable 180–340 MB, hot reload at 2 min with 0 dropped requests.
+
+---
+
+Or run the steps manually:
+
 #### Step 1 — Start the stack
 
 ```bash
@@ -968,8 +991,6 @@ echo ""; echo "=== RESULTS: ${ELAPSED}s | total=$TOT success=$SUC errors=$ERR ($
 echo "Final heap: $(curl -s http://localhost:8080/admin/memory/info | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{d['heap']['usedMB']}MB ({d['heap']['usagePercent']}%)\")")"
 rm -rf $TMPDIR_LT
 ```
-
-**Baseline from 2026-05-11**: 157,754 requests, **0 errors (0%)**, ~518 RPS, heap stable 180–340 MB, hot reload at 2 min with 0 dropped requests.
 
 #### Step 8 — Tear down
 
