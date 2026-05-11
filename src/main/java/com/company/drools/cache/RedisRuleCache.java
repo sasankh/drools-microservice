@@ -35,11 +35,11 @@ import org.springframework.stereotype.Component;
 public class RedisRuleCache implements RuleCache {
 
   private static final Logger log = LoggerFactory.getLogger(RedisRuleCache.class);
-  private static final String CACHE_KEY_PREFIX    = "drools:rule:";
-  private static final String CACHE_STATS_KEY     = "drools:stats:";
+  private static final String CACHE_KEY_PREFIX = "drools:rule:";
+  private static final String CACHE_STATS_KEY = "drools:stats:";
   private static final String METRIC_CACHE_MISSES = "drools.cache.misses";
-  private static final String TAG_CACHE_TYPE      = "cache_type";
-  private static final String CACHE_TYPE_REDIS    = "redis";
+  private static final String TAG_CACHE_TYPE = "cache_type";
+  private static final String CACHE_TYPE_REDIS = "redis";
 
   private final RedisTemplate<String, Rule> redisTemplate;
   private final Duration ttlDuration;
@@ -104,7 +104,12 @@ public class RedisRuleCache implements RuleCache {
       log.warn("Redis circuit breaker is open - treating as cache miss for rule: {}", ruleId);
       localMisses.incrementAndGet();
       meterRegistry
-          .counter(METRIC_CACHE_MISSES, TAG_CACHE_TYPE, CACHE_TYPE_REDIS, "reason", "circuit_breaker_open")
+          .counter(
+              METRIC_CACHE_MISSES,
+              TAG_CACHE_TYPE,
+              CACHE_TYPE_REDIS,
+              "reason",
+              "circuit_breaker_open")
           .increment();
       return Optional.empty();
 

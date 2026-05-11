@@ -198,7 +198,8 @@ class DrlSanitizerTest {
           then
               $data.put("executed", true);
           end
-          """.formatted(importLine);
+          """
+              .formatted(importLine);
 
       DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
 

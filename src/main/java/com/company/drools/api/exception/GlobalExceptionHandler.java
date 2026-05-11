@@ -57,7 +57,8 @@ public class GlobalExceptionHandler {
             .collect(Collectors.joining(", "));
 
     RuleExecutionResponse response =
-        RuleExecutionResponse.failure(null, ERROR_CODE_INVALID_INPUT, "Request validation failed", errors);
+        RuleExecutionResponse.failure(
+            null, ERROR_CODE_INVALID_INPUT, "Request validation failed", errors);
 
     return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
   }

@@ -68,7 +68,8 @@ public class S3Config {
             .region(Region.of(region))
             .credentialsProvider(createCredentialsProvider())
             .httpClient(httpClient)
-            .overrideConfiguration(builder -> builder.retryStrategy(AwsRetryStrategy.defaultRetryStrategy()));
+            .overrideConfiguration(
+                builder -> builder.retryStrategy(AwsRetryStrategy.defaultRetryStrategy()));
 
     // Configure endpoint for LocalStack or custom S3-compatible services
     if (StringUtils.hasText(endpoint)) {

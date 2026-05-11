@@ -177,7 +177,8 @@ class MemoryControllerTest {
         assertThat(warnings).anyMatch(w -> w.contains(expectedLabel));
       } else {
         assertThat(warnings)
-            .noneMatch(w -> w.contains("CRITICAL") || w.startsWith("WARNING") || w.contains("CAUTION"));
+            .noneMatch(
+                w -> w.contains("CRITICAL") || w.startsWith("WARNING") || w.contains("CAUTION"));
       }
     }
 

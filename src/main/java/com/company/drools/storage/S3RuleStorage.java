@@ -30,12 +30,12 @@ public class S3RuleStorage implements RuleStorage {
   private static final Logger log = LoggerFactory.getLogger(S3RuleStorage.class);
 
   private static final String METRIC_STORAGE_OPERATION_TIME = "drools.storage.operation.time";
-  private static final String TAG_OPERATION    = "operation";
+  private static final String TAG_OPERATION = "operation";
   private static final String TAG_STORAGE_TYPE = "storage_type";
-  private static final String STORAGE_TYPE_S3  = "s3";
-  private static final String TAG_STATUS       = "status";
-  private static final String FILE_EXT_DRL     = ".drl";
-  private static final String OP_GET_RULE      = "getRule";
+  private static final String STORAGE_TYPE_S3 = "s3";
+  private static final String TAG_STATUS = "status";
+  private static final String FILE_EXT_DRL = ".drl";
+  private static final String OP_GET_RULE = "getRule";
 
   private final S3Client s3Client;
   private final MeterRegistry meterRegistry;
@@ -287,7 +287,8 @@ public class S3RuleStorage implements RuleStorage {
 
       do {
         response = s3Client.listObjectsV2(request);
-        count += response.contents().stream().filter(obj -> obj.key().endsWith(FILE_EXT_DRL)).count();
+        count +=
+            response.contents().stream().filter(obj -> obj.key().endsWith(FILE_EXT_DRL)).count();
 
         request =
             ListObjectsV2Request.builder()

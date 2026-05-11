@@ -27,11 +27,11 @@ public class DroolsEngineService {
 
   private static final Logger log = LoggerFactory.getLogger(DroolsEngineService.class);
 
-  private static final String METRIC_RULE_EXECUTION_TIME  = "drools.rule.execution.time";
+  private static final String METRIC_RULE_EXECUTION_TIME = "drools.rule.execution.time";
   private static final String METRIC_RULE_EXECUTION_ERROR = "drools.rule.execution.error";
-  private static final String TAG_RULE_ID                 = "rule_id";
-  private static final String TAG_STATUS                  = "status";
-  private static final String STATUS_ERROR                = "error";
+  private static final String TAG_RULE_ID = "rule_id";
+  private static final String TAG_STATUS = "status";
+  private static final String STATUS_ERROR = "error";
 
   private final RuleCompiler ruleCompiler;
   private final RuleExecutor ruleExecutor;
@@ -88,7 +88,8 @@ public class DroolsEngineService {
       if (rule == null || metadata == null) {
         log.warn("Rule not found: {}", ruleId);
         meterRegistry
-            .counter(METRIC_RULE_EXECUTION_ERROR, TAG_RULE_ID, "unknown", STATUS_ERROR, "rule_not_found")
+            .counter(
+                METRIC_RULE_EXECUTION_ERROR, TAG_RULE_ID, "unknown", STATUS_ERROR, "rule_not_found")
             .increment();
         sample.stop(
             Timer.builder(METRIC_RULE_EXECUTION_TIME)
@@ -102,7 +103,8 @@ public class DroolsEngineService {
       if (metadata.getStatus() != RuleMetadata.RuleStatus.ACTIVE) {
         log.warn("Rule is not active: {} (status: {})", ruleId, metadata.getStatus());
         meterRegistry
-            .counter(METRIC_RULE_EXECUTION_ERROR, TAG_RULE_ID, ruleId, STATUS_ERROR, "rule_not_active")
+            .counter(
+                METRIC_RULE_EXECUTION_ERROR, TAG_RULE_ID, ruleId, STATUS_ERROR, "rule_not_active")
             .increment();
         sample.stop(
             Timer.builder(METRIC_RULE_EXECUTION_TIME)
@@ -132,7 +134,8 @@ public class DroolsEngineService {
       } else {
         // Record failed execution metrics
         meterRegistry
-            .counter(METRIC_RULE_EXECUTION_ERROR, TAG_RULE_ID, ruleId, STATUS_ERROR, "execution_failed")
+            .counter(
+                METRIC_RULE_EXECUTION_ERROR, TAG_RULE_ID, ruleId, STATUS_ERROR, "execution_failed")
             .increment();
         sample.stop(
             Timer.builder(METRIC_RULE_EXECUTION_TIME)

@@ -25,12 +25,12 @@ public class RuleExecutionController {
   private static final Logger log = LoggerFactory.getLogger(RuleExecutionController.class);
 
   private static final String METRIC_API_RESPONSE_TIME = "drools.api.response.time";
-  private static final String METRIC_API_ERRORS        = "drools.api.errors";
-  private static final String TAG_ENDPOINT             = "endpoint";
-  private static final String TAG_STATUS               = "status";
-  private static final String STATUS_ERROR             = "error";
-  private static final String TAG_ERROR_TYPE           = "error_type";
-  private static final String ENDPOINT_EXECUTE_RULE    = "/execute-rule";
+  private static final String METRIC_API_ERRORS = "drools.api.errors";
+  private static final String TAG_ENDPOINT = "endpoint";
+  private static final String TAG_STATUS = "status";
+  private static final String STATUS_ERROR = "error";
+  private static final String TAG_ERROR_TYPE = "error_type";
+  private static final String ENDPOINT_EXECUTE_RULE = "/execute-rule";
 
   private final DroolsEngineService droolsEngineService;
   private final MeterRegistry meterRegistry;
@@ -77,7 +77,7 @@ public class RuleExecutionController {
         sample.stop(
             Timer.builder(METRIC_API_RESPONSE_TIME)
                 .tag(TAG_ENDPOINT, ENDPOINT_EXECUTE_RULE)
-                .tag(TAG_STATUS,"success")
+                .tag(TAG_STATUS, "success")
                 .register(meterRegistry));
 
         RuleExecutionResponse response =
@@ -96,7 +96,12 @@ public class RuleExecutionController {
     } catch (RuleNotFoundException e) {
       // Record API error
       meterRegistry
-          .counter(METRIC_API_ERRORS, TAG_ENDPOINT, ENDPOINT_EXECUTE_RULE, TAG_ERROR_TYPE, "rule_not_found")
+          .counter(
+              METRIC_API_ERRORS,
+              TAG_ENDPOINT,
+              ENDPOINT_EXECUTE_RULE,
+              TAG_ERROR_TYPE,
+              "rule_not_found")
           .increment();
       sample.stop(
           Timer.builder(METRIC_API_RESPONSE_TIME)
@@ -108,7 +113,11 @@ public class RuleExecutionController {
       // Record API error
       meterRegistry
           .counter(
-              METRIC_API_ERRORS, TAG_ENDPOINT, ENDPOINT_EXECUTE_RULE, TAG_ERROR_TYPE, "execution_failed")
+              METRIC_API_ERRORS,
+              TAG_ENDPOINT,
+              ENDPOINT_EXECUTE_RULE,
+              TAG_ERROR_TYPE,
+              "execution_failed")
           .increment();
       sample.stop(
           Timer.builder(METRIC_API_RESPONSE_TIME)
@@ -123,7 +132,8 @@ public class RuleExecutionController {
           e);
       // Record API error
       meterRegistry
-          .counter(METRIC_API_ERRORS, TAG_ENDPOINT, ENDPOINT_EXECUTE_RULE, TAG_ERROR_TYPE, "unexpected")
+          .counter(
+              METRIC_API_ERRORS, TAG_ENDPOINT, ENDPOINT_EXECUTE_RULE, TAG_ERROR_TYPE, "unexpected")
           .increment();
       sample.stop(
           Timer.builder(METRIC_API_RESPONSE_TIME)
