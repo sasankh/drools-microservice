@@ -325,7 +325,7 @@ class DroolsEngineServiceTest {
               startLatch.await();
               Rule newRule = RuleTestUtils.createSimpleRule("locking.test.rule");
               service.loadRules(List.of(newRule));
-            } catch (Exception e) {
+            } catch (Exception _) {
               // ignore
             } finally {
               doneLatch.countDown();
@@ -339,7 +339,7 @@ class DroolsEngineServiceTest {
               startLatch.await();
               Thread.sleep(50); // give write lock time to acquire
               service.executeRule("locking.test.rule", Map.of("key", "value"));
-            } catch (Exception e) {
+            } catch (Exception _) {
               // ignore
             } finally {
               doneLatch.countDown();

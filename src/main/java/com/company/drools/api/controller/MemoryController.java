@@ -131,7 +131,7 @@ public class MemoryController {
 
     // Warning flags
     double heapUsagePercent = (heapUsed * 100.0) / heapMax;
-    memoryInfo.put("warnings", getMemoryWarnings(heapUsagePercent, heapUsed, heapMax));
+    memoryInfo.put("warnings", getMemoryWarnings(heapUsagePercent, heapMax));
 
     logger.debug(
         "Memory info requested - Heap usage: {}/{} MB ({}%)",
@@ -149,6 +149,7 @@ public class MemoryController {
   @SuppressFBWarnings(
       value = "DM_GC",
       justification = "Admin diagnostic endpoint; explicit GC trigger is the entire purpose")
+  @SuppressWarnings("java:S1215")
   @PostMapping("/gc")
   public ResponseEntity<Map<String, Object>> triggerGC() {
     logger.warn("Manual garbage collection triggered via API");
@@ -203,7 +204,7 @@ public class MemoryController {
     return ResponseEntity.ok(snapshot);
   }
 
-  private List<String> getMemoryWarnings(double heapUsagePercent, long heapUsed, long heapMax) {
+  private List<String> getMemoryWarnings(double heapUsagePercent, long heapMax) {
     List<String> warnings = new java.util.ArrayList<>();
 
     if (heapUsagePercent > 90) {

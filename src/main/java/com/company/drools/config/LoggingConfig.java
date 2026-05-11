@@ -85,6 +85,8 @@ public class LoggingConfig {
   /** Utility class for adding structured logging fields. */
   public static class StructuredLogging {
 
+    private StructuredLogging() {}
+
     /** Add rule execution context to MDC. */
     public static void addRuleContext(String ruleId, String operation) {
       MDC.put(MDC_RULE_ID, ruleId);

@@ -35,7 +35,6 @@ public class DroolsEngineService {
 
   private final RuleCompiler ruleCompiler;
   private final RuleExecutor ruleExecutor;
-  private final RuleStorage ruleStorage;
   private final TimeoutConfig timeoutConfig;
   private final KieRepository kieRepository;
 
@@ -65,7 +64,6 @@ public class DroolsEngineService {
     this.ruleExecutor = ruleExecutor;
     this.kieContainer = kieContainer;
     this.kieRepository = kieRepository;
-    this.ruleStorage = ruleStorage;
     this.timeoutConfig = timeoutConfig;
     this.meterRegistry = meterRegistry;
     log.info(

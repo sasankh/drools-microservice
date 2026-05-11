@@ -3,7 +3,6 @@ package com.company.drools.storage;
 import com.company.drools.api.exception.CircuitBreakerException;
 import com.company.drools.api.exception.RuleNotFoundException;
 import com.company.drools.api.exception.RuleStorageException;
-import com.company.drools.config.TimeoutConfig;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
@@ -39,7 +38,6 @@ public class S3RuleStorage implements RuleStorage {
 
   private final S3Client s3Client;
   private final MeterRegistry meterRegistry;
-  private final TimeoutConfig timeoutConfig;
   private final CircuitBreaker s3CircuitBreaker;
 
   @Value("${drools.s3.bucket-name}")
@@ -48,11 +46,9 @@ public class S3RuleStorage implements RuleStorage {
   public S3RuleStorage(
       S3Client s3Client,
       MeterRegistry meterRegistry,
-      TimeoutConfig timeoutConfig,
       @Qualifier("s3CircuitBreaker") CircuitBreaker s3CircuitBreaker) {
     this.s3Client = s3Client;
     this.meterRegistry = meterRegistry;
-    this.timeoutConfig = timeoutConfig;
     this.s3CircuitBreaker = s3CircuitBreaker;
   }
 

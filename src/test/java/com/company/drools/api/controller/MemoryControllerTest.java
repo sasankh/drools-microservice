@@ -145,15 +145,15 @@ class MemoryControllerTest {
       controller = new MemoryController();
       getMemoryWarningsMethod =
           MemoryController.class.getDeclaredMethod(
-              "getMemoryWarnings", double.class, long.class, long.class);
+              "getMemoryWarnings", double.class, long.class);
       getMemoryWarningsMethod.setAccessible(true);
     }
 
     @SuppressWarnings("unchecked")
-    private List<String> invokeGetMemoryWarnings(
-        double heapUsagePercent, long heapUsed, long heapMax) throws Exception {
+    private List<String> invokeGetMemoryWarnings(double heapUsagePercent, long heapMax)
+        throws Exception {
       return (List<String>)
-          getMemoryWarningsMethod.invoke(controller, heapUsagePercent, heapUsed, heapMax);
+          getMemoryWarningsMethod.invoke(controller, heapUsagePercent, heapMax);
     }
 
     static Stream<Arguments> heapUsageWarningCases() {
@@ -169,9 +169,8 @@ class MemoryControllerTest {
     @DisplayName("returns correct warning level for heap usage")
     void testHeapUsageWarningLevel(double usagePercent, String expectedLabel) throws Exception {
       long heapMax = 1024L * 1024 * 1024 * 2; // 2 GB
-      long heapUsed = (long) (heapMax * (usagePercent / 100.0));
 
-      List<String> warnings = invokeGetMemoryWarnings(usagePercent, heapUsed, heapMax);
+      List<String> warnings = invokeGetMemoryWarnings(usagePercent, heapMax);
 
       if (expectedLabel != null) {
         assertThat(warnings).anyMatch(w -> w.contains(expectedLabel));
@@ -186,9 +185,8 @@ class MemoryControllerTest {
     @DisplayName("returns info warning when heap max is less than 1GB")
     void testInfoWarning_SmallHeapMax() throws Exception {
       long heapMax = 512L * 1024 * 1024; // 512 MB
-      long heapUsed = (long) (heapMax * 0.50);
 
-      List<String> warnings = invokeGetMemoryWarnings(50.0, heapUsed, heapMax);
+      List<String> warnings = invokeGetMemoryWarnings(50.0, heapMax);
 
       assertThat(warnings)
           .anyMatch(w -> w.contains("INFO"))
@@ -199,9 +197,8 @@ class MemoryControllerTest {
     @DisplayName("returns no info warning when heap max is 1GB or more")
     void testNoInfoWarning_LargeHeapMax() throws Exception {
       long heapMax = 1024L * 1024 * 1024 * 2; // 2 GB
-      long heapUsed = (long) (heapMax * 0.50);
 
-      List<String> warnings = invokeGetMemoryWarnings(50.0, heapUsed, heapMax);
+      List<String> warnings = invokeGetMemoryWarnings(50.0, heapMax);
 
       assertThat(warnings).noneMatch(w -> w.contains("INFO"));
     }
@@ -210,9 +207,8 @@ class MemoryControllerTest {
     @DisplayName("returns both critical and info warnings when heap is small and above 90%")
     void testMultipleWarnings_SmallHeapAndHighUsage() throws Exception {
       long heapMax = 256L * 1024 * 1024; // 256 MB
-      long heapUsed = (long) (heapMax * 0.95);
 
-      List<String> warnings = invokeGetMemoryWarnings(95.0, heapUsed, heapMax);
+      List<String> warnings = invokeGetMemoryWarnings(95.0, heapMax);
 
       assertThat(warnings)
           .hasSize(2)

@@ -8,7 +8,6 @@ import static org.mockito.Mockito.*;
 
 import com.company.drools.api.exception.CircuitBreakerException;
 import com.company.drools.api.exception.RuleNotFoundException;
-import com.company.drools.config.TimeoutConfig;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
@@ -44,7 +43,6 @@ class S3RuleStorageTest {
 
   @Mock private S3Client s3Client;
   @Mock private CircuitBreaker s3CircuitBreaker;
-  @Mock private TimeoutConfig timeoutConfig;
 
   private MeterRegistry meterRegistry;
   private S3RuleStorage s3RuleStorage;
@@ -54,7 +52,7 @@ class S3RuleStorageTest {
     // Use a real SimpleMeterRegistry - handles Timer.start() and Timer.builder().register()
     meterRegistry = new SimpleMeterRegistry();
 
-    s3RuleStorage = new S3RuleStorage(s3Client, meterRegistry, timeoutConfig, s3CircuitBreaker);
+    s3RuleStorage = new S3RuleStorage(s3Client, meterRegistry, s3CircuitBreaker);
 
     // Set the bucketName field via reflection since it's @Value-injected
     Field bucketNameField = S3RuleStorage.class.getDeclaredField("bucketName");
