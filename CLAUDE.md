@@ -9,13 +9,56 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. `ai-instructions/ai-initial-context-instructions.md` — how to handle the `ai-context-update` command
 
 ### Project documentation (the canonical reference)
-3. **`project-documentation/00-system-overview.md`** — entry point for all 39 docs. Has role-based reading paths.
+3. **`project-documentation/00-system-overview.md`** — entry point for all 40 docs. Has role-based reading paths.
 
 The full documentation corpus is in `project-documentation/`. See [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md) for the index and reading paths by role.
 
 The legacy consolidated context file at `.ai-workspace/ai-initial-context/ai-initial-context-latest.md` is no longer the primary reference — the structured `project-documentation/` corpus supersedes it.
 
-## ⚠️ Important: Security Hardening Complete (2026-02-26)
+## ⚠️ Important: Recent change log (most recent first)
+
+### Sonar quality gates cleared (2026-05-11)
+- **Maintainability**: 178 → 0 open issues (Waves 4A–4D: AssertJ modernization, parameterized tests, constructor injection, unused fields, cognitive complexity, ReDoS hotspots)
+- **Reliability**: 5 → 0 (BLOCKER fixed: KieSession try-with-resources; S2142 InterruptedException handling; S2583 dead branch; S6813 constructor injection for validators)
+- **Security hotspots**: 2 resolved — `CorsConfig` regex ReDoS (S5852) and `DrlSanitizer` IMPORT_PATTERN possessive quantifiers
+- **Quality Gate**: OK on all three conditions (new_coverage 89.7%, new_violations 0, no duplications)
+- **Test count**: 597 (down 1 from parameterized test consolidation in Wave 4B)
+
+### Tooling: SonarQube MCP wired into Claude Code (2026-05-10)
+This repo supports a SonarQube MCP server, but **`.mcp.json` is gitignored** because it holds a SonarQube token. Each developer creates their own. To set it up:
+
+1. Get a SonarQube user token (SonarQube UI → My Account → Security → Generate Tokens).
+2. From the repo root, run:
+   ```bash
+   claude mcp add sonarqube \
+     --scope project \
+     --env SONARQUBE_TOKEN=<your-token> \
+     --env SONARQUBE_URL=http://host.docker.internal:9000 \
+     -- docker run -i --rm \
+          -e SONARQUBE_TOKEN \
+          -e SONARQUBE_URL \
+          mcp/sonarqube
+   ```
+   This creates a local `.mcp.json` (gitignored, never committed). On macOS use `host.docker.internal:9000` so the MCP container can reach SonarQube on your host; on Linux use `localhost:9000`.
+3. Verify: `claude mcp list` should show `sonarqube` as `✓ Connected`.
+4. Restart Claude Code so the new MCP is loaded.
+
+Docker must be running; the MCP launches `mcp/sonarqube` per session. See [`.env.example`](.env.example) "SONARQUBE MCP" section for additional notes.
+
+### Load test + sample-rules expansion + rule-loading rework (2026-05-10)
+- **Drools 10 rule-loading rework**: `DroolsEngineService` now holds a **single long-lived `KieContainer`** updated in place via `KieContainer.updateToVersion(ReleaseId)`, with an explicit `KieRepository.removeKieModule(oldReleaseId)` after each swap (Drools 10 does **not** auto-clean). Replaces the earlier two-container atomic-swap-with-`dispose()` pattern. See [ADR-003 2026-05-10 update](project-documentation/36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal).
+- **LOADING-marker bug fix**: latent at 10-rule scale (sub-ms compile); surfaced at 1000 rules (~46s compile) as a 1.5% error rate during refresh windows. Fixed in [`DroolsEngineService.loadOrReplaceRule`](src/main/java/com/company/drools/core/engine/DroolsEngineService.java).
+- **Sample-rules cookbook 10 → 17**: added 7 rules covering `accumulate`, `exists`, `not`, `salience`, regex, temporal, and accumulate-with-collect patterns. All under [`sample-rules/`](sample-rules/); cookbook in [`19-sample-rules-cookbook.md`](project-documentation/19-sample-rules-cookbook.md).
+- **Load test orchestrator**: `scripts/run-load-test.sh` runs the full Phase 0–8 suite end-to-end (1000 rules, JMeter, mixed-workload soak). Findings in [`project-documentation/39-load-test-findings.md`](project-documentation/39-load-test-findings.md).
+- **Test count**: 589 → 598 (load test session) → 597 (Sonar Wave 4B parameterized consolidation); **test files**: 45.
+
+### Stack modernization (2026-05-09)
+- **Java 17 → 25 LTS** (Maven Enforcer Plugin range `[25,26)`).
+- **Spring Boot 3.2.5 → 3.5.3**.
+- **Drools 8.44.0 → 10.2.0** (forced a refactor of rule-loading because `CompilationResult.getKieContainer()` was removed; led to the 2026-05-10 work above).
+- Closed deferred security finding #30 (outdated dependencies). See [ADR-013](project-documentation/36-architecture-decision-records.md#adr-013-java-17--25--spring-boot-modernization-2026-05-09) and [ADR-014](project-documentation/36-architecture-decision-records.md#adr-014-drools-844--102-as-part-of-stack-modernization).
+
+### Security Hardening Complete (2026-02-26)
 
 **39/42 security findings addressed** across 9 phases. Key changes:
 
@@ -28,9 +71,9 @@ The legacy consolidated context file at `.ai-workspace/ai-initial-context/ai-ini
 7. **Path Traversal Protection** — Defense-in-depth in LocalFileStorage and S3RuleStorage
 8. **Non-blocking Compilation** — Rule compilation outside write lock in DroolsEngineService
 
-### Previous Critical Fixes (2026-02-19)
-- **Java 17 Enforcement**: Maven Enforcer Plugin
-- **Memory Leak Fixed**: KieContainer disposal prevents OOM
+### Earlier Critical Fixes (2026-02-19)
+- **Java 17 Enforcement** (later upgraded to Java 25 on 2026-05-09)
+- **Memory Leak Fixed**: original atomic-swap KieContainer disposal prevented OOM (superseded 2026-05-10 by Drools 10 `updateToVersion` + `KieRepository.removeKieModule`)
 - **Memory Monitoring**: `GET /admin/memory/info` endpoint
 
 See [`project-documentation/14-security-architecture.md`](project-documentation/14-security-architecture.md) and [`project-documentation/30-runbooks-and-monitoring.md`](project-documentation/30-runbooks-and-monitoring.md) for full details.
@@ -39,27 +82,27 @@ See [`project-documentation/14-security-architecture.md`](project-documentation/
 
 This is a Drools Rule Engine Microservice designed for high-performance business rule execution (100-1000 RPS). Rules are stored in AWS S3 and executed via REST API.
 
-**Tech Stack**: Java 17 (enforced), Spring Boot 3.2.5, Drools 8.44.0.Final, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
+**Tech Stack**: Java 25 (enforced), Spring Boot 3.5.3, Drools 10.2.0, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
 
-**Health Status**: 9/10 - 589 tests, 96%/90% coverage, 39/42 security fixes complete
+**Health Status**: 9/10 - 597 tests, 96%/90% coverage (pre-modernization baseline), 39/42 security fixes complete, load-tested at 1000 rules, Sonar QG OK (0 maintainability / 0 reliability / 0 security issues)
 
 ## Common Commands
 
-### Java 17 Setup (Required for Local Development)
+### Java 25 Setup (Required for Local Development)
 
-**IMPORTANT**: Java 17 is required. Maven will enforce this automatically.
+**IMPORTANT**: Java 25 is required. Maven will enforce this automatically.
 
 ```bash
 # Option 1: Use the setup script (temporary for current terminal)
 source ./set-java-env.sh
 
 # Option 2: Permanent setup (add to ~/.zshrc or ~/.bashrc)
-export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 export PATH="$JAVA_HOME/bin:$PATH"
 
-# Verify Java 17 is active
-java -version   # Should show "openjdk version 17.x.x"
-mvn -version    # Should show "Java version: 17.x.x"
+# Verify Java 25 is active
+java -version   # Should show "openjdk version 25.x.x"
+mvn -version    # Should show "Java version: 25.x.x"
 ```
 
 ### Build & Run (once project is initialized)
@@ -73,7 +116,7 @@ docker-compose up -d
 docker build -t drools-rule-engine .
 
 # Test Docker build and validation
-./docker-build-test.sh
+./scripts/docker-build-test.sh
 
 # View application logs
 docker-compose logs -f app
@@ -219,7 +262,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 ## Development Workflow
 
-1. **Current Status**: 39/42 security findings addressed (Phases 1–9 complete, 2026-02-26); 589 tests; 96% instruction / 90% branch coverage; documentation rebuild complete (2026-05-08, 39 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
+1. **Current Status**: 39/42 security findings addressed (Phases 1–9 complete, 2026-02-26); stack modernized 2026-05-09 (Java 25, Spring Boot 3.5.3, Drools 10.2.0); Drools 10 rule-loading rework + sample-rules expansion + 1000-rule load test 2026-05-10; Sonar Wave 4 (maintainability 178→0, reliability 5→0, 2 security hotspots resolved) 2026-05-11; 597 tests; 96% / 90% coverage (pre-modernization baseline); documentation rebuild 2026-05-08 with refreshes through 2026-05-11 (40 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
 
 2. **One-Command Development Environment**: Complete automated setup with validation
    ```bash
@@ -229,11 +272,11 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
    # Or manual setup
    docker-compose up -d
    
-   # Initialize LocalStack S3 with 10 sample rules
+   # Initialize LocalStack S3 with 17 sample rules
    ./init-localstack.sh
    
    # Validate LocalStack setup
-   ./test-localstack.sh
+   ./scripts/test-localstack.sh
    
    # Check all services status
    docker-compose ps
@@ -254,7 +297,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 4. **Docker Validation**: Comprehensive testing and validation
    ```bash
    # Build and test Docker image
-   ./docker-build-test.sh
+   ./scripts/docker-build-test.sh
 
    # Manual Docker validation steps
    docker build -t drools-rule-engine:latest .
@@ -296,31 +339,37 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 ## Implementation Status
 
-All seven phases are shipped:
+All phases shipped:
 1. ✅ Core Infrastructure (Spring Boot + Drools)
 2. ✅ Storage & Caching (S3 + Redis)
 3. ✅ Production Readiness (Security, Performance, Monitoring)
 4. ✅ Testing & Documentation
 5. ✅ Deployment & Infrastructure
-6. ✅ Critical Fixes — Java 17 enforcement, memory leak, monitoring (2026-02-19)
+6. ✅ Critical Fixes — original Java 17 enforcement, memory-leak hardening, memory monitoring (2026-02-19)
 7. ✅ Security Hardening — 39/42 findings, Phases 1–9 (2026-02-26)
+8. ✅ Stack Modernization — Java 17→25, Spring Boot 3.2.5→3.5.3, Drools 8.44.0→10.2.0 (2026-05-09)
+9. ✅ Drools 10 rule-loading rework + sample-rules expansion (10→17) + 1000-rule load test (2026-05-10)
+10. ✅ Sonar quality gates — Maintainability 178→0, Reliability 5→0, Security hotspots 2→0 (2026-05-11)
 
 Current snapshot:
 - **Health Score**: 9/10
-- **Test Coverage**: 96.2% instruction / 89.7% branch (589 tests)
+- **Test Coverage**: 96.2% instruction / 89.7% branch (597 tests; coverage is the pre-modernization JaCoCo baseline — roughly preserved, not yet re-run)
 - **Security**: 39/42 findings addressed
-- **Performance**: 100–1000 RPS target, P99 < 100ms cached / < 500ms cache miss
+- **Performance**: 100–1000 RPS target, P99 < 100ms cached / < 500ms cache miss (load-tested at 1000 rules — see [`39-load-test-findings.md`](project-documentation/39-load-test-findings.md))
 
-For the canonical narrative — phase history, ADRs, performance targets, testing strategy, runbooks — see [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md) and the 39 numbered docs it indexes.
+For the canonical narrative — phase history, ADRs, performance targets, testing strategy, runbooks — see [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md) and the 40 numbered docs it indexes.
 
 ## Important Project Files
 
-- [`project-documentation/`](project-documentation/) — full 39-doc corpus, the canonical reference
-- [`set-java-env.sh`](set-java-env.sh) — Java 17 environment setup script
-- [`docker-build-test.sh`](docker-build-test.sh) — automated Docker build and validation
+- [`project-documentation/`](project-documentation/) — full 40-doc corpus, the canonical reference
+- [`set-java-env.sh`](set-java-env.sh) — Java 25 environment setup script
 - [`setup-dev-environment.sh`](setup-dev-environment.sh) — one-command local dev setup
 - [`init-localstack.sh`](init-localstack.sh) — LocalStack bootstrap (reads from `sample-rules/`)
-- [`sample-rules/`](sample-rules/) — 10 sample DRL files (single source of truth)
+- [`sample-rules/`](sample-rules/) — 17 sample DRL files (single source of truth: 10 original + 7 added 2026-05-10 covering accumulate/exists/not/salience/regex/temporal/accumulate-with-collect patterns)
+- [`scripts/test-localstack.sh`](scripts/test-localstack.sh) — validates LocalStack S3 bucket and uploaded rules
+- [`scripts/docker-build-test.sh`](scripts/docker-build-test.sh) — automated Docker build and validation
+- [`scripts/e2e-load-test.sh`](scripts/e2e-load-test.sh) — one-command E2E + 5-min load test with hot reload
+- [`scripts/run-load-test.sh`](scripts/run-load-test.sh) — full load-test orchestrator (Phase 0–8, 1000 rules, JMeter)
 - `gc-logs/`, `heap-dumps/` — runtime diagnostics output (gitignored content)
 - [`.ai-workspace/snap-memory/`](.ai-workspace/snap-memory/) — session memory files for `snap-memory` AI workflow
 

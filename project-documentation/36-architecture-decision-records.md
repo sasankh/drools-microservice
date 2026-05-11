@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Architects, senior developers, future contributors trying to understand "why was this done this way?" |
 | **Purpose** | Capture the load-bearing design decisions and their rationale, so future changes don't re-litigate the same choices unaware |
-| **Last updated** | 2026-05-08 |
+| **Last updated** | 2026-05-10 (ADR-003 sign-off note appended after 1000-rule load test; ADR-013/014 cover the 2026-05-09 stack modernization) |
 | **Related docs** | All — ADRs reference specific implementation files |
 
 ---
@@ -32,7 +32,7 @@ Format used here: each ADR has Status, Context, Decision, Alternatives Considere
 | [009](#adr-009-eval-banned-in-drl) | `eval()` banned in DRL via `DrlSanitizer` | Accepted |
 | [010](#adr-010-rate-limiting-in-memory-not-redis-backed) | Rate limiting in-memory (not Redis-backed) | Accepted (consider revisiting at scale) |
 | [011](#adr-011-custom-validation-annotations-vs-jakarta-only) | Custom validation annotations alongside Jakarta | Accepted |
-| [012](#adr-012-drools-8440-not-latest-8x-or-9x) | Drools 8.44.0.Final (not latest 8.x or 9.x) | Accepted |
+| [012](#adr-012-drools-8440-not-latest-8x-or-9x) | Drools 8.44.0.Final (not latest 8.x or 9.x) | Superseded by ADR-014 |
 
 ---
 
@@ -68,7 +68,7 @@ This project uses **traditional DRL syntax only**. Modern features (rule units, 
 ### References
 - [17-rule-development.md](17-rule-development.md) — project-specific rule patterns
 - [23-rule-language-reference.md](23-rule-language-reference.md) — upstream reference with "[Not used in this project]" tags
-- [`sample-rules/`](../sample-rules/) — 10 examples in the chosen style
+- [`sample-rules/`](../sample-rules/) — 17 examples in the chosen style
 
 ---
 
@@ -160,9 +160,57 @@ try {
 - **Negative**: there's a brief window (microseconds) during the swap where some readers see the old container and others see the new. Readers that captured `currentKieContainer` before the swap continue with the old container; their KieSession is created from the old KieBase. After the swap completes, all new lookups see the new container. **This is actually fine** — both old and new containers are valid KieContainers; the request just uses whichever was current when it started.
 
 ### References
-- [`DroolsEngineService.java:165-194`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java#L165-L194) — implementation
+- [`DroolsEngineService.java`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java) — implementation (now uses `updateToVersion`; see 2026-05-10 update below)
 - [04-architecture.md](04-architecture.md) — "Atomic-Swap Rule Loading Pattern" section
 - [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md) — verification load tests
+
+### 2026-05-10 update — superseded by `KieContainer.updateToVersion(ReleaseId)`
+
+The two-container atomic-swap with explicit `dispose()` documented above is **replaced** by Drools 10's canonical `KieContainer.updateToVersion(ReleaseId)` pattern. The change was driven by [`fix-findings-plan.md`](../.ai-workspace/project-plans/fix-findings-plan.md) (Finding #1 — single-rule refresh wiping out other rules). The fix had to give the engine a "merge one rule into the current set" primitive; the cleanest path was to switch the whole refresh pipeline to the canonical Drools 10 idiom rather than maintain two parallel architectures.
+
+What changed:
+- `RuleCompiler` now emits each compiled rule set as a versioned `KieModule` with a synthetic `ReleaseId` (`com.company.drools:rules-runtime:1.0.<n>`) registered in the `KieRepository`.
+- `DroolsEngineService` holds **one long-lived `KieContainer`** for the lifetime of the JVM; refresh calls `kieContainer.updateToVersion(newReleaseId)`. Drools handles the internal KieBase swap.
+- The explicit `oldContainer.dispose()` block was removed — there is no "old container" to dispose. Drools releases the previous internal KieBase as part of `updateToVersion`.
+
+What is preserved:
+- **No leak.** Verified by re-running the 10-refresh heap-stability check on 2026-05-10 with the new pattern: pre-test 118 MB → after 10 refreshes 215 MB → post-GC 47 MB. Post-GC heap is below the pre-test baseline, matching the original ADR-003 leak-free claim.
+- **Compile outside the lock**, then take the write lock only for the swap. Latency profile for concurrent readers is unchanged.
+- The **3000-refresh load test rationale** still holds. The new pattern has, if anything, lower memory churn because there is no double-container window during the swap.
+
+What is new (and why):
+- A new method `loadOrReplaceRule(Rule)` is the merge primitive used by `POST /admin/refresh-rules/{id}`. It snapshots `loadedRules`, swaps in the new rule, and re-runs `loadRules(combined)`. The whole sequence runs under the write lock (reentrant) so concurrent merges cannot lose each other's updates.
+- `loadRules(List<Rule>)` is now strictly **replacement** semantics — the new rule set is authoritative. Previous code was accidentally additive on the in-memory map; the bug surfaced as Finding #1 (caller passes 1 rule, KieContainer rebuild loses the other 9, but `loadedRules` map kept stale entries from prior calls).
+- Initial `KieContainer` (`DroolsConfig.kieContainer`) now uses the matching `groupId:artifactId` (`com.company.drools:rules-runtime:1.0.0`). Required so `updateToVersion` can resolve newly-built modules from the `KieRepository`.
+
+What is unchanged in the codebase:
+- ADR-001 (single-KieBase architecture).
+- One stateless `KieSession` per execute-rule call.
+- The 7 security headers, the rate-limiting filter chain, the observability hooks.
+- `KieScanner` still rejected — same reason as 2026-02-19.
+
+References:
+- [`fix-findings-plan.md`](../.ai-workspace/project-plans/fix-findings-plan.md) + [`fix-findings-checklist.md`](../.ai-workspace/project-plans/fix-findings-checklist.md) — the fix plan/checklist
+- [`e2e-validation-findings.md`](../.ai-workspace/project-plans/e2e-validation-findings.md) — the original Finding #1 + #2 write-up
+- [Drools 10 `KieContainer.updateToVersion` docs](https://docs.drools.org/latest/kie-api-javadoc/org/kie/api/runtime/KieContainer.html)
+
+### 2026-05-10 update — load tested at 1,000 rules
+
+**Status**: validated end-to-end via the load-test harness ([`load-test-plan.md`](../.ai-workspace/project-plans/load-test-plan.md) / [`load-test-checklist.md`](../.ai-workspace/project-plans/load-test-checklist.md)) on 2026-05-10. Result: **PASS** with one bug discovered + fixed during the run, and one architectural note for production planning.
+
+Headline numbers (full report: [`scripts/load-test-results/2026-05-10T073852Z/summary.md`](../scripts/load-test-results/2026-05-10T073852Z/summary.md)):
+
+- Baseline (50 RPS × 30 min, 1,000 rules): **P99=9 ms, 0 errors over 93,002 samples, post-GC heap 67 MB**.
+- Concurrency ramp 50 → 100 → 250 → 500 RPS: P99 stayed ≤ 5 ms; safe-RPS ceiling = 500 (cliff never reached).
+- Hot full-refresh under load: 0 errors, P99 = 9 ms (no measurable spike during the swap).
+- Hot single-rule refresh under load: 0 errors, P95 = 11 ms, P99 = 483 ms during ~1 % of the run that overlapped the lock-held-through-compile window. Architecturally correct behaviour for atomic rule swaps; SLO consideration for sub-100 ms tier services.
+- 15-min mixed-workload soak (12 full + 86 single-rule refreshes under 50 RPS): **heap drift 1 MB**, 0 errors over 43,397 samples.
+
+**Bug surfaced + fixed**: `DroolsEngineService.loadRules` was setting all rules to `LOADING` state upfront before the compile, then back to `ACTIVE` after. With 10-rule corpora the LOADING window was sub-millisecond and never observable; at 1,000 rules and a 46-second cold-JIT compile, ~1.5 % of concurrent execute requests hit the LOADING window and got `400 "Rule is not active"`. The pre-mark defeated the goal of "compile outside the lock = non-blocking reads of the OLD KieBase". Fix: removed the pre-mark; rules stay ACTIVE in the OLD KieBase during compile, and metadata is updated under the write lock only after `updateToVersion` succeeds. 5 unit tests in `DroolsEngineServiceTest` updated to reflect the corrected semantics. Phase 5 re-run after fix → 0 errors.
+
+**KieRepository cleanup verified**: 1 MB heap drift over 98 refresh operations confirms `kieRepository.removeKieModule(oldReleaseId)` (the Phase 0 patch) is doing its job. Without it, each refresh would leak one `ProjectClassLoader` + every compiled rule class — hundreds of MB across the soak.
+
+**Architectural note** (not a bug): single-rule refresh holds the write lock through a full ~510 ms warm-JIT compile of the entire rule set; a per-rule incremental KieBase rebuild is technically possible but currently not implemented. See the load-test summary for production-planning mitigations.
 
 ---
 
@@ -467,7 +515,7 @@ Use Jakarta annotations where they fit (`@NotNull`, `@Size`). Add custom annotat
 
 ## ADR-012: Drools 8.44.0.Final (not latest 8.x or 9.x)
 
-**Status**: Accepted
+**Status**: Superseded by [ADR-014](#adr-014-drools-8--10-migration-2026-05-09) on 2026-05-09
 **Date**: project inception
 
 ### Context
@@ -496,9 +544,151 @@ Pin to **8.44.0.Final**. Don't auto-upgrade.
 - Specific feature in newer 8.x version that we want to use.
 - Drools 9.x stable release + community-validated migration guide.
 
+### Status update (2026-05-09)
+
+Revisited and superseded. The project bumped to **Drools 10.2.0** as part of the 2026-05-09 stack modernization. See [ADR-014](#adr-014-drools-8--10-migration-2026-05-09) for the current state.
+
 ### References
 - [`pom.xml`](../pom.xml) — `drools.version`
 - [03-tech-stack.md](03-tech-stack.md) — version table
+
+---
+
+## ADR-013: Java 17 → 25 + Spring Boot modernization (2026-05-09)
+
+**Status**: Accepted
+**Date**: 2026-05-09
+
+### Context
+
+By May 2026, the project had been running on Java 17 (LTS, Sept 2021) with Spring Boot 3.2.5 (April 2024) for ~14 months. Both were two LTS / 3 minor versions behind current. The deferred security finding **#30** ("Outdated dependencies — skipped per user") covered the broader dependency stack — Lombok 1.18.30, AWS SDK 2.20.56, Maven plugins on 2-year-old versions.
+
+The user decided to invest in a single coordinated modernization rather than incremental bumps. Three options on the table:
+1. Java 17 → 21 only — zero library bumps, minimal benefit.
+2. Java 25 + Spring Boot 3.5.x + dependency sweep — current latest stable, closes #30.
+3. Java 25 + Drools 10 + everything — option 2 plus the Drools major bump (see ADR-014).
+
+### Decision
+
+Bump to **Java 25** + **Spring Boot 3.5.3** + bring all build plugins, Lombok, AWS SDK, and Resilience4j to current latest stable. Maven Enforcer rule changes from `[17,18)` to `[25,26)`. Closes security finding #30 in the same change.
+
+### Alternatives considered
+
+- **Stay on Java 17 + bump dependencies separately**: rejected. Bundling reduces total test/regression cost.
+- **Jump to Spring Boot 4.x**: rejected. Spring Boot 4 was approaching GA but not yet on Maven Central as of 2026-05-09. Stay on the latest stable 3.x.
+- **Java 21 (one LTS forward) instead of 25**: rejected. The user explicitly chose maximum modernization.
+
+### Consequences
+
+- **Positive**: project on current latest LTS with Premier support through Sept 2030.
+- **Positive**: closed deferred security finding #30 (dependency sweep).
+- **Positive**: a single coordinated test pass validates everything.
+- **Required code changes**:
+  - `RestTemplateBuilder.setConnectTimeout/setReadTimeout` deprecated in Spring Boot 3.5 → use `connectTimeout/readTimeout` ([`TimeoutConfig.java`](../src/main/java/com/company/drools/config/TimeoutConfig.java)).
+  - `@MockBean` deprecated in Spring Boot 3.4, removed in 3.5+ → use `@MockitoBean` ([`RuleExecutionControllerTest.java`](../src/test/java/com/company/drools/api/controller/RuleExecutionControllerTest.java)).
+- **Negative**: Spring Boot 3.5 doesn't officially list Java 25 in its tested matrix; project relies on forward-compat from the Java 17 baseline. So far works.
+
+### Concrete versions pinned
+
+| Component | Old | New |
+|---|---|---|
+| Java | 17 | **25** |
+| Spring Boot | 3.2.5 | **3.5.3** |
+| AWS SDK BOM | 2.20.56 | **2.34.0** |
+| Lombok | 1.18.30 | **1.18.38** |
+| Resilience4j | 2.2.0 | **2.3.0** |
+| Micrometer | 1.12.4 | **1.14.7** |
+| Testcontainers | 1.19.7 | **1.21.3** |
+| maven-compiler-plugin | 3.11.0 | **3.15.0** |
+| maven-enforcer-plugin | 3.3.0 | **3.6.2** |
+| jacoco-maven-plugin | 0.8.8 | **0.8.13** |
+| spotless-maven-plugin | 2.36.0 | **2.44.5** |
+| google-java-format | 1.17.0 | **1.27.0** |
+| spotbugs-maven-plugin | 4.7.3.0 | **4.9.3.0** |
+
+### When to revisit
+
+- Java 26 LTS (expected ~Sept 2026).
+- Spring Boot 4.x reaches GA + ecosystem stabilizes.
+- New security advisory in any of the bumped libraries.
+
+### References
+- [`pom.xml`](../pom.xml)
+- [`Dockerfile`](../Dockerfile) — base images bumped to `maven:3.9-eclipse-temurin-25` and `amazoncorretto:25-alpine-jdk`
+- [03-tech-stack.md](03-tech-stack.md) — full version table
+- [`.ai-workspace/project-plans/stack-modernization-plan.md`](../.ai-workspace/project-plans/stack-modernization-plan.md) — full modernization plan
+- [`.ai-workspace/project-plans/security-backlog.md`](../.ai-workspace/project-plans/security-backlog.md) — finding #30 closure
+
+---
+
+## ADR-014: Drools 8 → 10 migration (2026-05-09)
+
+**Status**: Accepted (supersedes [ADR-012](#adr-012-drools-8440final-not-latest-8x-or-9x))
+**Date**: 2026-05-09
+
+### Context
+
+Drools 10.x is the current major as of 2026-05-09. Drools 8.x line is in maintenance. As part of the 2026-05-09 stack modernization (see [ADR-013](#adr-013-java-17--25--spring-boot-modernization-2026-05-09)), the team chose to bump Drools too.
+
+The [Drools 10 migration guide](https://kie.apache.org/docs/10.0.x/drools/drools/migration-guide/index.html) explicitly states: *"All APIs and DRL syntax are compatible"* between Drools 8 and 10. The traditional `KieServices`/`KieContainer`/`KieBase`/`KieSession` API the project uses is "still supported but discouraged" — meaning it works without code rewrites.
+
+### Decision
+
+Bump to **Drools 10.2.0**. Replace `drools-core` + `drools-compiler` + `drools-mvel` (3 dependencies) with the single `drools-engine` aggregator. Keep `drools-mvel` as an explicit dependency because traditional DRL `then` blocks default to MVEL semantics and `drools-engine` no longer bundles MVEL by default.
+
+Keep [ADR-001](#adr-001-traditional-drl-syntax-only-not-rule-units--oopath) (traditional DRL only — no Rule Units / OOPath) — the migration guide confirms traditional DRL is still fully supported in Drools 10.
+
+Keep [ADR-003](#adr-003-kiecontainer-atomic-swap-with-disposal) (atomic-swap KieContainer pattern) — Drools 10 didn't change KieContainer lifecycle. Memory tests confirm the disposal-based leak fix still applies.
+
+### Alternatives considered
+
+- **Drools 9.x**: same migration cost as 10, less support runway. Rejected.
+- **Stay on latest 8.x (e.g., 8.45.x)**: lowest risk, no rewrite at all. Rejected — user chose maximum modernization.
+- **Adopt Rule Units / OOPath as part of the migration**: would require rewriting [`DroolsEngineService.java`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java) orchestration. Out of scope; the existing ADR-001 rejection still stands.
+
+### Consequences
+
+- **Positive**: Drools 10 baselines on JDK 17+, so Java 25 is forward-compatible.
+- **Positive**: single `drools-engine` aggregator replaces 3 individual dependencies. Cleaner pom.
+- **Positive**: future-proof — Drools 8.x is in maintenance, 10.x is the active line.
+- **Negative**: `drools-mvel` is officially deprecated by the Drools team but still required at runtime for this project's DRL dialect. Will need attention if Drools removes it in a future major.
+- **Negative**: executable model (the new default in `drools-engine`) has three documented behavior differences from MVEL: invalid type coercion (`(String) intValue` no longer tolerated), strict generics, wrapper coercion (`10` doesn't auto-coerce to `Long`). All 17 sample DRL files were reviewed; no rewrites needed (none of them use those patterns).
+
+### Code changes
+
+Single coordinate swap in [`pom.xml`](../pom.xml):
+
+```xml
+<!-- OLD -->
+<dependency><groupId>org.drools</groupId><artifactId>drools-core</artifactId><version>${drools.version}</version></dependency>
+<dependency><groupId>org.drools</groupId><artifactId>drools-compiler</artifactId><version>${drools.version}</version></dependency>
+<dependency><groupId>org.drools</groupId><artifactId>drools-mvel</artifactId><version>${drools.version}</version></dependency>
+
+<!-- NEW -->
+<dependency><groupId>org.drools</groupId><artifactId>drools-engine</artifactId><version>${drools.version}</version></dependency>
+<dependency><groupId>org.drools</groupId><artifactId>drools-mvel</artifactId><version>${drools.version}</version></dependency>
+```
+
+No application Java code changes required.
+
+### Validation
+
+- All 584 non-Docker tests pass on Java 25 + Drools 10.2.0 + Spring Boot 3.5.3.
+- All 17 sample rules produce identical outputs to pre-migration (verified via `RuleExecutionIntegrationTest$SampleRulesExecution`).
+- KieContainer disposal still functions; memory leak fix from prior Phase 6 still applies.
+- **Validated end-to-end on 2026-05-09 / 2026-05-10** against the full docker-compose stack (app + LocalStack + Redis) using all 17 production-shaped sample DRL files loaded from S3. Result: **PASS** with 0 DRL changes and 0 application config changes required. KieContainer atomic-swap disposal confirmed leak-free (post-GC heap below pre-test baseline after 10 successive full refreshes). 2 pre-existing findings (single-rule refresh KieContainer-replacement bug; malformed JSON returns 500 instead of 400) raised to backlog — neither is a Drools 10 regression. Full results: [`.ai-workspace/project-plans/e2e-validation-checklist.md`](../.ai-workspace/project-plans/e2e-validation-checklist.md).
+
+### When to revisit
+
+- Drools removes `drools-mvel` artifact entirely in a future major. We'd need to either explicitly switch DRL files to Java dialect via `dialect "java"` per rule, or accept whatever replacement Drools provides.
+- Drools 11.x stable release + community-validated migration guide.
+
+### References
+- [`pom.xml`](../pom.xml) — Drools dependencies
+- [03-tech-stack.md](03-tech-stack.md) — Rule engine section
+- [Drools 10 migration guide](https://kie.apache.org/docs/10.0.x/drools/drools/migration-guide/index.html)
+- [Drools 10 traditional DRL reference](https://kie.apache.org/docs/10.0.x/drools/drools/language-reference-traditional/index.html)
+- [`.ai-workspace/project-plans/stack-modernization-plan.md`](../.ai-workspace/project-plans/stack-modernization-plan.md)
 
 ---
 

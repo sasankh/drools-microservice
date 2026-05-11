@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Operators, on-call engineers, SREs |
 | **Purpose** | Operational procedures (start/stop/refresh/scale/incident response) plus monitoring setup (metrics, dashboards, alerts) |
-| **Last verified against** | Running stack on 2026-05-08 |
+| **Last verified against** | Running stack on 2026-05-10 |
 | **Related docs** | [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md), [26-performance-tuning-runbook.md](26-performance-tuning-runbook.md), [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md), [31-troubleshooting.md](31-troubleshooting.md) |
 
 ---
@@ -85,14 +85,14 @@ curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" \
 # Expected:
 # {
 #   "status": "completed",
-#   "rules_loaded": 10,
+#   "rules_loaded": 17,
 #   "rules_failed": 0,
 #   "duration_ms": 1234,
 #   "errors": []
 # }
 ```
 
-The atomic-swap pattern means in-flight requests are not interrupted. New requests use the new rule set immediately after the swap.
+The compile happens **outside** the write lock; the lock is held only briefly for `KieContainer.updateToVersion(ReleaseId)`. In-flight `/execute-rule` requests are not interrupted. New requests use the new rule set immediately after the version swap. See [04-architecture.md](04-architecture.md) and [39-load-test-findings.md](39-load-test-findings.md) for measured behavior at 1000 rules.
 
 #### Single rule
 
@@ -306,7 +306,7 @@ In the `prod` profile, metrics are exported to CloudWatch in namespace `DroolsEn
 aws cloudwatch get-metric-statistics \
   --namespace DroolsEngine \
   --metric-name drools.rule.execution.time \
-  --start-time 2026-05-08T10:00:00Z --end-time 2026-05-08T11:00:00Z \
+  --start-time 2026-05-10T10:00:00Z --end-time 2026-05-10T11:00:00Z \
   --period 60 --statistics Average,Maximum
 ```
 

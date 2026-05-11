@@ -4,8 +4,8 @@
 |---|---|
 | **Audience** | Operators, on-call engineers, performance engineers |
 | **Purpose** | Decision-tree runbook for diagnosing and tuning performance issues. Each branch leads to a concrete tuning action. |
-| **Last verified against** | Running stack on 2026-05-08 |
-| **Related docs** | [09-environment-variables-reference.md](09-environment-variables-reference.md), [24-jvm-optimization.md](24-jvm-optimization.md), [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md), [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md), [30-runbooks-and-monitoring.md](30-runbooks-and-monitoring.md) |
+| **Last verified against** | Running stack on 2026-05-10 (load-tested at 1000 rules — see [39-load-test-findings.md](39-load-test-findings.md) for measured numbers) |
+| **Related docs** | [09-environment-variables-reference.md](09-environment-variables-reference.md), [24-jvm-optimization.md](24-jvm-optimization.md), [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md), [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md), [30-runbooks-and-monitoring.md](30-runbooks-and-monitoring.md), [39-load-test-findings.md](39-load-test-findings.md) |
 
 ---
 
@@ -290,9 +290,9 @@ Watch the trend. Climbing steadily = leak. Stable = healthy. Sawtooth = normal G
 
 #### F1: Heap usage growing steadily (looks like a leak)
 
-The KieContainer disposal fix from 2026-02-19 should prevent the most common leak (rule refresh accumulating containers). Verify:
+The KieContainer lifecycle was overhauled on 2026-05-10: a single long-lived container is updated in place via `updateToVersion(ReleaseId)`, and old `KieModule`s are explicitly removed with `kieRepository.removeKieModule(oldReleaseId)`. Verify the current pattern is in place:
 
-- Look at recent commits to `DroolsEngineService` — `oldContainer.dispose()` should be called.
+- Look at `DroolsEngineService.loadRules` — confirm it calls `kieRepository.removeKieModule(oldReleaseId)` after `container.updateToVersion(newReleaseId)`. The old `oldContainer.dispose()` two-container pattern is superseded.
 - Run a refresh storm test:
   ```bash
   for i in {1..20}; do
@@ -496,9 +496,15 @@ Mitigations:
 - Increase `AWS_S3_MAX_CONNECTIONS` for parallel fetches
 - Increase `DROOLS_STORAGE_THREAD_POOL_MAX_SIZE`
 
-#### J3: Atomic-swap pattern works fine, refresh is just inherently O(rules)
+#### J3: `updateToVersion` works as designed; refresh is inherently O(rules)
 
-This is **fine**. The atomic-swap pattern means existing requests don't block during refresh. A 30-second refresh is acceptable as long as it's not happening every minute.
+This is **fine**. The current pattern (Drools 10 `KieContainer.updateToVersion(ReleaseId)`) compiles **outside** the write lock — existing `/execute-rule` traffic is **not** blocked during compilation. Read traffic continues uninterrupted, and the write lock is held only briefly for the in-place version swap.
+
+**Caveat at scale**: full refresh wall-clock time scales with rule count. Measured 2026-05-10:
+- 10 rules → ~1.5s
+- 1000 rules → ~46s (compile dominates; scales **superlinearly** because Drools rebuilds the whole RETE network)
+
+A 30-second refresh is acceptable as long as it's not happening every minute. See [39-load-test-findings.md](39-load-test-findings.md) §"Compile time scaling" for the full curve.
 
 If you need faster turnaround for individual rule updates, use **per-rule refresh**:
 ```bash
@@ -506,7 +512,7 @@ curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" \
   http://localhost:8080/admin/refresh-rules/pricing.discount.vip
 ```
 
-This recompiles just one rule.
+This still recompiles the **full rule set** (Drools 10 has no public per-rule incremental compile API), but it's a useful single-call admin shape. Single-rule refresh under load was load-tested at 1000 rules: 0 errors across 360 swaps, P99 spike during compile windows. See [39-load-test-findings.md](39-load-test-findings.md).
 
 ---
 

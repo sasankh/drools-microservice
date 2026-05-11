@@ -3,9 +3,9 @@ package com.company.drools.core.engine;
 import com.company.drools.core.model.Rule;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 import org.kie.api.KieServices;
 import org.kie.api.builder.*;
-import org.kie.api.runtime.KieContainer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -13,10 +13,19 @@ import org.springframework.stereotype.Component;
 @Component
 public class RuleCompiler {
 
+  // Shared artifact identity for the in-memory rules KieModule.
+  // DroolsConfig must use the same groupId/artifactId when it creates the initial KieContainer
+  // so subsequent kieContainer.updateToVersion(...) calls can resolve newly-built modules from
+  // the KieRepository — updateToVersion requires matching groupId:artifactId.
+  public static final String GROUP_ID = "com.company.drools";
+  public static final String ARTIFACT_ID = "rules-runtime";
+  public static final String INITIAL_VERSION = "1.0.0";
+
   private static final Logger log = LoggerFactory.getLogger(RuleCompiler.class);
 
   private final KieServices kieServices;
   private final DrlSanitizer drlSanitizer;
+  private final AtomicLong versionCounter = new AtomicLong(0);
 
   public RuleCompiler(KieServices kieServices, DrlSanitizer drlSanitizer) {
     this.kieServices = kieServices;
@@ -27,7 +36,6 @@ public class RuleCompiler {
     log.debug("Compiling {} rules", rules.size());
 
     try {
-      // Sanitize all rules before compilation
       List<String> allViolations = new ArrayList<>();
       for (Rule rule : rules) {
         DrlSanitizer.SanitizationResult result =
@@ -42,9 +50,12 @@ public class RuleCompiler {
             "DRL security violations: " + String.join("; ", allViolations));
       }
 
-      KieFileSystem kieFileSystem = kieServices.newKieFileSystem();
+      long versionNumber = versionCounter.incrementAndGet();
+      ReleaseId releaseId = kieServices.newReleaseId(GROUP_ID, ARTIFACT_ID, "1.0." + versionNumber);
 
-      // Add each rule to the file system
+      KieFileSystem kieFileSystem = kieServices.newKieFileSystem();
+      kieFileSystem.generateAndWritePomXML(releaseId);
+
       for (Rule rule : rules) {
         String resourcePath =
             "src/main/resources/rules/" + rule.getRuleId().replace(".", "/") + ".drl";
@@ -72,11 +83,12 @@ public class RuleCompiler {
         }
       }
 
-      KieModule kieModule = kieBuilder.getKieModule();
-      KieContainer kieContainer = kieServices.newKieContainer(kieModule.getReleaseId());
-
-      log.info("Successfully compiled {} rules", rules.size());
-      return CompilationResult.success(kieContainer);
+      // KieBuilder auto-registers the resulting KieModule in the KieRepository under releaseId.
+      // The engine service will call kieContainer.updateToVersion(releaseId) to swap the running
+      // KieBase to the new module without disrupting the long-lived KieContainer.
+      log.info(
+          "Successfully compiled {} rules at release {}", rules.size(), releaseId.getVersion());
+      return CompilationResult.success(releaseId);
 
     } catch (Exception e) {
       log.error("Failed to compile rules", e);
@@ -86,17 +98,17 @@ public class RuleCompiler {
 
   public static class CompilationResult {
     private final boolean success;
-    private final KieContainer kieContainer;
+    private final ReleaseId releaseId;
     private final String errorMessage;
 
-    private CompilationResult(boolean success, KieContainer kieContainer, String errorMessage) {
+    private CompilationResult(boolean success, ReleaseId releaseId, String errorMessage) {
       this.success = success;
-      this.kieContainer = kieContainer;
+      this.releaseId = releaseId;
       this.errorMessage = errorMessage;
     }
 
-    public static CompilationResult success(KieContainer kieContainer) {
-      return new CompilationResult(true, kieContainer, null);
+    public static CompilationResult success(ReleaseId releaseId) {
+      return new CompilationResult(true, releaseId, null);
     }
 
     public static CompilationResult failure(String errorMessage) {
@@ -107,8 +119,8 @@ public class RuleCompiler {
       return success;
     }
 
-    public KieContainer getKieContainer() {
-      return kieContainer;
+    public ReleaseId getReleaseId() {
+      return releaseId;
     }
 
     public String getErrorMessage() {

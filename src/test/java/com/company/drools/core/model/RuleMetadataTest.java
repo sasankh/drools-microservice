@@ -49,8 +49,8 @@ class RuleMetadataTest {
     @Test
     @DisplayName("throws NullPointerException when status is null")
     void testNullStatus() {
-      assertThatThrownBy(
-              () -> new RuleMetadata("1.0", LocalDateTime.now(), null, null, null, 0, 0.0))
+      LocalDateTime now = LocalDateTime.now();
+      assertThatThrownBy(() -> new RuleMetadata("1.0", now, null, null, null, 0, 0.0))
           .isInstanceOf(NullPointerException.class)
           .hasMessage("Rule status cannot be null");
     }
@@ -336,11 +336,12 @@ class RuleMetadataTest {
 
       String result = metadata.toString();
 
-      assertThat(result).startsWith("RuleMetadata{");
-      assertThat(result).contains("version='1.0'");
-      assertThat(result).contains("status=ACTIVE");
-      assertThat(result).contains("executionCount=5");
-      assertThat(result).contains("averageExecutionTimeMs=3.2");
+      assertThat(result)
+          .startsWith("RuleMetadata{")
+          .contains("version='1.0'")
+          .contains("status=ACTIVE")
+          .contains("executionCount=5")
+          .contains("averageExecutionTimeMs=3.2");
     }
   }
 
@@ -353,8 +354,8 @@ class RuleMetadataTest {
     void testAllEnumValues() {
       RuleMetadata.RuleStatus[] values = RuleMetadata.RuleStatus.values();
 
-      assertThat(values).hasSize(4);
       assertThat(values)
+          .hasSize(4)
           .containsExactly(
               RuleMetadata.RuleStatus.LOADING,
               RuleMetadata.RuleStatus.ACTIVE,

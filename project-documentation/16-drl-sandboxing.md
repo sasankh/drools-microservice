@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Rule authors (humans), AI rule-generation tools, security reviewers |
 | **Purpose** | Definitive reference for what `DrlSanitizer` blocks and what's allowed. The doc AI rule-generation tools must consume to produce sandbox-passing rules. |
-| **Last verified against** | [`DrlSanitizer.java`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java), [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) on 2026-05-08 |
+| **Last verified against** | [`DrlSanitizer.java`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java), [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) on 2026-05-10 |
 | **Related docs** | [17-rule-development.md](17-rule-development.md), [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
@@ -67,7 +67,7 @@ See [10-api-reference.md](10-api-reference.md) `POST /admin/refresh-rules` for t
 
 [`DrlSanitizer.java:124-144`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java#L124-L144)
 
-The import scanner uses regex `^\s*import\s+(static\s+)?([\w.]+\*?)\s*;?\s*$` and inspects every match.
+The import scanner uses regex `^\h*+import\h++(static\h++)?([\w.]+\*?)\h*+;?+\h*+$` (`\h` = horizontal whitespace, possessive quantifiers `*+`/`++`/`?+` prevent ReDoS backtracking on malformed DRL — S5852 fix) and inspects every match.
 
 For each import the sanitizer applies three rules:
 
@@ -258,7 +258,7 @@ We ban it. Period. **Use Drools pattern matching instead.**
 | `eval(((Number)$data.get("amount")).doubleValue() > 50)` | `$data : Map(((Number)this["amount"]).doubleValue() > 50)` |
 | `eval("VIP".equals($data.get("customerType")))` | `$data : Map(this["customerType"] == "VIP")` |
 
-Verified by the 10 sample rules in [`sample-rules/`](../sample-rules/) — none use `eval()`.
+Verified by the 17 sample rules in [`sample-rules/`](../sample-rules/) — none use `eval()`.
 
 ### What about `eval()` in other contexts?
 

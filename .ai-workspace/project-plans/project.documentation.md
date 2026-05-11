@@ -1,5 +1,7 @@
 # 📚 Drools Rule Engine Microservice - Complete Project Documentation
 
+> ⚠️ **SUPERSEDED** — This consolidated documentation file is no longer the primary reference. The `project-documentation/` corpus (40 numbered docs) supersedes it as of 2026-05-08. Stack references below are also stale (Java 17 → now Java 25; Drools 8.44.0 → now 10.2.0; Spring Boot 3.2.5 → now 3.5.3). Kept as historical archive only.
+
 ## Table of Contents
 1. [Executive Summary](#executive-summary)
 2. [Project Overview](#project-overview)

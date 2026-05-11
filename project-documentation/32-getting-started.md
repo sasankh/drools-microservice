@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | New developers and evaluators (see something work in under 30 minutes) |
 | **Purpose** | Fastest path from `git clone` to "I just executed a rule and got a result" |
-| **Last verified against** | Running stack on 2026-05-08 |
+| **Last verified against** | Running stack on 2026-05-10 |
 | **Related docs** | [27-development-setup.md](27-development-setup.md) (full dev setup), [33-simple-start.md](33-simple-start.md) (rule author quickstart), [10-api-reference.md](10-api-reference.md) |
 
 ---
@@ -12,7 +12,7 @@
 ## What you'll have in 30 minutes
 
 - The full stack running locally in Docker
-- 10 sample business rules loaded
+- 17 sample business rules loaded
 - Three successful API calls under your belt
 - A pointer to where to go next
 
@@ -49,7 +49,7 @@ docker compose up -d --build
 
 What happens:
 1. **Builds the app image** (Maven inside the container, ~3-5 min on first run, downloads dependencies). Future builds are seconds.
-2. **Starts LocalStack** (S3 emulator). Auto-runs `init-localstack.sh` which uploads the 10 sample rules.
+2. **Starts LocalStack** (S3 emulator). Auto-runs `init-localstack.sh` which uploads the 17 sample rules.
 3. **Starts Redis** (cache).
 4. **Starts the app**. Boots in ~30-45s.
 
@@ -153,8 +153,8 @@ You've now seen the service work. Where to go next depends on your role:
 ### "I'm a developer who'll work on the codebase"
 
 → [27-development-setup.md](27-development-setup.md) — local Java setup, IDE, conventions, build/test workflow.
-→ [04-architecture.md](04-architecture.md) — full architecture: filter chain, threading, atomic-swap pattern, security layers.
-→ [28-testing-guide.md](28-testing-guide.md) — test suite map (44 files, 589 tests), how to add tests.
+→ [04-architecture.md](04-architecture.md) — full architecture: filter chain, threading, Drools 10 `updateToVersion` rule-loading pattern, security layers.
+→ [28-testing-guide.md](28-testing-guide.md) — test suite map (45 files, 597 tests), how to add tests.
 
 ### "I'm an architect / I want to understand the design"
 
@@ -182,7 +182,7 @@ You've now seen the service work. Where to go next depends on your role:
 → [33-simple-start.md](33-simple-start.md) — write and deploy your first custom rule.
 → [16-drl-sandboxing.md](16-drl-sandboxing.md) — what the sandbox blocks (read this first).
 → [17-rule-development.md](17-rule-development.md) — patterns for production rules.
-→ [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) — 10 working examples.
+→ [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) — 17 working examples.
 → [20-rule-generation-prompt.md](20-rule-generation-prompt.md) — AI-assisted rule authoring.
 
 ### "I'm an AI agent or I want a complete map"

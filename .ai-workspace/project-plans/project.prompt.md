@@ -1,5 +1,7 @@
 # 🚀 Comprehensive Drools Rule Engine Microservice Implementation
 
+> 📦 **ARCHIVED — Original requirements prompt** — Stack references are intentionally kept as-is (Java 17, Drools 8.44.0, Spring Boot 3.x). The actual implemented stack is Java 25 / Spring Boot 3.5.3 / Drools 10.2.0. See [`project-documentation/00-system-overview.md`](../../project-documentation/00-system-overview.md) for current state.
+
 ## 📋 Project Overview
 
 Build a high-performance, production-ready Drools rule engine microservice that dynamically loads and executes business rules via REST API. The service is designed for high traffic (100-1000 RPS), containerized with Docker, and deployed on AWS ECS.

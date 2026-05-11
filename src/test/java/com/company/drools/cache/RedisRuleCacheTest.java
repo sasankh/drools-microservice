@@ -100,7 +100,7 @@ class RedisRuleCacheTest extends BaseUnitTest {
       redisRuleCache.put(rule);
 
       // Then - verify set was called with correct key, rule, and TTL
-      verify(valueOperations).set(eq(expectedKey), eq(rule), eq(ttlDuration));
+      verify(valueOperations).set(expectedKey, rule, ttlDuration);
 
       // Given - setup get to return the same rule
       when(valueOperations.get(expectedKey)).thenReturn(rule);
@@ -194,7 +194,7 @@ class RedisRuleCacheTest extends BaseUnitTest {
       String expectedKey = "drools:rule:pricing.discount.simple";
 
       redisRuleCache.put(rule);
-      verify(valueOperations).set(eq(expectedKey), eq(rule), eq(ttlDuration));
+      verify(valueOperations).set(expectedKey, rule, ttlDuration);
 
       // Test 2: Transition to OPEN - put should silently fail
       forceCircuitBreakerOpen();
@@ -342,7 +342,7 @@ class RedisRuleCacheTest extends BaseUnitTest {
       customTtlCache.put(rule);
 
       // Then - verify TTL duration is passed correctly
-      verify(valueOperations).set(eq(expectedKey), eq(rule), eq(customTtl));
+      verify(valueOperations).set(expectedKey, rule, customTtl);
 
       // Verify with a different TTL
       reset(valueOperations);
@@ -353,7 +353,7 @@ class RedisRuleCacheTest extends BaseUnitTest {
           new RedisRuleCache(redisTemplate, longTtl, meterRegistry, redisCircuitBreaker);
 
       longTtlCache.put(rule);
-      verify(valueOperations).set(eq(expectedKey), eq(rule), eq(longTtl));
+      verify(valueOperations).set(expectedKey, rule, longTtl);
     }
   }
 
@@ -439,7 +439,7 @@ class RedisRuleCacheTest extends BaseUnitTest {
     void testSize_NoKeys_ReturnsZero() {
       mockScanKeys(null);
 
-      assertThat(redisRuleCache.size()).isEqualTo(0);
+      assertThat(redisRuleCache.size()).isZero();
     }
 
     @Test
@@ -449,7 +449,7 @@ class RedisRuleCacheTest extends BaseUnitTest {
       when(redisTemplate.execute(any(RedisCallback.class)))
           .thenThrow(new QueryTimeoutException("Redis timeout"));
 
-      assertThat(redisRuleCache.size()).isEqualTo(0);
+      assertThat(redisRuleCache.size()).isZero();
     }
   }
 
@@ -487,8 +487,8 @@ class RedisRuleCacheTest extends BaseUnitTest {
 
       List<String> ruleIds = redisRuleCache.getCachedRuleIds();
 
-      assertThat(ruleIds).hasSize(2);
       assertThat(ruleIds)
+          .hasSize(2)
           .containsExactlyInAnyOrder("pricing.discount.simple", "validation.input.basic");
     }
 

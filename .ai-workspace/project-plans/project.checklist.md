@@ -40,10 +40,13 @@
 - **Phase 1**: Core Infrastructure ✅ **COMPLETED** (1 session - 55 minutes)
 - **Phase 2**: Storage & Caching ✅ **COMPLETED** (1 session - 60 minutes)
 - **Phase 3**: Production Readiness ✅ **COMPLETED** (3 sessions)
-- **Phase 4**: Testing & Documentation ✅ **COMPLETED** (4.1-4.2 + 4.4 done, 4.3 deferred)
+- **Phase 4**: Testing & Documentation ✅ **COMPLETED** (4.1-4.2 + 4.4 done; 4.3 JMeter delivered in Phase 9 load test)
 - **Phase 5**: Deployment & Infrastructure ✅ **COMPLETED** (Phase 5.1-5.2 - 1 session)
-- **Phase 6**: Critical Fixes & Hardening ✅ **COMPLETED** (Java 17 enforcement, memory leak, monitoring, test coverage push)
-- **Phase 7**: Security Hardening ✅ **COMPLETED** (39/42 findings — admin auth, DRL sandboxing, security headers, CORS, rate limiting, path traversal, Jackson RCE, log sanitization — 589 tests)
+- **Phase 6**: Critical Fixes & Hardening ✅ **COMPLETED** (Java 17→25 enforcement, memory leak, monitoring, test coverage push)
+- **Phase 7**: Security Hardening ✅ **COMPLETED** (39/42 findings closed — admin auth, DRL sandboxing, security headers, CORS, rate limiting, path traversal, Jackson RCE, log sanitization — 589 tests)
+- **Phase 8**: Stack Modernization ✅ **COMPLETED** (Java 17→25, Spring Boot 3.2.5→3.5.3, Drools 8.44.0→10.2.0, dep sweep — 2026-05-09)
+- **Phase 9**: Load Test + Drools 10 Rework + Sample Rules Expansion ✅ **COMPLETED** (KieContainer updateToVersion pattern, 7 new sample rules (10→17), 1000-rule load test, LOADING-marker fix — 2026-05-10; 598 tests)
+- **Phase 10**: Sonar Quality Gates ✅ **COMPLETED** (Maintainability 178→0, Reliability 5→0, Security hotspots 2→0, QG OK — 2026-05-11; 597 tests)
 
 ---
 
@@ -286,7 +289,31 @@ Before moving to the next phase, ensure:
 
 ---
 
-Last Updated: 2026-02-20 - Phase 6 COMPLETE (550 tests, 96.2% instruction / 89.7% branch coverage) ✅
+Last Updated: 2026-05-11 - **All 10 phases COMPLETE** (597 tests, 96.2%/89.7% coverage, Sonar QG OK, 0 open issues) ✅
+
+## Phase 8–10 Summary
+
+### Phase 8: Stack Modernization ✅ COMPLETED (2026-05-09)
+- [x] Java 17 → 25 (Maven Enforcer Plugin range `[25,26)`)
+- [x] Spring Boot 3.2.5 → 3.5.3
+- [x] Drools 8.44.0 → 10.2.0
+- [x] Full dependency sweep (AWS SDK, Resilience4j, Micrometer, etc.)
+- [x] All 584 non-Docker tests pass
+
+### Phase 9: Load Test + Drools 10 Rework + Sample Rules ✅ COMPLETED (2026-05-10)
+- [x] KieContainer single long-lived with updateToVersion(ReleaseId) pattern
+- [x] KieRepository.removeKieModule(oldReleaseId) explicit cleanup
+- [x] LOADING-marker premature-state bug fixed
+- [x] Sample rules expanded: 10 → 17 (accumulate, exists, not, salience, regex, temporal patterns)
+- [x] 1000-rule load test: P99=9ms, 0 errors, memory stable
+- [x] Test count: 589 → 598
+
+### Phase 10: Sonar Quality Gates ✅ COMPLETED (2026-05-11)
+- [x] Maintainability: 178 → 0 (Wave 4A production + 4B tests + 4C/4D remaining)
+- [x] Reliability: 5 → 0 (BLOCKER: KieSession try-with-resources; InterruptedException; always-true condition; constructor injection)
+- [x] Security hotspots: 2 → 0 (CorsConfig ReDoS + DrlSanitizer IMPORT_PATTERN possessive quantifiers)
+- [x] Quality Gate: OK on all conditions
+- [x] Test count: 598 → 597 (parameterized test consolidation)
 
 ---
 

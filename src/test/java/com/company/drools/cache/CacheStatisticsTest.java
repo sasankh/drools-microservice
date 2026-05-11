@@ -137,14 +137,15 @@ class CacheStatisticsTest {
 
       String result = stats.toString();
 
-      assertThat(result).contains("CacheStatistics{");
-      assertThat(result).contains("hits=10");
-      assertThat(result).contains("misses=5");
-      assertThat(result).contains("evictions=2");
-      assertThat(result).contains("size=8");
-      assertThat(result).contains("maxSize=100");
-      assertThat(result).contains("hitRate=");
-      assertThat(result).contains("lastAccess=");
+      assertThat(result)
+          .contains("CacheStatistics{")
+          .contains("hits=10")
+          .contains("misses=5")
+          .contains("evictions=2")
+          .contains("size=8")
+          .contains("maxSize=100")
+          .contains("hitRate=")
+          .contains("lastAccess=");
     }
 
     @Test

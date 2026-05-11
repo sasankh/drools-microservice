@@ -62,7 +62,7 @@ class LocalLRUCacheTest extends BaseUnitTest {
     @Test
     @DisplayName("size returns the correct count of cached rules")
     void testSize_ReturnsCorrectCount() {
-      assertThat(cache.size()).isEqualTo(0);
+      assertThat(cache.size()).isZero();
 
       cache.put(RuleTestUtils.createSimpleRule("rule.one"));
       assertThat(cache.size()).isEqualTo(1);
@@ -189,7 +189,7 @@ class LocalLRUCacheTest extends BaseUnitTest {
                     errors.incrementAndGet();
                   }
                 }
-              } catch (Exception e) {
+              } catch (Exception _) {
                 errors.incrementAndGet();
               } finally {
                 doneLatch.countDown();
@@ -204,7 +204,7 @@ class LocalLRUCacheTest extends BaseUnitTest {
       executor.awaitTermination(5, TimeUnit.SECONDS);
 
       assertThat(completed).isTrue();
-      assertThat(errors.get()).isEqualTo(0);
+      assertThat(errors.get()).isZero();
       // Note: Under heavy concurrent load, the access-ordered LinkedHashMap's internal
       // eviction may not keep size exactly at maxSize due to read-lock get() calls
       // modifying structure. The primary assertion here is thread safety (no exceptions).
@@ -237,7 +237,7 @@ class LocalLRUCacheTest extends BaseUnitTest {
                   smallCache.get(ruleId);
                   smallCache.contains(ruleId);
                 }
-              } catch (Exception e) {
+              } catch (Exception _) {
                 errors.incrementAndGet();
               } finally {
                 doneLatch.countDown();
@@ -252,7 +252,7 @@ class LocalLRUCacheTest extends BaseUnitTest {
       executor.awaitTermination(5, TimeUnit.SECONDS);
 
       assertThat(completed).isTrue();
-      assertThat(errors.get()).isEqualTo(0);
+      assertThat(errors.get()).isZero();
       // Note: Under heavy concurrency, access-ordered LinkedHashMap's get() is a
       // structural modification that can interfere with eviction tracking under read lock.
       // The primary goal of this test is thread safety (no exceptions), not strict size.
@@ -290,7 +290,7 @@ class LocalLRUCacheTest extends BaseUnitTest {
                   cache.size();
                   cache.getStatistics();
                 }
-              } catch (Exception e) {
+              } catch (Exception _) {
                 errors.incrementAndGet();
               } finally {
                 doneLatch.countDown();
@@ -305,7 +305,7 @@ class LocalLRUCacheTest extends BaseUnitTest {
       executor.awaitTermination(5, TimeUnit.SECONDS);
 
       assertThat(completed).isTrue();
-      assertThat(errors.get()).isEqualTo(0);
+      assertThat(errors.get()).isZero();
       assertThat(cache.size()).isEqualTo(5);
     }
   }
@@ -357,7 +357,7 @@ class LocalLRUCacheTest extends BaseUnitTest {
       assertThat(stats.getHits()).isEqualTo(5);
       assertThat(stats.getMisses()).isEqualTo(3);
       assertThat(stats.getHitRate()).isCloseTo(0.625, org.assertj.core.data.Offset.offset(0.001));
-      assertThat(stats.getEvictions()).isEqualTo(0);
+      assertThat(stats.getEvictions()).isZero();
     }
 
     @Test
@@ -429,7 +429,7 @@ class LocalLRUCacheTest extends BaseUnitTest {
 
       cache.clear();
 
-      assertThat(cache.size()).isEqualTo(0);
+      assertThat(cache.size()).isZero();
       assertThat(cache.contains("rule.one")).isFalse();
       assertThat(cache.contains("rule.two")).isFalse();
       assertThat(cache.contains("rule.three")).isFalse();
@@ -438,11 +438,11 @@ class LocalLRUCacheTest extends BaseUnitTest {
     @Test
     @DisplayName("clear on empty cache does not throw")
     void testClear_EmptyCache_NoError() {
-      assertThat(cache.size()).isEqualTo(0);
+      assertThat(cache.size()).isZero();
 
       cache.clear();
 
-      assertThat(cache.size()).isEqualTo(0);
+      assertThat(cache.size()).isZero();
     }
   }
 
@@ -459,8 +459,9 @@ class LocalLRUCacheTest extends BaseUnitTest {
 
       List<String> ruleIds = cache.getCachedRuleIds();
 
-      assertThat(ruleIds).hasSize(3);
-      assertThat(ruleIds).containsExactlyInAnyOrder("rule.alpha", "rule.beta", "rule.gamma");
+      assertThat(ruleIds)
+          .hasSize(3)
+          .containsExactlyInAnyOrder("rule.alpha", "rule.beta", "rule.gamma");
     }
 
     @Test
@@ -603,7 +604,7 @@ class LocalLRUCacheTest extends BaseUnitTest {
     void testPut_DisabledCache_DoesNotStore() {
       disabledCache.put(RuleTestUtils.createSimpleRule("rule.one"));
 
-      assertThat(disabledCache.size()).isEqualTo(0);
+      assertThat(disabledCache.size()).isZero();
     }
 
     @Test
@@ -615,21 +616,21 @@ class LocalLRUCacheTest extends BaseUnitTest {
     @Test
     @DisplayName("size returns 0 when cache is disabled")
     void testSize_DisabledCache_ReturnsZero() {
-      assertThat(disabledCache.size()).isEqualTo(0);
+      assertThat(disabledCache.size()).isZero();
     }
 
     @Test
     @DisplayName("clear does not throw when cache is disabled")
     void testClear_DisabledCache_NoError() {
       disabledCache.clear();
-      assertThat(disabledCache.size()).isEqualTo(0);
+      assertThat(disabledCache.size()).isZero();
     }
 
     @Test
     @DisplayName("remove does not throw when cache is disabled")
     void testRemove_DisabledCache_NoError() {
       disabledCache.remove("rule.one");
-      assertThat(disabledCache.size()).isEqualTo(0);
+      assertThat(disabledCache.size()).isZero();
     }
 
     @Test
@@ -646,14 +647,14 @@ class LocalLRUCacheTest extends BaseUnitTest {
 
       disabledCache.warmUp(rules);
 
-      assertThat(disabledCache.size()).isEqualTo(0);
+      assertThat(disabledCache.size()).isZero();
     }
 
     @Test
     @DisplayName("evictIfNeeded does nothing when cache is disabled")
     void testEvictIfNeeded_DisabledCache_NoError() {
       disabledCache.evictIfNeeded();
-      assertThat(disabledCache.size()).isEqualTo(0);
+      assertThat(disabledCache.size()).isZero();
     }
 
     @Test

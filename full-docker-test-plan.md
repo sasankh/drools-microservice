@@ -1,7 +1,7 @@
 # Full Docker Integration Test Plan
 **Purpose**: Verify all application functionality works end-to-end in Docker.
 **Usage**: Tell Claude "run the full docker test plan from full-docker-test-plan.md"
-**Last Validated**: 2026-02-26
+**Last Validated**: 2026-05-09 (full e2e on Java 25 + Spring Boot 3.5.3 + Drools 10.2.0 stack — see [`.ai-workspace/project-plans/e2e-validation-checklist.md`](.ai-workspace/project-plans/e2e-validation-checklist.md))
 
 ---
 

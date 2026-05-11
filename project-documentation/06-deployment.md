@@ -47,7 +47,7 @@ This guide covers deployment options for the Drools Rule Engine Microservice, fr
 ## 📋 Prerequisites
 
 ### System Requirements
-- **Java**: 17 or higher (Oracle JDK or OpenJDK)
+- **Java**: 25 (enforced by Maven Enforcer Plugin — build will fail on other versions)
 - **Memory**: Minimum 1GB RAM (2GB+ recommended for production)
 - **CPU**: 2+ cores for production workloads
 - **Disk**: 500MB+ available space
@@ -204,7 +204,7 @@ cd drools-microservice
 mvn clean compile
 
 # Verify Java version
-java -version  # Should be 17+
+java -version  # Should be 25
 ```
 
 ### 2. Start LocalStack & Redis (Docker Compose)
@@ -561,7 +561,7 @@ aws ec2 run-instances \
 cat > user-data.sh << 'EOF'
 #!/bin/bash
 yum update -y
-yum install -y java-17-amazon-corretto
+yum install -y java-25-amazon-corretto
 
 # Download and install application
 wget https://releases.company.com/drools-rule-engine-1.0.0.jar
@@ -579,7 +579,7 @@ The repository ships an actual `Dockerfile` at the repo root. It is **multi-stag
 
 ```dockerfile
 # ── Stage 1: Build ───────────────────────────────────────────
-FROM maven:3.9-eclipse-temurin-17 AS build
+FROM maven:3.9-eclipse-temurin-25 AS build
 WORKDIR /app
 COPY pom.xml .
 RUN mvn dependency:go-offline -B          # dependency caching layer
@@ -588,7 +588,7 @@ RUN mvn clean package -DskipTests
 # Output: /app/target/drools-rule-engine-*.jar
 
 # ── Stage 2: Runtime ─────────────────────────────────────────
-FROM amazoncorretto:17-alpine-jdk
+FROM amazoncorretto:25-alpine-jdk
 RUN addgroup -g 1000 appgroup && adduser -D -u 1000 -G appgroup appuser
 WORKDIR /app
 COPY --from=build /app/target/drools-rule-engine-*.jar app.jar

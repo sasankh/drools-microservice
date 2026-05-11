@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.kie.api.KieServices;
+import org.kie.api.builder.ReleaseId;
 import org.kie.api.runtime.KieContainer;
 import org.kie.api.runtime.KieSession;
 
@@ -40,7 +41,9 @@ class RuleCompilerTest {
       RuleCompiler.CompilationResult result = ruleCompiler.compileRules(List.of(rule));
 
       assertThat(result.isSuccess()).isTrue();
-      assertThat(result.getKieContainer()).isNotNull();
+      assertThat(result.getReleaseId()).isNotNull();
+      assertThat(result.getReleaseId().getGroupId()).isEqualTo(RuleCompiler.GROUP_ID);
+      assertThat(result.getReleaseId().getArtifactId()).isEqualTo(RuleCompiler.ARTIFACT_ID);
       assertThat(result.getErrorMessage()).isNull();
     }
 
@@ -55,14 +58,13 @@ class RuleCompilerTest {
           ruleCompiler.compileRules(List.of(rule1, rule2, rule3));
 
       assertThat(result.isSuccess()).isTrue();
-      assertThat(result.getKieContainer()).isNotNull();
+      assertThat(result.getReleaseId()).isNotNull();
       assertThat(result.getErrorMessage()).isNull();
     }
 
     @Test
     @DisplayName("compiles a valid rule that may produce warnings but still succeeds")
     void testCompileRules_ValidRuleWithWarnings_SuccessWithWarnings() {
-      // A rule with an unused variable pattern -- compiles but may warn
       String content =
           """
           package com.company.rules.test
@@ -81,9 +83,36 @@ class RuleCompilerTest {
 
       RuleCompiler.CompilationResult result = ruleCompiler.compileRules(List.of(rule));
 
-      // Even if there are warnings, compilation should succeed
       assertThat(result.isSuccess()).isTrue();
-      assertThat(result.getKieContainer()).isNotNull();
+      assertThat(result.getReleaseId()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("each successive compile assigns a bumped release version")
+    void testCompileRules_AssignsBumpedReleaseId() {
+      Rule rule = RuleTestUtils.createSimpleRule("pricing.discount.simple");
+
+      RuleCompiler.CompilationResult first = ruleCompiler.compileRules(List.of(rule));
+      RuleCompiler.CompilationResult second = ruleCompiler.compileRules(List.of(rule));
+      RuleCompiler.CompilationResult third = ruleCompiler.compileRules(List.of(rule));
+
+      assertThat(first.isSuccess()).isTrue();
+      assertThat(second.isSuccess()).isTrue();
+      assertThat(third.isSuccess()).isTrue();
+
+      String firstVersion = first.getReleaseId().getVersion();
+      String secondVersion = second.getReleaseId().getVersion();
+      String thirdVersion = third.getReleaseId().getVersion();
+
+      assertThat(firstVersion).isNotEqualTo(secondVersion);
+      assertThat(secondVersion).isNotEqualTo(thirdVersion);
+
+      // Versions are "1.0.<n>" — extract n and verify monotonic
+      long n1 = Long.parseLong(firstVersion.substring(firstVersion.lastIndexOf('.') + 1));
+      long n2 = Long.parseLong(secondVersion.substring(secondVersion.lastIndexOf('.') + 1));
+      long n3 = Long.parseLong(thirdVersion.substring(thirdVersion.lastIndexOf('.') + 1));
+      assertThat(n2).isGreaterThan(n1);
+      assertThat(n3).isGreaterThan(n2);
     }
   }
 
@@ -107,14 +136,13 @@ class RuleCompilerTest {
               $data.put("executed", true)
           end
           """;
-      // Missing semicolon after put() call in the then block
       Rule rule = new Rule("test.badsyntax", content, RuleMetadata.createNew());
 
       RuleCompiler.CompilationResult result = ruleCompiler.compileRules(List.of(rule));
 
       assertThat(result.isSuccess()).isFalse();
       assertThat(result.getErrorMessage()).isNotNull();
-      assertThat(result.getKieContainer()).isNull();
+      assertThat(result.getReleaseId()).isNull();
     }
 
     @Test
@@ -126,7 +154,7 @@ class RuleCompilerTest {
 
       assertThat(result.isSuccess()).isFalse();
       assertThat(result.getErrorMessage()).isNotNull();
-      assertThat(result.getKieContainer()).isNull();
+      assertThat(result.getReleaseId()).isNull();
     }
 
     @Test
@@ -174,29 +202,28 @@ class RuleCompilerTest {
 
       RuleCompiler.CompilationResult result = ruleCompiler.compileRules(List.of(rule));
 
-      // Empty content may either fail compilation or produce a container with no rules
-      // Either way it should not throw an unhandled exception
       assertThat(result).isNotNull();
     }
   }
 
   @Nested
-  @DisplayName("KieServices Integration")
-  class KieServicesIntegration {
+  @DisplayName("KieRepository Integration")
+  class KieRepositoryIntegration {
 
     @Test
-    @DisplayName("creates a valid KieContainer that can produce sessions")
-    void testCompileRules_CreatesValidKieContainer() {
+    @DisplayName("registers a KieModule that can be resolved into a working KieContainer")
+    void testCompileRules_RegistersResolvableModule() {
       Rule rule = RuleTestUtils.createSimpleRule("pricing.discount.simple");
 
       RuleCompiler.CompilationResult result = ruleCompiler.compileRules(List.of(rule));
 
       assertThat(result.isSuccess()).isTrue();
+      ReleaseId releaseId = result.getReleaseId();
 
-      KieContainer kieContainer = result.getKieContainer();
+      // The registered module should be resolvable via KieServices.newKieContainer.
+      KieContainer kieContainer = kieServices.newKieContainer(releaseId);
       assertThat(kieContainer).isNotNull();
 
-      // Verify the container can create sessions
       KieSession session = kieContainer.newKieSession();
       assertThat(session).isNotNull();
       session.dispose();

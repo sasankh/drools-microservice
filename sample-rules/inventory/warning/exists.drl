@@ -1,0 +1,18 @@
+package com.company.rules.inventory.warning
+
+import java.util.Map
+import java.util.List
+
+// `exists` pattern: fires once if AT LEAST ONE element of a derived collection matches
+// the constraint. Here we want a low-stock warning when ANY item in the inventory list
+// has stockLevel < 5. Without `exists` the rule would fire once per matching item; with
+// `exists` it fires exactly once regardless of how many items match.
+rule "Low Stock Warning"
+when
+    $data : Map(this["items"] != null)
+    exists Map( ((Number) this["stockLevel"]).intValue() < 5 ) from ((List) $data.get("items"))
+then
+    $data.put("lowStockWarning", true);
+    $data.put("warningType", "STOCK_LOW");
+    $data.put("validationMethod", "exists-pattern");
+end

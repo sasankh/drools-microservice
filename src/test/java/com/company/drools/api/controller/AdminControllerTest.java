@@ -58,7 +58,15 @@ class AdminControllerTest {
 
     adminController =
         new AdminController(
-            droolsEngineService, storageFactory, ruleCache, meterRegistry, threadPoolConfig);
+            droolsEngineService,
+            storageFactory,
+            ruleCache,
+            meterRegistry,
+            threadPoolConfig,
+            null,
+            null,
+            null,
+            null);
 
     // Create a Spring context with ValidationConfig so @ValidRuleId validator works.
     // The SpringConstraintValidatorFactory allows Hibernate Validator to inject Spring beans
@@ -67,7 +75,7 @@ class AdminControllerTest {
     appContext.registerBean(
         "validationConfig",
         com.company.drools.config.ValidationConfig.class,
-        () -> ValidationConfigTestHelper.createTestValidationConfig());
+        ValidationConfigTestHelper::createTestValidationConfig);
     appContext.refresh();
 
     LocalValidatorFactoryBean validatorFactory = new LocalValidatorFactoryBean();
@@ -283,7 +291,8 @@ class AdminControllerTest {
             12.5);
     when(droolsEngineService.getRuleMetadata(ruleId)).thenReturn(metadata);
     when(mockStorage.getRule(ruleId)).thenReturn(Optional.of(rule));
-    when(droolsEngineService.loadRules(anyList())).thenReturn(true);
+    when(droolsEngineService.loadOrReplaceRule(org.mockito.ArgumentMatchers.any(Rule.class)))
+        .thenReturn(true);
 
     // When/Then
     mockMvc
@@ -292,6 +301,9 @@ class AdminControllerTest {
         .andExpect(jsonPath("$.rule_id").value(ruleId))
         .andExpect(jsonPath("$.status").value("success"));
 
+    // Verify the merge primitive was used, not the full-replace loadRules.
+    verify(droolsEngineService).loadOrReplaceRule(rule);
+    verify(droolsEngineService, never()).loadRules(anyList());
     // Verify cache was invalidated and re-populated
     verify(ruleCache).remove(ruleId);
     verify(ruleCache).put(rule);
@@ -326,15 +338,16 @@ class AdminControllerTest {
             0.0);
     when(droolsEngineService.getRuleMetadata(ruleId)).thenReturn(metadata);
     when(mockStorage.getRule(ruleId)).thenReturn(Optional.of(rule));
-    when(droolsEngineService.loadRules(anyList())).thenReturn(true);
+    when(droolsEngineService.loadOrReplaceRule(org.mockito.ArgumentMatchers.any(Rule.class)))
+        .thenReturn(true);
 
     // When
     mockMvc.perform(post("/admin/refresh-rules/{ruleId}", ruleId)).andExpect(status().isOk());
 
-    // Then - verify cache.remove() was called
+    // Then - cache invalidate → engine merge → cache repopulate, in that order
     InOrder inOrder = inOrder(ruleCache, droolsEngineService);
     inOrder.verify(ruleCache).remove(ruleId);
-    inOrder.verify(droolsEngineService).loadRules(anyList());
+    inOrder.verify(droolsEngineService).loadOrReplaceRule(rule);
     inOrder.verify(ruleCache).put(rule);
   }
 
@@ -806,7 +819,8 @@ class AdminControllerTest {
             0.0);
     when(droolsEngineService.getRuleMetadata(ruleId)).thenReturn(metadata);
     when(mockStorage.getRule(ruleId)).thenReturn(Optional.of(rule));
-    when(droolsEngineService.loadRules(anyList())).thenReturn(false);
+    when(droolsEngineService.loadOrReplaceRule(org.mockito.ArgumentMatchers.any(Rule.class)))
+        .thenReturn(false);
 
     // When/Then
     mockMvc
@@ -846,7 +860,8 @@ class AdminControllerTest {
     Rule rule = createTestRule(ruleId);
     when(droolsEngineService.getRuleMetadata(ruleId)).thenReturn(null);
     when(mockStorage.getRule(ruleId)).thenReturn(Optional.of(rule));
-    when(droolsEngineService.loadRules(anyList())).thenReturn(true);
+    when(droolsEngineService.loadOrReplaceRule(org.mockito.ArgumentMatchers.any(Rule.class)))
+        .thenReturn(true);
 
     // When/Then
     mockMvc

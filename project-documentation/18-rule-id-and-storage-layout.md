@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Rule authors, operators uploading rules |
 | **Purpose** | How rule IDs map to file paths and S3 keys, what the format constraints are, and how to organize rules in storage |
-| **Last verified against** | [`StorageFactory.java`](../src/main/java/com/company/drools/storage/StorageFactory.java), [`S3RuleStorage.java`](../src/main/java/com/company/drools/storage/S3RuleStorage.java), [`LocalFileStorage.java`](../src/main/java/com/company/drools/storage/LocalFileStorage.java), [`RuleIdValidator.java`](../src/main/java/com/company/drools/api/validation/RuleIdValidator.java) on 2026-05-08 |
+| **Last verified against** | [`StorageFactory.java`](../src/main/java/com/company/drools/storage/StorageFactory.java), [`S3RuleStorage.java`](../src/main/java/com/company/drools/storage/S3RuleStorage.java), [`LocalFileStorage.java`](../src/main/java/com/company/drools/storage/LocalFileStorage.java), [`RuleIdValidator.java`](../src/main/java/com/company/drools/api/validation/RuleIdValidator.java) on 2026-05-10 |
 | **Related docs** | [16-drl-sandboxing.md](16-drl-sandboxing.md), [17-rule-development.md](17-rule-development.md), [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md), [09-environment-variables-reference.md](09-environment-variables-reference.md) |
 
 ---
@@ -111,7 +111,7 @@ Validation happens in **three places** for defense-in-depth:
 
 ## Naming conventions
 
-The format rules above are *enforced*. The conventions below are *recommended* — followed by all 10 sample rules in [`sample-rules/`](../sample-rules/).
+The format rules above are *enforced*. The conventions below are *recommended* — followed by all 17 sample rules in [`sample-rules/`](../sample-rules/).
 
 ### Three-segment hierarchy: `{domain}.{category}.{specific}`
 

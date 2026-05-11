@@ -59,11 +59,11 @@ sudo kill -9 <PID>
 # Check Java version
 java -version
 
-# Should show Java 17 or higher
+# Should show Java 25
 # Solution: Install correct Java version
-sudo apt install openjdk-17-jre-headless
+sudo apt install openjdk-25-jre-headless
 # or
-sudo yum install java-17-openjdk
+sudo yum install java-25-openjdk
 ```
 
 ##### 3. Missing Environment Variables

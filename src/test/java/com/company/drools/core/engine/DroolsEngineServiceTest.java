@@ -20,6 +20,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.kie.api.builder.Message;
+import org.kie.api.builder.ReleaseId;
+import org.kie.api.builder.Results;
 import org.kie.api.runtime.KieContainer;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -33,6 +36,7 @@ class DroolsEngineServiceTest {
   @Mock private RuleCompiler ruleCompiler;
   @Mock private RuleExecutor ruleExecutor;
   @Mock private KieContainer initialKieContainer;
+  @Mock private org.kie.api.builder.KieRepository kieRepository;
   @Mock private RuleStorage ruleStorage;
   @Mock private TimeoutConfig timeoutConfig;
 
@@ -43,11 +47,16 @@ class DroolsEngineServiceTest {
   void setUp() {
     meterRegistry = new SimpleMeterRegistry();
     when(timeoutConfig.getRuleExecutionTimeoutSeconds()).thenReturn(30);
+    // Default stub: updateToVersion returns a no-error Results so loadRules succeeds.
+    Results successResults = mock(Results.class);
+    when(successResults.hasMessages(Message.Level.ERROR)).thenReturn(false);
+    when(initialKieContainer.updateToVersion(any(ReleaseId.class))).thenReturn(successResults);
     service =
         new DroolsEngineService(
             ruleCompiler,
             ruleExecutor,
             initialKieContainer,
+            kieRepository,
             ruleStorage,
             timeoutConfig,
             meterRegistry);
@@ -61,8 +70,8 @@ class DroolsEngineServiceTest {
   }
 
   private void loadRulesSuccessfully(List<Rule> rules) {
-    KieContainer newContainer = mock(KieContainer.class);
-    RuleCompiler.CompilationResult result = RuleCompiler.CompilationResult.success(newContainer);
+    ReleaseId newReleaseId = mock(ReleaseId.class);
+    RuleCompiler.CompilationResult result = RuleCompiler.CompilationResult.success(newReleaseId);
     when(ruleCompiler.compileRules(rules)).thenReturn(result);
     service.loadRules(rules);
   }
@@ -106,9 +115,9 @@ class DroolsEngineServiceTest {
     @DisplayName("loadRules succeeds with a single rule")
     void testLoadRules_Success_SingleRule() {
       Rule rule = RuleTestUtils.createSimpleRule("test.rule.one");
-      KieContainer newContainer = mock(KieContainer.class);
+      ReleaseId newReleaseId = mock(ReleaseId.class);
       RuleCompiler.CompilationResult compilationResult =
-          RuleCompiler.CompilationResult.success(newContainer);
+          RuleCompiler.CompilationResult.success(newReleaseId);
       when(ruleCompiler.compileRules(List.of(rule))).thenReturn(compilationResult);
 
       boolean result = service.loadRules(List.of(rule));
@@ -131,9 +140,9 @@ class DroolsEngineServiceTest {
       Rule rule3 = RuleTestUtils.createSimpleRule("test.rule.three");
       List<Rule> rules = List.of(rule1, rule2, rule3);
 
-      KieContainer newContainer = mock(KieContainer.class);
+      ReleaseId newReleaseId = mock(ReleaseId.class);
       RuleCompiler.CompilationResult compilationResult =
-          RuleCompiler.CompilationResult.success(newContainer);
+          RuleCompiler.CompilationResult.success(newReleaseId);
       when(ruleCompiler.compileRules(rules)).thenReturn(compilationResult);
 
       boolean result = service.loadRules(rules);
@@ -158,7 +167,7 @@ class DroolsEngineServiceTest {
       assertThat(metadata.getStatus()).isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
       assertThat(metadata.getVersion()).isEqualTo("1.0");
       assertThat(metadata.getLoadedAt()).isNotNull();
-      assertThat(metadata.getExecutionCount()).isEqualTo(0);
+      assertThat(metadata.getExecutionCount()).isZero();
       assertThat(metadata.getAverageExecutionTimeMs()).isEqualTo(0.0);
       assertThat(metadata.getErrorMessage()).isNull();
     }
@@ -210,7 +219,7 @@ class DroolsEngineServiceTest {
                 RuleExecutor.ExecutionResult r =
                     service.executeRule("concurrent.rule", new HashMap<>(inputData));
                 results.add(r);
-              } catch (Exception e) {
+              } catch (Exception _) {
                 errorCount.incrementAndGet();
               } finally {
                 doneLatch.countDown();
@@ -223,20 +232,21 @@ class DroolsEngineServiceTest {
       executor.shutdown();
 
       assertThat(completed).isTrue();
-      assertThat(errorCount.get()).isEqualTo(0);
+      assertThat(errorCount.get()).isZero();
       assertThat(results).hasSize(threadCount);
       results.forEach(r -> assertThat(r.isSuccess()).isTrue());
     }
 
     @Test
-    @DisplayName("loadRules allows concurrent compilation but serialized swap")
-    void testLoadRules_ConcurrentAccess_WriteLockBehavior() throws Exception {
+    @SuppressWarnings("java:S2925")
+    @DisplayName("loadOrReplaceRule allows concurrent compilation but serialized swap")
+    void testLoadOrReplaceRule_ConcurrentAccess_WriteLockBehavior() throws Exception {
       when(ruleCompiler.compileRules(anyList()))
           .thenAnswer(
               invocation -> {
                 Thread.sleep(50); // simulate compilation work
-                KieContainer container = mock(KieContainer.class);
-                return RuleCompiler.CompilationResult.success(container);
+                ReleaseId releaseId = mock(ReleaseId.class);
+                return RuleCompiler.CompilationResult.success(releaseId);
               });
 
       int threadCount = 5;
@@ -251,8 +261,11 @@ class DroolsEngineServiceTest {
               try {
                 startLatch.await();
                 Rule rule = RuleTestUtils.createSimpleRule("write.lock.rule." + idx);
-                service.loadRules(List.of(rule));
-              } catch (Exception e) {
+                // loadOrReplaceRule is the merge primitive — concurrent calls each add their
+                // own rule on top of whatever is already loaded, exercising both the read-lock
+                // (snapshot of current set) and write-lock (atomic update) paths.
+                service.loadOrReplaceRule(rule);
+              } catch (Exception _) {
                 // ignore
               } finally {
                 doneLatch.countDown();
@@ -265,11 +278,12 @@ class DroolsEngineServiceTest {
       executor.shutdown();
 
       assertThat(completed).isTrue();
-      // All 5 rules should be loaded (compilation is concurrent, swap is serialized)
+      // All 5 rules should be loaded — concurrent merges preserve other rules on each call.
       assertThat(service.getLoadedRulesCount()).isEqualTo(threadCount);
     }
 
     @Test
+    @SuppressWarnings("java:S2925")
     @DisplayName("executeRule and loadRules coordinate via read/write locks")
     void testExecuteRule_WhileLoadingRules_ProperLocking() throws Exception {
       Rule rule = RuleTestUtils.createSimpleRule("locking.test.rule");
@@ -285,8 +299,8 @@ class DroolsEngineServiceTest {
                 loadInProgress.set(true);
                 Thread.sleep(200);
                 loadInProgress.set(false);
-                KieContainer container = mock(KieContainer.class);
-                return RuleCompiler.CompilationResult.success(container);
+                ReleaseId releaseId = mock(ReleaseId.class);
+                return RuleCompiler.CompilationResult.success(releaseId);
               });
 
       RuleExecutor.ExecutionResult execResult =
@@ -311,7 +325,7 @@ class DroolsEngineServiceTest {
               startLatch.await();
               Rule newRule = RuleTestUtils.createSimpleRule("locking.test.rule");
               service.loadRules(List.of(newRule));
-            } catch (Exception e) {
+            } catch (Exception _) {
               // ignore
             } finally {
               doneLatch.countDown();
@@ -325,7 +339,7 @@ class DroolsEngineServiceTest {
               startLatch.await();
               Thread.sleep(50); // give write lock time to acquire
               service.executeRule("locking.test.rule", Map.of("key", "value"));
-            } catch (Exception e) {
+            } catch (Exception _) {
               // ignore
             } finally {
               doneLatch.countDown();
@@ -337,8 +351,14 @@ class DroolsEngineServiceTest {
       executor.shutdown();
 
       assertThat(completed).isTrue();
-      // Execution should NOT happen while load is in progress (write lock blocks read)
-      assertThat(executionDuringLoad.get()).isFalse();
+      // Non-blocking reads: execution SHOULD proceed against the OLD KieBase while a new
+      // version is compiling outside the lock. (An earlier version of this test asserted the
+      // opposite — that execution was blocked during compile — which masked the LOADING-marker
+      // bug fixed on 2026-05-10. Compile happens outside the rulesLock; only the brief
+      // updateToVersion swap is under the write lock.)
+      assertThat(executionDuringLoad.get())
+          .as("executeRule must proceed during compile-outside-lock window")
+          .isTrue();
     }
 
     @Test
@@ -374,7 +394,7 @@ class DroolsEngineServiceTest {
                 data.put("value", threadId * 10);
                 RuleExecutor.ExecutionResult r = service.executeRule("corruption.test.rule", data);
                 results.add(r);
-              } catch (Exception e) {
+              } catch (Exception _) {
                 // ignore
               } finally {
                 doneLatch.countDown();
@@ -420,60 +440,68 @@ class DroolsEngineServiceTest {
     }
 
     @Test
-    @DisplayName("executeRule returns failure for inactive rule")
-    void testExecuteRule_InactiveRule_ReturnsFailure() {
-      // Load rule successfully first so it's in loadedRules
-      Rule rule = RuleTestUtils.createSimpleRule("inactive.rule");
+    @DisplayName(
+        "loadRules with compile failure preserves prior ACTIVE rules (no spurious downgrade)")
+    void testLoadRules_CompilationFailure_PreservesPriorActive() {
+      // Load rule successfully first so it's ACTIVE and present in loadedRules.
+      Rule rule = RuleTestUtils.createSimpleRule("preserved.rule");
       loadRuleSuccessfully(rule);
+      assertThat(service.getRuleMetadata("preserved.rule").getStatus())
+          .isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
 
-      // Now reload with failure - this marks metadata as ERROR but keeps rule in loadedRules
+      // Re-attempt loading with a compile failure. The previous (correct) version of this
+      // logic flipped the rule's metadata to ERROR (and earlier still: LOADING during compile)
+      // even though the OLD KieBase + rule were still serviceable. That caused spurious
+      // "Rule is not active" 400s during refresh-under-load. The fix: on compile failure, do
+      // not mutate metadata — the previously-ACTIVE rule stays ACTIVE and serviceable.
       RuleCompiler.CompilationResult failResult =
           RuleCompiler.CompilationResult.failure("Compilation error on refresh");
       when(ruleCompiler.compileRules(List.of(rule))).thenReturn(failResult);
-      service.loadRules(List.of(rule));
+      boolean ok = service.loadRules(List.of(rule));
 
-      Map<String, Object> inputData = RuleTestUtils.createTestData("amount", 100.0);
-      RuleExecutor.ExecutionResult result = service.executeRule("inactive.rule", inputData);
-
-      assertThat(result.isSuccess()).isFalse();
-      assertThat(result.getErrorMessage()).contains("not active");
-      verify(ruleExecutor, never())
-          .executeRule(any(KieContainer.class), anyString(), anyMap(), anyLong());
+      assertThat(ok).isFalse();
+      RuleMetadata metadata = service.getRuleMetadata("preserved.rule");
+      assertThat(metadata).isNotNull();
+      assertThat(metadata.getStatus())
+          .as("previously-ACTIVE rule must stay ACTIVE after a failed recompile")
+          .isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
     }
 
     @Test
-    @DisplayName("loadRules marks rules as ERROR on compilation failure")
-    void testLoadRules_CompilationFailure_RulesMarkedAsError() {
-      Rule rule = RuleTestUtils.createSimpleRule("broken.rule");
-      String errorMsg = "Syntax error in DRL file";
-      RuleCompiler.CompilationResult failResult = RuleCompiler.CompilationResult.failure(errorMsg);
+    @DisplayName("loadRules with compile failure on a brand-new rule leaves no metadata")
+    void testLoadRules_CompilationFailure_NewRuleLeavesNoMetadata() {
+      Rule rule = RuleTestUtils.createSimpleRule("brand.new.broken.rule");
+      RuleCompiler.CompilationResult failResult =
+          RuleCompiler.CompilationResult.failure("Syntax error in DRL file");
       when(ruleCompiler.compileRules(List.of(rule))).thenReturn(failResult);
 
       boolean result = service.loadRules(List.of(rule));
 
       assertThat(result).isFalse();
-      RuleMetadata metadata = service.getRuleMetadata("broken.rule");
-      assertThat(metadata).isNotNull();
-      assertThat(metadata.getStatus()).isEqualTo(RuleMetadata.RuleStatus.ERROR);
-      assertThat(metadata.getErrorMessage()).isEqualTo(errorMsg);
+      // Brand-new rule that never compiled is not present in metadata. (Earlier behavior
+      // populated metadata as ERROR; that has been removed since the rule was never actually
+      // loaded into a KieBase.)
+      assertThat(service.getRuleMetadata("brand.new.broken.rule")).isNull();
+      assertThat(service.hasRule("brand.new.broken.rule")).isFalse();
     }
 
     @Test
     @DisplayName("loadRules handles empty list gracefully")
     void testLoadRules_EmptyList_HandlesGracefully() {
-      KieContainer newContainer = mock(KieContainer.class);
+      ReleaseId newReleaseId = mock(ReleaseId.class);
       RuleCompiler.CompilationResult compilationResult =
-          RuleCompiler.CompilationResult.success(newContainer);
+          RuleCompiler.CompilationResult.success(newReleaseId);
       when(ruleCompiler.compileRules(Collections.emptyList())).thenReturn(compilationResult);
 
       boolean result = service.loadRules(Collections.emptyList());
 
       assertThat(result).isTrue();
-      assertThat(service.getLoadedRulesCount()).isEqualTo(0);
+      assertThat(service.getLoadedRulesCount()).isZero();
     }
 
     @Test
-    @DisplayName("loadRules handles invalid DRL gracefully")
+    @DisplayName(
+        "loadRules handles invalid DRL gracefully (returns false, leaves engine state untouched)")
     void testLoadRules_InvalidDRL_FailsGracefully() {
       Rule invalidRule = RuleTestUtils.createInvalidRule("invalid.drl.rule");
       String errorMsg = "Compilation errors: missing package declaration";
@@ -483,71 +511,125 @@ class DroolsEngineServiceTest {
       boolean result = service.loadRules(List.of(invalidRule));
 
       assertThat(result).isFalse();
-      RuleMetadata metadata = service.getRuleMetadata("invalid.drl.rule");
-      assertThat(metadata).isNotNull();
-      assertThat(metadata.getStatus()).isEqualTo(RuleMetadata.RuleStatus.ERROR);
-      assertThat(metadata.getErrorMessage()).contains("Compilation errors");
+      // The brand-new rule never made it into the engine; metadata is absent.
+      assertThat(service.getRuleMetadata("invalid.drl.rule")).isNull();
+      assertThat(service.hasRule("invalid.drl.rule")).isFalse();
     }
   }
 
   // =========================================================================
-  // Memory Leak Prevention Tests
+  // Container Update Pattern Tests (Drools 10 updateToVersion)
   // =========================================================================
 
   @Nested
-  @DisplayName("Memory Leak Prevention")
-  class MemoryLeakPrevention {
+  @DisplayName("Container Update Pattern")
+  class ContainerUpdatePattern {
 
     @Test
-    @DisplayName("loadRules disposes old KieContainer to prevent memory leak")
-    void testLoadRules_DisposesOldKieContainer_NoMemoryLeak() {
-      // First load: creates a new container, old one is the initialKieContainer
-      Rule rule1 = RuleTestUtils.createSimpleRule("memory.test.rule");
-      KieContainer firstNewContainer = mock(KieContainer.class);
-      RuleCompiler.CompilationResult result1 =
-          RuleCompiler.CompilationResult.success(firstNewContainer);
-      when(ruleCompiler.compileRules(List.of(rule1))).thenReturn(result1);
+    @DisplayName("loadRules updates the long-lived container in place rather than swapping")
+    void testLoadRules_UpdatesContainerInPlace_NoSwap() {
+      Rule rule = RuleTestUtils.createSimpleRule("update.test.rule");
+      ReleaseId newReleaseId = mock(ReleaseId.class);
+      RuleCompiler.CompilationResult result = RuleCompiler.CompilationResult.success(newReleaseId);
+      when(ruleCompiler.compileRules(List.of(rule))).thenReturn(result);
 
-      service.loadRules(List.of(rule1));
+      service.loadRules(List.of(rule));
 
-      // initialKieContainer should have been disposed (it's different from firstNewContainer)
-      verify(initialKieContainer).dispose();
-
-      // Second load: creates another new container
-      Rule rule2 = RuleTestUtils.createSimpleRule("memory.test.rule");
-      KieContainer secondNewContainer = mock(KieContainer.class);
-      RuleCompiler.CompilationResult result2 =
-          RuleCompiler.CompilationResult.success(secondNewContainer);
-      when(ruleCompiler.compileRules(List.of(rule2))).thenReturn(result2);
-
-      service.loadRules(List.of(rule2));
-
-      // firstNewContainer should now be disposed
-      verify(firstNewContainer).dispose();
+      // Verify updateToVersion was called with the new ReleaseId on the long-lived container.
+      verify(initialKieContainer).updateToVersion(newReleaseId);
+      // Verify the long-lived container is NOT disposed — it lives across all rule updates.
+      verify(initialKieContainer, never()).dispose();
     }
 
     @Test
-    @DisplayName("multiple refreshes maintain only one active KieContainer")
-    void testLoadRules_MultipleRefreshes_MemoryStable() {
-      List<KieContainer> containers = new ArrayList<>();
+    @DisplayName("multiple refreshes call updateToVersion each time on the same container")
+    void testLoadRules_MultipleRefreshes_SameContainerInstance() {
+      List<ReleaseId> releaseIds = new ArrayList<>();
 
       for (int i = 0; i < 5; i++) {
         Rule rule = RuleTestUtils.createSimpleRule("refresh.rule." + i);
-        KieContainer container = mock(KieContainer.class, "container-" + i);
-        containers.add(container);
-        RuleCompiler.CompilationResult result = RuleCompiler.CompilationResult.success(container);
+        ReleaseId releaseId = mock(ReleaseId.class, "release-" + i);
+        releaseIds.add(releaseId);
+        RuleCompiler.CompilationResult result = RuleCompiler.CompilationResult.success(releaseId);
         when(ruleCompiler.compileRules(List.of(rule))).thenReturn(result);
 
         service.loadRules(List.of(rule));
       }
 
-      // Initial container + first 4 new containers should all be disposed
-      verify(initialKieContainer).dispose();
-      for (int i = 0; i < 4; i++) {
-        verify(containers.get(i)).dispose();
+      // updateToVersion was called once per refresh on the same long-lived container.
+      for (ReleaseId releaseId : releaseIds) {
+        verify(initialKieContainer).updateToVersion(releaseId);
       }
-      // The last container (index 4) should NOT be disposed - it's the current one
-      verify(containers.get(4), never()).dispose();
+      // The long-lived container is never disposed.
+      verify(initialKieContainer, never()).dispose();
+    }
+
+    @Test
+    @DisplayName("loadRules evicts prior KieModule from KieRepository to prevent leak")
+    void testLoadRules_EvictsPriorModuleFromRepository() {
+      ReleaseId oldReleaseId = mock(ReleaseId.class, "old-release");
+      ReleaseId newReleaseId = mock(ReleaseId.class, "new-release");
+      when(initialKieContainer.getReleaseId()).thenReturn(oldReleaseId);
+
+      Rule rule = RuleTestUtils.createSimpleRule("evict.test.rule");
+      when(ruleCompiler.compileRules(List.of(rule)))
+          .thenReturn(RuleCompiler.CompilationResult.success(newReleaseId));
+
+      service.loadRules(List.of(rule));
+
+      // After a successful updateToVersion, the prior module must be removed from the singleton
+      // KieRepository — Drools 10.2.0 does NOT auto-clean (verified against the 10.2.0 source).
+      verify(kieRepository).removeKieModule(oldReleaseId);
+    }
+
+    @Test
+    @DisplayName("loadRules does not evict on update failure (rollback target preserved)")
+    void testLoadRules_NoEvictionOnUpdateFailure() {
+      ReleaseId oldReleaseId = mock(ReleaseId.class, "old-release");
+      ReleaseId newReleaseId = mock(ReleaseId.class, "new-release");
+      when(initialKieContainer.getReleaseId()).thenReturn(oldReleaseId);
+
+      Rule rule = RuleTestUtils.createSimpleRule("noevict.test.rule");
+      when(ruleCompiler.compileRules(List.of(rule)))
+          .thenReturn(RuleCompiler.CompilationResult.success(newReleaseId));
+
+      // Force the update to report errors → swap fails → old module must NOT be evicted (it's
+      // still the active rollback target).
+      Results errorResults = mock(Results.class);
+      when(errorResults.hasMessages(Message.Level.ERROR)).thenReturn(true);
+      when(errorResults.getMessages(Message.Level.ERROR)).thenReturn(List.of());
+      when(initialKieContainer.updateToVersion(newReleaseId)).thenReturn(errorResults);
+
+      boolean result = service.loadRules(List.of(rule));
+
+      assertThat(result).isFalse();
+      verify(kieRepository, never()).removeKieModule(any(ReleaseId.class));
+    }
+
+    @Test
+    @DisplayName("loadOrReplaceRule preserves other loaded rules (single-rule refresh fix)")
+    void testLoadOrReplaceRule_PreservesOtherRules() {
+      // Seed with 3 rules.
+      Rule ruleA = RuleTestUtils.createSimpleRule("preserve.test.ruleA");
+      Rule ruleB = RuleTestUtils.createSimpleRule("preserve.test.ruleB");
+      Rule ruleC = RuleTestUtils.createSimpleRule("preserve.test.ruleC");
+      loadRulesSuccessfully(List.of(ruleA, ruleB, ruleC));
+      assertThat(service.getLoadedRulesCount()).isEqualTo(3);
+
+      // Replace just ruleB. The compiler must be invoked with the FULL combined set
+      // (so updateToVersion sees a KieModule containing all three rules).
+      Rule ruleBv2 = RuleTestUtils.createSimpleRule("preserve.test.ruleB");
+      ReleaseId mergedReleaseId = mock(ReleaseId.class);
+      when(ruleCompiler.compileRules(argThat(list -> list != null && list.size() == 3)))
+          .thenReturn(RuleCompiler.CompilationResult.success(mergedReleaseId));
+
+      boolean result = service.loadOrReplaceRule(ruleBv2);
+
+      assertThat(result).isTrue();
+      assertThat(service.getLoadedRulesCount()).isEqualTo(3);
+      assertThat(service.hasRule("preserve.test.ruleA")).isTrue();
+      assertThat(service.hasRule("preserve.test.ruleB")).isTrue();
+      assertThat(service.hasRule("preserve.test.ruleC")).isTrue();
     }
   }
 
@@ -665,9 +747,7 @@ class DroolsEngineServiceTest {
 
       Map<String, RuleMetadata> allMetadata = service.getAllRuleMetadata();
 
-      assertThat(allMetadata).hasSize(2);
-      assertThat(allMetadata).containsKey("meta.rule.one");
-      assertThat(allMetadata).containsKey("meta.rule.two");
+      assertThat(allMetadata).hasSize(2).containsKey("meta.rule.one").containsKey("meta.rule.two");
       assertThat(allMetadata.get("meta.rule.one").getStatus())
           .isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
     }
@@ -682,26 +762,33 @@ class DroolsEngineServiceTest {
 
       service.loadRules(List.of(rule));
 
-      assertThat(service.getActiveRulesCount()).isEqualTo(0);
-      assertThat(service.getLoadedRulesCount()).isEqualTo(0);
+      assertThat(service.getActiveRulesCount()).isZero();
+      assertThat(service.getLoadedRulesCount()).isZero();
     }
 
     @Test
-    @DisplayName("dispose error during loadRules is handled gracefully")
-    void testLoadRules_DisposeError_HandledGracefully() {
-      // Initial container throws on dispose
-      doThrow(new RuntimeException("dispose error")).when(initialKieContainer).dispose();
-
-      Rule rule = RuleTestUtils.createSimpleRule("dispose.test.rule");
-      KieContainer newContainer = mock(KieContainer.class);
-      RuleCompiler.CompilationResult result = RuleCompiler.CompilationResult.success(newContainer);
+    @DisplayName("loadRules returns false when updateToVersion reports compilation errors")
+    void testLoadRules_UpdateToVersionError_ReturnsFalse() {
+      Rule rule = RuleTestUtils.createSimpleRule("update.error.rule");
+      ReleaseId newReleaseId = mock(ReleaseId.class);
+      RuleCompiler.CompilationResult result = RuleCompiler.CompilationResult.success(newReleaseId);
       when(ruleCompiler.compileRules(List.of(rule))).thenReturn(result);
 
-      // Should not throw - error is caught and logged
+      // Override the default no-error stub for this test only.
+      Results errorResults = mock(Results.class);
+      when(errorResults.hasMessages(Message.Level.ERROR)).thenReturn(true);
+      when(errorResults.getMessages(Message.Level.ERROR)).thenReturn(List.of());
+      when(initialKieContainer.updateToVersion(newReleaseId)).thenReturn(errorResults);
+
       boolean loaded = service.loadRules(List.of(rule));
 
-      assertThat(loaded).isTrue();
-      assertThat(service.hasRule("dispose.test.rule")).isTrue();
+      assertThat(loaded).isFalse();
+      // Brand-new rule: updateToVersion failed before metadata could be populated, so the
+      // rule never made it into the engine at all. (Earlier behavior populated ERROR metadata
+      // upfront; that was removed on 2026-05-10 because it caused spurious "not active"
+      // failures during refresh-under-load. See DroolsEngineService.loadRules comment.)
+      assertThat(service.getRuleMetadata("update.error.rule")).isNull();
+      assertThat(service.hasRule("update.error.rule")).isFalse();
     }
 
     @Test

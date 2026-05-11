@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, AI agents (the navigation map both reach for first) |
 | **Purpose** | Annotated tree of every file and folder in the repo, so a reader can find any code, config, or doc by purpose |
-| **Last verified against repo** | 2026-05-08 |
+| **Last verified against repo** | 2026-05-10 (post-modernization, post-load-test) |
 | **Related docs** | [01-project-overview.md](01-project-overview.md), [03-tech-stack.md](03-tech-stack.md), [27-development-setup.md](27-development-setup.md) |
 
 ---
@@ -14,8 +14,8 @@
 ```
 drools-microservice/
 ├── src/                              # Java source + tests + resources
-├── sample-rules/                     # 10 production-ready DRL rules (uploaded to S3 by init script)
-├── scripts/                          # Profile-specific run scripts
+├── sample-rules/                     # 17 production-ready DRL rules (uploaded to S3 by init script)
+├── scripts/                          # Profile-specific run scripts + load-test orchestrator
 ├── project-documentation/            # ★ THIS DOCUMENTATION CORPUS (NotebookLM target)
 ├── ai-instructions/                  # AI workflow protocols (excluded from doc corpus)
 ├── .ai-workspace/                    # AI planning artifacts (excluded from doc corpus)
@@ -35,11 +35,11 @@ drools-microservice/
 ├── docker-validation.md              # Docker validation checklist
 ├── full-docker-test-plan.md          # 30-step Docker integration test plan
 │
-├── set-java-env.sh                   # Source to set JAVA_HOME=Java 17 (macOS)
+├── set-java-env.sh                   # Source to set JAVA_HOME=Java 25 (macOS)
 ├── setup-dev-environment.sh          # One-command full dev stack bootstrap
 ├── init-localstack.sh                # Auto-runs in LocalStack container; uploads sample-rules to S3
-├── test-localstack.sh                # Validates LocalStack S3 setup; ⚠️ embedded curl uses wrong field name
-├── docker-build-test.sh              # Build + isolated container health-check test (port 9080/9081)
+├── scripts/test-localstack.sh        # Validates LocalStack S3 setup
+├── scripts/docker-build-test.sh     # Build + isolated container health-check test (port 9080/9081)
 │
 ├── .env / .env.example               # Local env var defaults (gitignored / committed template)
 ├── .gitignore
@@ -79,7 +79,8 @@ com/company/drools/
 │   │   ├── RuleNotFoundException.java     # → 404
 │   │   ├── RuleExecutionException.java    # → 400
 │   │   ├── TimeoutException.java          # → 408
-│   │   └── CircuitBreakerException.java   # → 503
+│   │   ├── CircuitBreakerException.java   # → 503
+│   │   └── RuleStorageException.java      # wraps S3/filesystem storage failures → 500
 │   │
 │   ├── filter/                        # Spring servlet filters (@Order matters)
 │   │   ├── SecurityHeadersFilter.java     # @Order(-1) — adds 7 response headers
@@ -95,9 +96,13 @@ com/company/drools/
 │
 ├── core/                              # Business logic — the rule engine itself
 │   ├── engine/
-│   │   ├── DroolsEngineService.java       # Central rule-execution service. Holds KieContainer.
-│   │   │                                  # ReentrantReadWriteLock + atomic-swap reload pattern.
-│   │   ├── RuleCompiler.java              # Compiles .drl → KieContainer. Calls DrlSanitizer first.
+│   │   ├── DroolsEngineService.java       # Central rule-execution service. Holds a single long-lived
+│   │   │                                  # KieContainer updated in place via Drools 10's
+│   │   │                                  # KieContainer.updateToVersion(ReleaseId). ReentrantReadWriteLock
+│   │   │                                  # + explicit KieRepository.removeKieModule cleanup. See ADR-003
+│   │   │                                  # 2026-05-10 update.
+│   │   ├── RuleCompiler.java              # Compiles .drl → returns versioned ReleaseId (KieModule auto-
+│   │   │                                  # registered in KieRepository). Calls DrlSanitizer first.
 │   │   ├── RuleExecutor.java              # Async fireAllRules(maxRuleFirings=10000) with timeout cancel.
 │   │   └── DrlSanitizer.java              # ★ Sandbox: import allowlist + class/method blocklist + eval() block
 │   │
@@ -154,7 +159,7 @@ The `application.yml` is the most-referenced config file in the codebase. See [0
 
 ### `src/test/java/com/company/drools/`
 
-44 test files, 589 tests, **96.2% instruction / 89.7% branch** coverage (JaCoCo).
+45 test files, 597 tests passing (1 pre-existing testcontainers env error, unrelated). Coverage roughly preserved from the 96.2% / 89.7% pre-modernization baseline.
 
 ```
 src/test/java/com/company/drools/
@@ -190,7 +195,7 @@ The tests are the **most accurate behavior spec** in the project. When docs disa
 
 ## `sample-rules/` — production-ready example DRLs
 
-10 working rules used in the dev stack (auto-uploaded to LocalStack S3 by `init-localstack.sh`):
+17 working rules used in the dev stack (auto-uploaded to LocalStack S3 by `init-localstack.sh`). The original 10 were the seed cookbook; 7 more were added 2026-05-10 to demonstrate Drools patterns previously not in the cookbook (`accumulate`, `exists`, `not`, `salience`, compound `&&`/`||`, temporal date math, `forall`).
 
 ```
 sample-rules/
@@ -203,22 +208,45 @@ sample-rules/
 │   │   ├── bulk.drl                   # 15% off for quantity ≥ 10
 │   │   └── first-time.drl             # 5% off first-time customers
 │   │
-│   └── shipping/
-│       ├── standard.drl               # $5.99/$9.99/$15.99 by weight
-│       └── express.drl                # $12.99/$19.99/$29.99 by weight, free over $100
+│   ├── shipping/
+│   │   ├── standard.drl               # $5.99/$9.99/$15.99 by weight
+│   │   └── express.drl                # $12.99/$19.99/$29.99 by weight, free over $100
+│   │
+│   ├── bundle/
+│   │   └── accumulate.drl             # ⚡ accumulate: 10% bundle discount when summed item prices > $100
+│   │
+│   └── loyalty/
+│       └── salience.drl               # ⚡ salience 100: loyalty member 15% override
 │
 ├── seasonal/
-│   └── holiday/
-│       ├── discount.drl               # 12% off when isHolidaySeason=true
-│       └── blackfriday.drl            # 25% off with promotionCode=BLACK2024
+│   ├── holiday/
+│   │   ├── discount.drl               # 12% off when isHolidaySeason=true
+│   │   └── blackfriday.drl            # 25% off with promotionCode=BLACK2024
+│   │
+│   └── expiry/
+│       └── temporal.drl               # ⚡ date comparison: promo ACTIVE/EXPIRED via java.time.LocalDate
+│
+├── inventory/
+│   └── warning/
+│       └── exists.drl                 # ⚡ exists: low-stock warning if any item has stockLevel < 5
 │
 └── validation/
-    └── customer/
-        ├── age.drl                    # Reject under-18; tag age groups
-        └── credit.drl                 # Tiered approval (Excellent/Good/Fair/Poor)
+    ├── customer/
+    │   ├── age.drl                    # Reject under-18; tag age groups
+    │   └── credit.drl                 # Tiered approval (Excellent/Good/Fair/Poor)
+    │
+    ├── cart/
+    │   ├── notempty.drl               # ⚡ not-pattern: reject when items list missing or empty
+    │   └── forall.drl                 # ⚡ forall: every cart item must have stockLevel > 0
+    │
+    └── email/
+        └── compound.drl               # ⚡ compound &&/|| LHS with `matches` regex (substituted from
+                                       #    eval() because DrlSanitizer blocks the eval keyword)
 ```
 
-Verified curl examples for all 10 rules: [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md).
+(⚡ = added in the 2026-05-10 cookbook expansion.)
+
+Verified curl examples for all 17 rules: [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md).
 
 The path → rule ID transformation: `pricing/discount/vip.drl` ↔ `pricing.discount.vip`. See [18-rule-id-and-storage-layout.md](18-rule-id-and-storage-layout.md).
 
@@ -228,8 +256,8 @@ The path → rule ID transformation: `pricing/discount/vip.drl` ↔ `pricing.dis
 
 | File | Purpose |
 |---|---|
-| `pom.xml` | Maven build. Spring Boot 3.2.5, Drools 8.44.0, Java 17 enforced. Plugins: enforcer, spotless (Google Java Format), JaCoCo, SpotBugs, surefire, spring-boot-maven-plugin. |
-| `Dockerfile` | Multi-stage: `maven:3.9-eclipse-temurin-17` → `amazoncorretto:17-alpine-jdk`. Non-root `appuser`. JAVA_OPTS pre-set with G1GC + container support + Drools properties. |
+| `pom.xml` | Maven build. Spring Boot 3.5.3, Drools 10.2.0, Java 25 enforced. Plugins: enforcer, spotless (Google Java Format), JaCoCo, SpotBugs, surefire, spring-boot-maven-plugin. |
+| `Dockerfile` | Multi-stage: `maven:3.9-eclipse-temurin-25` → `amazoncorretto:25-alpine-jdk`. Non-root `appuser`. JAVA_OPTS pre-set with G1GC + container support + Drools properties. |
 | `docker-compose.yml` | 3-service dev stack: `app` (build from Dockerfile), `localstack` (2.3, S3 only), `redis` (7-alpine). Healthchecks on all three. Networks: `drools-network`. Volumes: `localstack-data`, `redis-data`, plus host mounts for heap dumps and GC logs. |
 | `.dockerignore` | Excludes target/, .git, *.log, IDE files, etc. from Docker build context. |
 | `.env` / `.env.example` | Local env var template. `.env` is gitignored (real secrets); `.env.example` is committed (defaults). |
@@ -240,22 +268,29 @@ The path → rule ID transformation: `pricing/discount/vip.drl` ↔ `pricing.dis
 
 | Script | What it does | When to run |
 |---|---|---|
-| `set-java-env.sh` | `source` to set `JAVA_HOME` and `PATH` to Java 17 (macOS via `/usr/libexec/java_home -v 17`). | Before running `mvn` or local `java` commands. |
-| `setup-dev-environment.sh` | Full bootstrap: Maven build → Docker build → `docker-compose up -d` → wait for healthy → run `test-localstack.sh`. Flags: `--skip-build`, `--skip-tests`, `--force-rebuild`. | First time on a clean clone. |
+| `set-java-env.sh` | `source` to set `JAVA_HOME` and `PATH` to Java 25 (macOS via `/usr/libexec/java_home -v 25`). | Before running `mvn` or local `java` commands. |
+| `setup-dev-environment.sh` | Full bootstrap: Maven build → Docker build → `docker-compose up -d` → wait for healthy → run `scripts/test-localstack.sh`. Flags: `--skip-build`, `--skip-tests`, `--force-rebuild`. | First time on a clean clone. |
 | `init-localstack.sh` | Runs **inside** the LocalStack container as a ready-hook (mounted to `/etc/localstack/init/ready.d/init-aws.sh`). Creates `local-rules` bucket, syncs `sample-rules/` into it, applies a permissive Principal:`*` policy (LocalStack-guarded). | Automatic — fires when LocalStack starts. |
-| `test-localstack.sh` | 5 sequential checks against LocalStack: connectivity, bucket exists, rules uploaded, rule content valid, optional rule execution. ⚠️ Step 5 uses `ruleId` (camelCase) instead of `rule_id` (snake_case) — fails silently against the real DTO. See `CODE_FINDINGS.md` F-025. | After LocalStack is up; manually or via setup script. |
-| `docker-build-test.sh` | Isolated build + container test on ports 9080/9081 (avoids conflict with the compose stack). Uses `RULE_SOURCE=memory` so no S3/Redis needed. | CI-style validation that the Docker image works. |
+
+| Script under `scripts/` (validation helpers) | What it does | When to run |
+|---|---|---|
+| `scripts/test-localstack.sh` | 5 sequential checks against LocalStack: connectivity, bucket exists, rules uploaded, rule content valid, optional rule execution. | After LocalStack is up; manually or via setup script. |
+| `scripts/docker-build-test.sh` | Isolated build + container test on ports 9080/9081 (avoids conflict with the compose stack). Uses `RULE_SOURCE=memory` so no S3/Redis needed. | CI-style validation that the Docker image works. |
 
 | Script under `scripts/` | What it does |
 |---|---|
 | `scripts/start-development.sh` | Starts the app with the `dev` Spring profile. |
 | `scripts/start-production.sh` | Starts the app with the `prod` Spring profile. Tighter timeouts, tighter circuit breakers, larger thread pools. |
+| `scripts/run-load-test.sh` | One-command load + stress + soak test orchestrator (Phases 0–8). See [39-load-test-findings.md](39-load-test-findings.md) and `scripts/README.md`. |
+| `scripts/lib/*.sh` | Reusable helpers (preflight checks, stack lifecycle, corpus generator, memory poller, refresh loops, heap-dump capture). |
+| `scripts/jmeter/execute-only.jmx` | Single parameterized JMeter plan reused across all load-test phases (rps_per_min/duration_s/threads/rule_ids_csv/jtl_path via `-J`). |
+| `scripts/docker-compose.loadtest.yml` | Compose override that disables the rate limiter when running the load harness from a single client IP. |
 
 ---
 
 ## Documentation files (this corpus)
 
-`project-documentation/` contains the 34-doc corpus. The numbering is a NotebookLM ordering signal.
+`project-documentation/` contains the 39-doc corpus (40 files including this folder's own `README.md`). The numbering is a NotebookLM ordering signal.
 
 ```
 project-documentation/
@@ -297,6 +332,9 @@ project-documentation/
 ├── 35-faq.md
 ├── 36-architecture-decision-records.md
 ├── 37-glossary.md
+├── 38-for-ai-agents.md                # Verification rules + pitfalls for AI sessions
+├── 39-load-test-findings.md           # 2026-05-10 load test verdict + production-planning guidance
+├── README.md                          # Index of this corpus
 └── api-reference/
     └── openapi.yml                    # Moved from repo root; canonical API spec
 ```
@@ -364,7 +402,7 @@ If you are an AI agent considering whether to read those folders: don't, unless 
 | Build config | [pom.xml](../pom.xml) |
 | Container build | [Dockerfile](../Dockerfile) |
 | Dev compose stack | [docker-compose.yml](../docker-compose.yml) |
-| Sample rules (10) | [`sample-rules/`](../sample-rules/) |
+| Sample rules (17) | [`sample-rules/`](../sample-rules/) |
 | Unit test base | [BaseUnitTest.java](../src/test/java/com/company/drools/BaseUnitTest.java) |
 | Integration test base (Testcontainers) | [BaseIntegrationTest.java](../src/test/java/com/company/drools/BaseIntegrationTest.java) |
 | DRL sandbox tests (23 cases) | [DrlSanitizerTest.java](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) |

@@ -126,8 +126,7 @@ public class ThreadPoolConfig {
   /** Get current rule execution thread pool statistics for monitoring. */
   public String getRuleExecutionPoolStats() {
     Executor executor = ruleExecutionExecutor();
-    if (executor instanceof ThreadPoolTaskExecutor) {
-      ThreadPoolTaskExecutor taskExecutor = (ThreadPoolTaskExecutor) executor;
+    if (executor instanceof ThreadPoolTaskExecutor taskExecutor) {
       ThreadPoolExecutor threadPoolExecutor = taskExecutor.getThreadPoolExecutor();
 
       return String.format(
@@ -145,8 +144,7 @@ public class ThreadPoolConfig {
   /** Get current storage thread pool statistics for monitoring. */
   public String getStoragePoolStats() {
     Executor executor = storageExecutor();
-    if (executor instanceof ThreadPoolTaskExecutor) {
-      ThreadPoolTaskExecutor taskExecutor = (ThreadPoolTaskExecutor) executor;
+    if (executor instanceof ThreadPoolTaskExecutor taskExecutor) {
       ThreadPoolExecutor threadPoolExecutor = taskExecutor.getThreadPoolExecutor();
 
       return String.format(

@@ -2,17 +2,17 @@
 
 ## For AI Assistants - Complete Rule Generation Guide
 
-This prompt incorporates official Drools 8 documentation and best practices for generating production-ready rules.
+This prompt incorporates official Drools 10 documentation and best practices for generating production-ready rules.
 
 ---
 
 **INSTRUCTION TO AI ASSISTANT:**
 
-You are a Drools 8 rule generation expert. Create business rules following the official Drools Rule Language (DRL) specification while maintaining backward compatibility with traditional syntax.
+You are a Drools 10 rule generation expert. Create business rules following the official Drools Rule Language (DRL) specification using traditional DRL syntax (this project does not use Rule Units / OOPath).
 
 ## 📋 Key Information
 
-- **Drools Version**: 8.44.0.Final (supports both new and traditional syntax)
+- **Drools Version**: 10.2.0 (supports both modern and traditional syntax; this project uses traditional)
 - **Preferred Pattern**: Traditional pattern matching (for compatibility)
 - **Data Format**: JSON → Map conversion for rule execution
 - **Package Convention**: `com.company.rules.{domain}.{category}`

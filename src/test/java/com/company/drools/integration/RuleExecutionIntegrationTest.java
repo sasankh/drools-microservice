@@ -74,10 +74,14 @@ class RuleExecutionIntegrationTest {
           }
 
           @Override
-          public void saveRule(Rule rule) {}
+          public void saveRule(Rule rule) {
+            /* test stub — no persistence needed */
+          }
 
           @Override
-          public void deleteRule(String ruleId) {}
+          public void deleteRule(String ruleId) {
+            /* test stub — no persistence needed */
+          }
 
           @Override
           public boolean ruleExists(String ruleId) {
@@ -85,10 +89,14 @@ class RuleExecutionIntegrationTest {
           }
 
           @Override
-          public void refreshCache() {}
+          public void refreshCache() {
+            // intentionally empty — test-only RuleStorage stub
+          }
 
           @Override
-          public void refreshRule(String ruleId) {}
+          public void refreshRule(String ruleId) {
+            // intentionally empty — test-only RuleStorage stub
+          }
 
           @Override
           public long getTotalRuleCount() {
@@ -107,14 +115,26 @@ class RuleExecutionIntegrationTest {
 
     droolsEngineService =
         new DroolsEngineService(
-            ruleCompiler, ruleExecutor, emptyContainer, noOpStorage, timeoutConfig, meterRegistry);
+            ruleCompiler,
+            ruleExecutor,
+            emptyContainer,
+            kieServices.getRepository(),
+            noOpStorage,
+            timeoutConfig,
+            meterRegistry);
   }
 
   private KieContainer createEmptyKieContainer() {
+    // Must use the same groupId/artifactId that RuleCompiler emits, so updateToVersion(...)
+    // can resolve newly-built modules from the KieRepository.
+    var releaseId =
+        kieServices.newReleaseId(
+            RuleCompiler.GROUP_ID, RuleCompiler.ARTIFACT_ID, RuleCompiler.INITIAL_VERSION);
     var kfs = kieServices.newKieFileSystem();
+    kfs.generateAndWritePomXML(releaseId);
     var kb = kieServices.newKieBuilder(kfs);
     kb.buildAll();
-    return kieServices.newKieContainer(kb.getKieModule().getReleaseId());
+    return kieServices.newKieContainer(releaseId);
   }
 
   private Rule loadSampleRule(String ruleId) throws IOException {
@@ -237,6 +257,152 @@ class RuleExecutionIntegrationTest {
       assertThat(result.getResult()).containsEntry("shippingCost", 9.99);
       assertThat(result.getResult()).containsEntry("shippingMethod", "Standard");
       assertThat(result.getResult()).containsEntry("estimatedDays", 5);
+    }
+
+    // =========================================================================
+    // Phase 1 cookbook expansion (7 new patterns)
+    // =========================================================================
+
+    @Test
+    @DisplayName("Accumulate: bundle discount when summed item prices exceed threshold")
+    void testExecuteAccumulate_BundleOverThreshold_AppliesDiscount() throws IOException {
+      Rule rule = loadSampleRule("pricing.bundle.accumulate");
+      assertThat(droolsEngineService.loadRules(List.of(rule))).isTrue();
+
+      Map<String, Object> item1 = new HashMap<>();
+      item1.put("price", 50.0);
+      Map<String, Object> item2 = new HashMap<>();
+      item2.put("price", 60.0);
+      Map<String, Object> inputData = new HashMap<>();
+      inputData.put("items", List.of(item1, item2));
+
+      RuleExecutor.ExecutionResult result =
+          droolsEngineService.executeRule("pricing.bundle.accumulate", inputData);
+
+      assertThat(result.isSuccess()).isTrue();
+      assertThat(result.getResult()).containsEntry("bundleTotal", 110.0);
+      assertThat(result.getResult()).containsEntry("bundleDiscount", 11.0);
+      assertThat(result.getResult()).containsEntry("bundleFinalAmount", 99.0);
+      assertThat(result.getResult()).containsEntry("appliedRule", "bundle-accumulate");
+    }
+
+    @Test
+    @DisplayName("Exists: low stock warning fires when ANY item is low")
+    void testExecuteExists_AnyLowStockItem_FiresWarning() throws IOException {
+      Rule rule = loadSampleRule("inventory.warning.exists");
+      assertThat(droolsEngineService.loadRules(List.of(rule))).isTrue();
+
+      Map<String, Object> goodItem = new HashMap<>();
+      goodItem.put("stockLevel", 10);
+      Map<String, Object> lowItem = new HashMap<>();
+      lowItem.put("stockLevel", 3);
+      Map<String, Object> inputData = new HashMap<>();
+      inputData.put("items", List.of(goodItem, lowItem));
+
+      RuleExecutor.ExecutionResult result =
+          droolsEngineService.executeRule("inventory.warning.exists", inputData);
+
+      assertThat(result.isSuccess()).isTrue();
+      assertThat(result.getResult()).containsEntry("lowStockWarning", true);
+      assertThat(result.getResult()).containsEntry("warningType", "STOCK_LOW");
+      assertThat(result.getResult()).containsEntry("validationMethod", "exists-pattern");
+    }
+
+    @Test
+    @DisplayName("Not: empty cart is rejected via not-pattern")
+    void testExecuteNot_EmptyCart_RejectsOrder() throws IOException {
+      Rule rule = loadSampleRule("validation.cart.notempty");
+      assertThat(droolsEngineService.loadRules(List.of(rule))).isTrue();
+
+      // Cart with empty items list — the not(...) pattern fires.
+      Map<String, Object> inputData = new HashMap<>();
+      inputData.put("items", List.of());
+
+      RuleExecutor.ExecutionResult result =
+          droolsEngineService.executeRule("validation.cart.notempty", inputData);
+
+      assertThat(result.isSuccess()).isTrue();
+      assertThat(result.getResult()).containsEntry("validationResult", "REJECTED");
+      assertThat(result.getResult()).containsEntry("reason", "EMPTY_CART");
+      assertThat(result.getResult()).containsEntry("validationMethod", "not-pattern");
+    }
+
+    @Test
+    @DisplayName("Salience: loyalty rule applies 15% discount (priority override)")
+    void testExecuteSalience_LoyaltyMember_AppliesPriorityDiscount() throws IOException {
+      Rule rule = loadSampleRule("pricing.loyalty.salience");
+      assertThat(droolsEngineService.loadRules(List.of(rule))).isTrue();
+
+      Map<String, Object> inputData = new HashMap<>();
+      inputData.put("loyaltyMember", true);
+      inputData.put("amount", 100.0);
+
+      RuleExecutor.ExecutionResult result =
+          droolsEngineService.executeRule("pricing.loyalty.salience", inputData);
+
+      assertThat(result.isSuccess()).isTrue();
+      assertThat(result.getResult()).containsEntry("amount", 85.0);
+      assertThat(result.getResult()).containsEntry("loyaltyDiscount", 15.0);
+      assertThat(result.getResult()).containsEntry("loyaltyApplied", true);
+      assertThat((String) result.getResult().get("discountReason")).contains("salience 100");
+    }
+
+    @Test
+    @DisplayName("Compound LHS: internal customer with corporate email passes validation")
+    void testExecuteCompound_InternalCorporateEmail_Valid() throws IOException {
+      Rule rule = loadSampleRule("validation.email.compound");
+      assertThat(droolsEngineService.loadRules(List.of(rule))).isTrue();
+
+      Map<String, Object> inputData = new HashMap<>();
+      inputData.put("email", "alice@company.com");
+      inputData.put("customerType", "internal");
+
+      RuleExecutor.ExecutionResult result =
+          droolsEngineService.executeRule("validation.email.compound", inputData);
+
+      assertThat(result.isSuccess()).isTrue();
+      assertThat(result.getResult()).containsEntry("emailValidationResult", "VALID");
+      assertThat(result.getResult()).containsEntry("validationMethod", "compound-lhs");
+    }
+
+    @Test
+    @DisplayName("Temporal: promo within date range is ACTIVE")
+    void testExecuteTemporal_WithinExpiry_IsActive() throws IOException {
+      Rule rule = loadSampleRule("seasonal.expiry.temporal");
+      assertThat(droolsEngineService.loadRules(List.of(rule))).isTrue();
+
+      Map<String, Object> inputData = new HashMap<>();
+      inputData.put("currentDate", "2026-05-10");
+      inputData.put("expiryDate", "2026-12-31");
+
+      RuleExecutor.ExecutionResult result =
+          droolsEngineService.executeRule("seasonal.expiry.temporal", inputData);
+
+      assertThat(result.isSuccess()).isTrue();
+      assertThat(result.getResult()).containsEntry("promoValid", true);
+      assertThat(result.getResult()).containsEntry("promoStatus", "ACTIVE");
+      assertThat(result.getResult()).containsEntry("daysRemaining", 235L);
+    }
+
+    @Test
+    @DisplayName("Forall: all cart items in stock satisfies universal quantification")
+    void testExecuteForall_AllItemsInStock_Passes() throws IOException {
+      Rule rule = loadSampleRule("validation.cart.forall");
+      assertThat(droolsEngineService.loadRules(List.of(rule))).isTrue();
+
+      Map<String, Object> i1 = new HashMap<>();
+      i1.put("stockLevel", 10);
+      Map<String, Object> i2 = new HashMap<>();
+      i2.put("stockLevel", 20);
+      Map<String, Object> inputData = new HashMap<>();
+      inputData.put("items", List.of(i1, i2));
+
+      RuleExecutor.ExecutionResult result =
+          droolsEngineService.executeRule("validation.cart.forall", inputData);
+
+      assertThat(result.isSuccess()).isTrue();
+      assertThat(result.getResult()).containsEntry("allItemsInStock", true);
+      assertThat(result.getResult()).containsEntry("validationMethod", "forall");
     }
   }
 
@@ -410,11 +576,14 @@ class RuleExecutionIntegrationTest {
                     data.put("shippingType", "standard");
                     data.put("weight", 1.0 + index);
                   }
+                  default -> {
+                    /* no data setup needed for other rule IDs */
+                  }
                 }
 
                 RuleExecutor.ExecutionResult result = droolsEngineService.executeRule(ruleId, data);
                 results.add(result);
-              } catch (Exception e) {
+              } catch (Exception _) {
                 errorCount.incrementAndGet();
               } finally {
                 doneLatch.countDown();
@@ -428,7 +597,7 @@ class RuleExecutionIntegrationTest {
       concurrentExecutor.shutdown();
 
       assertThat(completed).as("All concurrent executions should complete").isTrue();
-      assertThat(errorCount.get()).as("No exceptions during concurrent execution").isEqualTo(0);
+      assertThat(errorCount.get()).as("No exceptions during concurrent execution").isZero();
       assertThat(results).hasSize(threadCount);
 
       // Every execution should succeed

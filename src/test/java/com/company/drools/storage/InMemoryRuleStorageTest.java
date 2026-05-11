@@ -1,6 +1,7 @@
 package com.company.drools.storage;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
@@ -151,13 +152,13 @@ class InMemoryRuleStorageTest {
     @Test
     @DisplayName("refreshCache is no-op")
     void testRefreshCache() {
-      adapter.refreshCache(); // should not throw
+      assertDoesNotThrow(() -> adapter.refreshCache());
     }
 
     @Test
     @DisplayName("refreshRule is no-op")
     void testRefreshRule() {
-      adapter.refreshRule("pricing.discount.simple"); // should not throw
+      assertDoesNotThrow(() -> adapter.refreshRule("pricing.discount.simple"));
     }
 
     @Test

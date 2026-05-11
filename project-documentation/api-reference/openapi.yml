@@ -7,7 +7,7 @@ info:
     ## Features
     - **High Performance**: Support for 100-1000 requests per second
     - **Memory Stable**: Proper resource disposal prevents memory leaks and OOM errors
-    - **Real-time Monitoring**: Memory diagnostics with automatic warnings (NEW)
+    - **Real-time Monitoring**: Memory diagnostics with automatic warnings
     - **Security Hardened**: Admin auth, DRL sandboxing, security headers, input validation, rate limiting, CORS
     - **Production Ready**: Health monitoring, metrics, circuit breakers
     - **Scalable**: Multi-tier caching with S3 storage backend
@@ -26,7 +26,15 @@ info:
     - CORS configuration (empty default; wildcard only in dev profiles)
     - Sensitive data sanitization in logs
 
-    ## Recent Updates (2026-02-26)
+    ## Recent Updates (2026-05-11)
+    - **Sonar Quality Gates**: Maintainability 0, Reliability 0, Security Hotspots 0 — Quality Gate OK
+    - **ReDoS Fixes**: CorsConfig regex split + DrlSanitizer IMPORT_PATTERN possessive quantifiers (S5852)
+
+    ## Previous Updates (2026-05-09)
+    - **Stack Modernization**: Java 17 → 25, Spring Boot 3.2.5 → 3.5.3, Drools 8.44.0 → 10.2.0
+    - **Dependency Sweep Closed**: All Maven Central libraries on current latest stable
+
+    ## Previous Updates (2026-02-26)
     - **Security Hardening**: 39/42 security fixes across 9 phases
     - **Admin Authentication**: API key protection for admin endpoints
     - **DRL Sandboxing**: Rule content scanning prevents arbitrary code execution
@@ -408,7 +416,7 @@ paths:
                   value:
                     application: "Drools Rule Engine Microservice"
                     version: "1.0.0"
-                    java_version: "17.0.8"
+                    java_version: "25.0.0"
                     timestamp: "2025-07-22T12:00:00Z"
 
   /admin/thread-pools:
@@ -908,7 +916,7 @@ components:
           example: "1.0.0"
         java_version:
           type: string
-          example: "17.0.8"
+          example: "25.0.0"
         timestamp:
           type: string
           format: date-time
@@ -1054,43 +1062,6 @@ components:
           type: string
           description: Error message
 
-  securitySchemes:
-    AdminApiKeyAuth:
-      type: apiKey
-      in: header
-      name: X-Admin-API-Key
-      description: |
-        API Key for admin endpoint authentication.
-
-        **Usage:**
-        - Required for all `/admin/*` endpoints when `ADMIN_API_KEY` is configured
-        - Set via `ADMIN_API_KEY` environment variable
-        - When not configured (empty), admin auth is disabled (development mode)
-        - Returns 401 Unauthorized if key is missing or invalid
-
-    ApiKeyAuth:
-      type: apiKey
-      in: header
-      name: X-API-Key
-      description: |
-        API Key for client identification and rate limiting.
-
-        **Usage:**
-        - Used for client identification in rate limiting
-        - Optional but recommended for production
-        - Helps with monitoring and analytics
-
-    BearerAuth:
-      type: http
-      scheme: bearer
-      description: |
-        Bearer token authentication.
-
-        **Usage:**
-        - Alternative client identification method
-        - Used in rate limiting and monitoring
-        - JWT tokens supported
-
     MemoryInfo:
       type: object
       description: Comprehensive memory information including heap, non-heap, and GC statistics
@@ -1196,6 +1167,43 @@ components:
           type: number
           format: double
 
+  securitySchemes:
+    AdminApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Admin-API-Key
+      description: |
+        API Key for admin endpoint authentication.
+
+        **Usage:**
+        - Required for all `/admin/*` endpoints when `ADMIN_API_KEY` is configured
+        - Set via `ADMIN_API_KEY` environment variable
+        - When not configured (empty), admin auth is disabled (development mode)
+        - Returns 401 Unauthorized if key is missing or invalid
+
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API Key for client identification and rate limiting.
+
+        **Usage:**
+        - Used for client identification in rate limiting
+        - Optional but recommended for production
+        - Helps with monitoring and analytics
+
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Bearer token authentication.
+
+        **Usage:**
+        - Alternative client identification method
+        - Used in rate limiting and monitoring
+        - JWT tokens supported
+
 security:
   - ApiKeyAuth: []
   - BearerAuth: []
@@ -1237,7 +1245,7 @@ tags:
 
   - name: Memory Monitoring
     description: |
-      Real-time memory diagnostics and monitoring (NEW).
+      Real-time memory diagnostics and monitoring.
 
       **Features:**
       - Comprehensive memory statistics (heap, non-heap, pools)

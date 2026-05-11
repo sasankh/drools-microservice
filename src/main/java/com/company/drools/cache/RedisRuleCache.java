@@ -36,7 +36,9 @@ public class RedisRuleCache implements RuleCache {
 
   private static final Logger log = LoggerFactory.getLogger(RedisRuleCache.class);
   private static final String CACHE_KEY_PREFIX = "drools:rule:";
-  private static final String CACHE_STATS_KEY = "drools:stats:";
+  private static final String METRIC_CACHE_MISSES = "drools.cache.misses";
+  private static final String TAG_CACHE_TYPE = "cache_type";
+  private static final String CACHE_TYPE_REDIS = "redis";
 
   private final RedisTemplate<String, Rule> redisTemplate;
   private final Duration ttlDuration;
@@ -88,27 +90,32 @@ public class RedisRuleCache implements RuleCache {
 
       if (result.isPresent()) {
         localHits.incrementAndGet();
-        meterRegistry.counter("drools.cache.hits", "cache_type", "redis").increment();
+        meterRegistry.counter("drools.cache.hits", TAG_CACHE_TYPE, CACHE_TYPE_REDIS).increment();
       } else {
         localMisses.incrementAndGet();
-        meterRegistry.counter("drools.cache.misses", "cache_type", "redis").increment();
+        meterRegistry.counter(METRIC_CACHE_MISSES, TAG_CACHE_TYPE, CACHE_TYPE_REDIS).increment();
       }
 
       return result;
 
-    } catch (CallNotPermittedException e) {
+    } catch (CallNotPermittedException _) {
       // Circuit breaker is open - treat as cache miss
       log.warn("Redis circuit breaker is open - treating as cache miss for rule: {}", ruleId);
       localMisses.incrementAndGet();
       meterRegistry
-          .counter("drools.cache.misses", "cache_type", "redis", "reason", "circuit_breaker_open")
+          .counter(
+              METRIC_CACHE_MISSES,
+              TAG_CACHE_TYPE,
+              CACHE_TYPE_REDIS,
+              "reason",
+              "circuit_breaker_open")
           .increment();
       return Optional.empty();
 
     } catch (Exception e) {
       log.warn("Redis error during get operation for rule: {}", ruleId, e);
       localMisses.incrementAndGet();
-      meterRegistry.counter("drools.cache.misses", "cache_type", "redis").increment();
+      meterRegistry.counter(METRIC_CACHE_MISSES, TAG_CACHE_TYPE, CACHE_TYPE_REDIS).increment();
       return Optional.empty();
     }
   }
@@ -134,7 +141,7 @@ public class RedisRuleCache implements RuleCache {
 
       redisOperation.run();
 
-    } catch (CallNotPermittedException e) {
+    } catch (CallNotPermittedException _) {
       // Circuit breaker is open - silently fail the cache write
       log.warn("Redis circuit breaker is open - cannot cache rule: {}", rule.getRuleId());
 

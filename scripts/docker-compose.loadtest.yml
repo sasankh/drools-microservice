@@ -1,0 +1,13 @@
+# Docker compose override for load testing.
+# Activated by the orchestrator (run-load-test.sh) via:
+#   docker compose -f docker-compose.yml -f scripts/docker-compose.loadtest.yml up -d --build
+#
+# Disables rate limiting because the load gen runs from a single client (one IP) and would
+# otherwise hit the project's default 1000-req/min cap within ~20 seconds, polluting the
+# measurement with 429 responses instead of actual rule-execution latency.
+#
+# Production stays unchanged — this override only applies when the orchestrator is invoked.
+services:
+  app:
+    environment:
+      - DROOLS_RATE_LIMITING_ENABLED=false

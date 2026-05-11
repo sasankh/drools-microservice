@@ -59,12 +59,13 @@ class DtoTest {
       ErrorResponse e2 = new ErrorResponse("ERR", "msg", "det");
       ErrorResponse e3 = new ErrorResponse("ERR2", "msg", "det");
 
-      assertThat(e1).isEqualTo(e2);
-      assertThat(e1).isNotEqualTo(e3);
-      assertThat(e1).isNotEqualTo(null);
-      assertThat(e1).isNotEqualTo("string");
-      assertThat(e1).isEqualTo(e1);
-      assertThat(e1.hashCode()).isEqualTo(e2.hashCode());
+      assertThat(e1)
+          .isEqualTo(e2)
+          .isNotEqualTo(e3)
+          .isNotEqualTo(null)
+          .isNotEqualTo("string")
+          .isEqualTo(e1)
+          .hasSameHashCodeAs(e2);
     }
 
     @Test
@@ -72,9 +73,7 @@ class DtoTest {
     void testToString() {
       ErrorResponse error = new ErrorResponse("ERR", "msg", "det");
       String str = error.toString();
-      assertThat(str).contains("ERR");
-      assertThat(str).contains("msg");
-      assertThat(str).contains("det");
+      assertThat(str).contains("ERR").contains("msg").contains("det");
     }
   }
 
@@ -119,12 +118,13 @@ class DtoTest {
       RuleExecutionRequest r2 = new RuleExecutionRequest("rule1", data);
       RuleExecutionRequest r3 = new RuleExecutionRequest("rule2", data);
 
-      assertThat(r1).isEqualTo(r2);
-      assertThat(r1).isNotEqualTo(r3);
-      assertThat(r1).isNotEqualTo(null);
-      assertThat(r1).isNotEqualTo("string");
-      assertThat(r1).isEqualTo(r1);
-      assertThat(r1.hashCode()).isEqualTo(r2.hashCode());
+      assertThat(r1)
+          .isEqualTo(r2)
+          .isNotEqualTo(r3)
+          .isNotEqualTo(null)
+          .isNotEqualTo("string")
+          .isEqualTo(r1)
+          .hasSameHashCodeAs(r2);
     }
 
     @Test
@@ -206,12 +206,13 @@ class DtoTest {
       RuleExecutionResponse r2 = new RuleExecutionResponse("rule1", result, null, 10L);
       RuleExecutionResponse r3 = new RuleExecutionResponse("rule2", result, null, 10L);
 
-      assertThat(r1).isEqualTo(r2);
-      assertThat(r1).isNotEqualTo(r3);
-      assertThat(r1).isNotEqualTo(null);
-      assertThat(r1).isNotEqualTo("string");
-      assertThat(r1).isEqualTo(r1);
-      assertThat(r1.hashCode()).isEqualTo(r2.hashCode());
+      assertThat(r1)
+          .isEqualTo(r2)
+          .isNotEqualTo(r3)
+          .isNotEqualTo(null)
+          .isNotEqualTo("string")
+          .isEqualTo(r1)
+          .hasSameHashCodeAs(r2);
     }
 
     @Test
@@ -232,7 +233,7 @@ class DtoTest {
     void testDefaultConstructor() {
       RuleListResponse response = new RuleListResponse();
       assertThat(response.getTimestamp()).isNotNull();
-      assertThat(response.getTotalRules()).isEqualTo(0);
+      assertThat(response.getTotalRules()).isZero();
     }
 
     @Test
@@ -255,10 +256,10 @@ class DtoTest {
     void testSetRulesUpdatesTotalCount() {
       RuleListResponse response = new RuleListResponse();
       response.setRules(List.of());
-      assertThat(response.getTotalRules()).isEqualTo(0);
+      assertThat(response.getTotalRules()).isZero();
 
       response.setRules(null);
-      assertThat(response.getTotalRules()).isEqualTo(0);
+      assertThat(response.getTotalRules()).isZero();
     }
 
     @Test
@@ -277,7 +278,7 @@ class DtoTest {
     @DisplayName("constructor with null rules")
     void testConstructorWithNullRules() {
       RuleListResponse response = new RuleListResponse(null);
-      assertThat(response.getTotalRules()).isEqualTo(0);
+      assertThat(response.getTotalRules()).isZero();
     }
   }
 
@@ -376,7 +377,7 @@ class DtoTest {
 
       assertThat(response.getStatus()).isEqualTo("SUCCESS");
       assertThat(response.getRulesLoaded()).isEqualTo(10);
-      assertThat(response.getRulesFailed()).isEqualTo(0);
+      assertThat(response.getRulesFailed()).isZero();
       assertThat(response.getDurationMs()).isEqualTo(100L);
       assertThat(response.getErrors()).isEmpty();
       assertThat(response.getCacheUpdatedAt()).isEqualTo(now);

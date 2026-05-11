@@ -5,10 +5,8 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
-import com.company.drools.config.ValidationConfig;
 import com.company.drools.testutil.ValidationConfigTestHelper;
 import jakarta.validation.ConstraintValidatorContext;
-import java.lang.reflect.Field;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -24,13 +22,8 @@ class RuleIdValidatorTest {
   private ConstraintValidatorContext context;
 
   @BeforeEach
-  void setUp() throws Exception {
-    validator = new RuleIdValidator();
-
-    ValidationConfig config = ValidationConfigTestHelper.createTestValidationConfig();
-    Field configField = RuleIdValidator.class.getDeclaredField("validationConfig");
-    configField.setAccessible(true);
-    configField.set(validator, config);
+  void setUp() {
+    validator = new RuleIdValidator(ValidationConfigTestHelper.createTestValidationConfig());
 
     context = mock(ConstraintValidatorContext.class);
     ConstraintValidatorContext.ConstraintViolationBuilder violationBuilder =

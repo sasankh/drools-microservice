@@ -1,0 +1,25 @@
+package com.company.rules.validation.cart
+
+import java.util.Map
+import java.util.List
+
+// `not` pattern: fires when a pattern is ABSENT from working memory. Here we check that
+// no Map exists with a non-empty `items` list.
+//
+// IMPORTANT: the first pattern `Map(this["items"] != null)` ensures this rule only fires
+// for inputs that ARE cart-validation requests (items field present). Without that guard,
+// `not Map(items != null, size > 0)` would fire on every request lacking an items field —
+// including pure pricing requests with just {amount: ...}. Combined with the architecture's
+// single-Map fact insertion, the rule then says: "items is present, but no Map exists with
+// items present AND size > 0 — i.e. this cart's items list is empty". Fires only on the
+// {items: []} or {items: null} edge case.
+rule "Reject Empty Cart"
+when
+    $data : Map(this["items"] != null)
+    not Map( this["items"] != null,
+             ((List) this["items"]).size() > 0 )
+then
+    $data.put("validationResult", "REJECTED");
+    $data.put("reason", "EMPTY_CART");
+    $data.put("validationMethod", "not-pattern");
+end

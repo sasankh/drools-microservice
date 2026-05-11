@@ -47,12 +47,12 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 2. [27-development-setup.md](27-development-setup.md) — local Java + Maven setup, conventions
 3. [02-project-structure.md](02-project-structure.md) — annotated directory tree (clickable)
 4. [04-architecture.md](04-architecture.md) — system design
-5. [28-testing-guide.md](28-testing-guide.md) — test suite map (44 files, 589 tests)
+5. [28-testing-guide.md](28-testing-guide.md) — test suite map (45 files, 598 tests)
 
 ### 🏛️ Architect / design reviewer
 
 1. [01-project-overview.md](01-project-overview.md) — capabilities + non-goals
-2. [04-architecture.md](04-architecture.md) — full architecture (8 security layers, threading, atomic-swap)
+2. [04-architecture.md](04-architecture.md) — full architecture (8 security layers, threading, Drools 10 `updateToVersion`)
 3. [14-security-architecture.md](14-security-architecture.md) — threat model + 8 layers
 4. [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md) — failure handling
 5. [36-architecture-decision-records.md](36-architecture-decision-records.md) — 12 ADRs explaining "why"
@@ -79,7 +79,7 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 2. [16-drl-sandboxing.md](16-drl-sandboxing.md) — what the sandbox blocks (read this BEFORE authoring)
 3. [17-rule-development.md](17-rule-development.md) — rule patterns + best practices
 4. [18-rule-id-and-storage-layout.md](18-rule-id-and-storage-layout.md) — rule ID format + storage paths
-5. [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) — 10 working examples with live curl tests
+5. [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) — 17 working examples with live curl tests
 
 ### 🤖 AI agent (Claude Code, Codex, NotebookLM)
 
@@ -98,16 +98,16 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 
 | Layer | Choice | Version |
 |---|---|---|
-| Language | Java (LTS) | 17 (enforced) |
-| Framework | Spring Boot | 3.2.5 |
-| Rule engine | Drools | 8.44.0.Final |
-| Storage | AWS S3 (via SDK v2) | 2.20.56 |
+| Language | Java (LTS) | 25 (enforced) |
+| Framework | Spring Boot | 3.5.3 |
+| Rule engine | Drools | 10.2.0 |
+| Storage | AWS S3 (via SDK v2) | 2.34.0 |
 | Cache | LocalLRU primary; Redis dormant | — |
-| Resilience | Resilience4j | 2.2.0 |
-| Metrics | Micrometer (CloudWatch registry) | 1.12.4 |
+| Resilience | Resilience4j | 2.3.0 |
+| Metrics | Micrometer (CloudWatch registry) | 1.14.7 |
 | Logging | Logback + logstash-logback-encoder | 7.4 |
 | Test | JUnit 5, Mockito, AssertJ, Testcontainers | — |
-| Container | Amazon Corretto 17 Alpine | — |
+| Container | Amazon Corretto 25 Alpine | — |
 
 Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 
@@ -117,12 +117,12 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 
 | Stat | Value |
 |---|---|
-| Total documentation files | **39** (including this one) |
+| Total documentation files | **40** (including this one) |
 | Total Java source files | 57 |
-| Total test files | 44 |
-| Total tests (`@Test` + `@ParameterizedTest`) | **589** |
+| Total test files | 45 |
+| Total tests (`@Test` + `@ParameterizedTest`) | **597** |
 | Test coverage (instruction / branch) | 96.2% / 89.7% |
-| Sample rules in `sample-rules/` | 10 |
+| Sample rules in `sample-rules/` | 17 |
 | Environment variables actually read | 66 |
 | Distinct error codes | 10 |
 | Spring profiles | 4 (`local`, `dev`, `prod`, `docker`) |
@@ -131,12 +131,12 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 | Ports exposed | 2 (8080 main+admin, 8081 actuator) |
 | Sustained throughput target / measured | 100-1000 RPS / 45+ RPS sustained |
 | P99 latency target / measured (cached) | < 100ms / 1-40ms |
-| Docker image size | ~347 MB (Corretto 17 Alpine multi-stage) |
+| Docker image size | ~347 MB (Corretto 25 Alpine multi-stage) |
 | Production-ready security findings | 39 of 42 closed |
 
 ---
 
-## The 39-doc corpus, by category
+## The 40-doc corpus, by category
 
 ### Foundation (00-04)
 - [00-system-overview.md](00-system-overview.md) — this file
@@ -166,11 +166,11 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 ### Rule authoring (17-23)
 - [17-rule-development.md](17-rule-development.md) — comprehensive rule-author guide
 - [18-rule-id-and-storage-layout.md](18-rule-id-and-storage-layout.md) — rule ID format, S3 paths
-- [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) — 10 sample rules with live curl
+- [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) — 17 sample rules with live curl
 - [20-rule-generation-prompt.md](20-rule-generation-prompt.md) — AI prompt (full)
 - [21-rule-generation-prompt-enhanced.md](21-rule-generation-prompt-enhanced.md) — AI prompt (with safety patterns)
 - [22-rule-generation-prompt-concise.md](22-rule-generation-prompt-concise.md) — AI prompt (concise)
-- [23-rule-language-reference.md](23-rule-language-reference.md) — upstream Drools 8 reference
+- [23-rule-language-reference.md](23-rule-language-reference.md) — upstream Drools reference
 
 ### Performance & memory (24-26)
 - [24-jvm-optimization.md](24-jvm-optimization.md) — JVM tuning
@@ -189,13 +189,14 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 ### Onboarding & reference (32-35)
 - [32-getting-started.md](32-getting-started.md) — 30-min quickstart
 - [33-simple-start.md](33-simple-start.md) — rule author quickstart
-- [34-java-setup-guide.md](34-java-setup-guide.md) — Java 17 install
+- [34-java-setup-guide.md](34-java-setup-guide.md) — Java 25 install
 - [35-faq.md](35-faq.md) — 65+ Q&A
 
-### Advanced (36-38)
+### Advanced (36-39)
 - [36-architecture-decision-records.md](36-architecture-decision-records.md) — 12 ADRs + extension points
 - [37-glossary.md](37-glossary.md) — every term defined
 - [38-for-ai-agents.md](38-for-ai-agents.md) — verification rules and pitfalls for AI sessions working on this repo
+- [39-load-test-findings.md](39-load-test-findings.md) — measured numbers, architectural trade-offs, production-planning guidance from the 2026-05-10 load test (1,000 rules, mixed-workload soak)
 
 ### Reference assets
 - [api-reference/openapi.yml](api-reference/openapi.yml) — OpenAPI 3.0 spec
@@ -233,7 +234,7 @@ If you take only one thing from this overview:
 3. **`eval()` is BANNED in DRL** — and the sample rules don't need it. See [16-drl-sandboxing.md](16-drl-sandboxing.md).
 4. **`LocalLRUCache.get()` uses a WRITE lock** (because `LinkedHashMap` mutates internally on get). See [ADR-004](36-architecture-decision-records.md#adr-004-locallrucache-uses-write-lock-on-get).
 5. **`X-Forwarded-For` is explicitly ignored** by the rate limiter (anti-spoofing). Use `X-API-Key` or `X-Client-Id` for stable identity behind a load balancer. See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md).
-6. **Rule refresh doesn't block readers** — atomic-swap pattern. See [ADR-003](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal).
+6. **Rule refresh doesn't block readers** — single long-lived `KieContainer` updated in place via `KieContainer.updateToVersion(ReleaseId)` (compile happens outside the write lock). See [ADR-003](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal) and [39-load-test-findings.md](39-load-test-findings.md).
 7. **JSON uses snake_case (`rule_id`)** — not camelCase. The Java field is `ruleId` but mapped via `@JsonProperty`. See [ADR-008](36-architecture-decision-records.md#adr-008-snake_case-json-via-jsonproperty).
 
 ---
@@ -243,10 +244,10 @@ If you take only one thing from this overview:
 - **No workflow orchestration** — this is single-pass rule execution, not BPMN.
 - **No event broker** — synchronous request/response only.
 - **No multi-tenancy** — single rule namespace per deployment.
-- **No Drools 8 modern syntax** — rule units / OOPath / DataStream not used. See [ADR-001](36-architecture-decision-records.md#adr-001-traditional-drl-syntax-only-not-rule-units--oopath).
+- **No Drools modern syntax** — rule units / OOPath / DataStream not used. See [ADR-001](36-architecture-decision-records.md#adr-001-traditional-drl-syntax-only-not-rule-units--oopath).
 - **No primary authentication** — `AdminAuthFilter` is defense in depth; primary auth is at API gateway.
 - **No Terraform / IaC** — reference architecture documented, not packaged. See [ADR-007](36-architecture-decision-records.md#adr-007-no-terraform-aws-deployment-documented-as-reference-only).
-- **No JMeter performance suite** — load testing deferred per project plan.
+- ~~**No JMeter performance suite** — load testing deferred per project plan.~~ Delivered 2026-05-10 — see [39-load-test-findings.md](39-load-test-findings.md) and `scripts/run-load-test.sh`.
 - **No SDK packages** — partners use HTTP directly. See [11-integration-guide.md](11-integration-guide.md) for code patterns.
 
 ---

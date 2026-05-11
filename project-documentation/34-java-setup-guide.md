@@ -1,15 +1,15 @@
-# Java 17 Setup Guide
+# Java 25 Setup Guide
 
-**Version**: 1.0.0
-**Last Updated**: 2026-02-19
-**Requirement**: Java 17 (LTS) - Enforced by Maven
+**Version**: 2.0.0
+**Last Updated**: 2026-05-09
+**Requirement**: Java 25 (LTS) - Enforced by Maven
 
 ---
 
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Why Java 17?](#why-java-17)
+2. [Why Java 25?](#why-java-25)
 3. [Installation](#installation)
 4. [Environment Setup](#environment-setup)
 5. [Verification](#verification)
@@ -21,11 +21,11 @@
 
 ## Overview
 
-### Java 17 Requirement
+### Java 25 Requirement
 
-This project **requires Java 17** specifically. The Maven Enforcer Plugin will automatically fail builds if using a different Java version.
+This project **requires Java 25** specifically. The Maven Enforcer Plugin will automatically fail builds if using a different Java version.
 
-**Critical**: As of 2026-02-19, the project enforces Java 17 at build time to prevent compatibility issues.
+**Critical**: As of 2026-05-09, the project enforces Java 25 at build time to prevent compatibility issues.
 
 ### What's Enforced
 
@@ -34,7 +34,7 @@ This project **requires Java 17** specifically. The Maven Enforcer Plugin will a
 <plugin>
     <groupId>org.apache.maven.plugins</groupId>
     <artifactId>maven-enforcer-plugin</artifactId>
-    <version>3.3.0</version>
+    <version>3.6.2</version>
     <executions>
         <execution>
             <id>enforce-java</id>
@@ -42,8 +42,8 @@ This project **requires Java 17** specifically. The Maven Enforcer Plugin will a
             <configuration>
                 <rules>
                     <requireJavaVersion>
-                        <version>[17,18)</version>
-                        <message>❌ Java 17 is required!</message>
+                        <version>[25,26)</version>
+                        <message>❌ Java 25 is required!</message>
                     </requireJavaVersion>
                 </rules>
             </configuration>
@@ -52,16 +52,16 @@ This project **requires Java 17** specifically. The Maven Enforcer Plugin will a
 </plugin>
 ```
 
-**Result**: Build fails with clear error message if Java 17 is not used.
+**Result**: Build fails with clear error message if Java 25 is not used.
 
 ---
 
-## Why Java 17?
+## Why Java 25?
 
 ### Technical Reasons
 
-1. **Spring Boot 3.2.5 Baseline**: Requires Java 17 minimum
-2. **Drools 8.44.0.Final Compatibility**: Optimized for Java 17
+1. **Spring Boot 3.5.3 Baseline**: Forward-compatible with Java 25 (minimum is Java 17)
+2. **Drools 10.2.0 Compatibility**: Drools 10 baselines on JDK 17+; Java 25 is forward-compatible
 3. **LTS Support**: Long-term support until September 2026+
 4. **Performance**: G1GC improvements, better memory management
 5. **Security**: Latest security patches and updates
@@ -75,11 +75,11 @@ This project **requires Java 17** specifically. The Maven Enforcer Plugin will a
 
 **Java 21/23** (too new):
 - Potential compatibility issues
-- Untested with Drools 8.44.0
+- Untested with Drools 10.2.0
 - Different GC behavior
 - May introduce bugs
 
-**Result**: Stick with Java 17 for guaranteed compatibility.
+**Result**: Stick with Java 25 for guaranteed compatibility.
 
 ---
 
@@ -87,24 +87,24 @@ This project **requires Java 17** specifically. The Maven Enforcer Plugin will a
 
 ### macOS (Homebrew)
 
-**Install Java 17**:
+**Install Java 25**:
 ```bash
-# Install OpenJDK 17
-brew install openjdk@17
+# Install OpenJDK 25
+brew install openjdk@25
 
 # Link it (optional)
-sudo ln -sfn /opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk \
-    /Library/Java/JavaVirtualMachines/openjdk-17.jdk
+sudo ln -sfn /opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk \
+    /Library/Java/JavaVirtualMachines/openjdk-25.jdk
 
 # Verify installation
-/opt/homebrew/opt/openjdk@17/bin/java --version
+/opt/homebrew/opt/openjdk@25/bin/java --version
 ```
 
 **Expected Output**:
 ```
-openjdk 17.0.x 2024-xx-xx
-OpenJDK Runtime Environment Homebrew (build 17.0.x+x)
-OpenJDK 64-Bit Server VM Homebrew (build 17.0.x+x, mixed mode, sharing)
+openjdk 25.0.x 2024-xx-xx
+OpenJDK Runtime Environment Homebrew (build 25.0.x+x)
+OpenJDK 64-Bit Server VM Homebrew (build 25.0.x+x, mixed mode, sharing)
 ```
 
 ---
@@ -115,8 +115,8 @@ OpenJDK 64-Bit Server VM Homebrew (build 17.0.x+x, mixed mode, sharing)
 # Update package list
 sudo apt update
 
-# Install OpenJDK 17
-sudo apt install openjdk-17-jdk
+# Install OpenJDK 25
+sudo apt install openjdk-25-jdk
 
 # Verify
 java -version
@@ -127,11 +127,11 @@ java -version
 ### Linux (RHEL/CentOS/Fedora)
 
 ```bash
-# Install OpenJDK 17
-sudo dnf install java-17-openjdk-devel
+# Install OpenJDK 25
+sudo dnf install java-25-openjdk-devel
 
 # Or on older systems
-sudo yum install java-17-openjdk-devel
+sudo yum install java-25-openjdk-devel
 
 # Verify
 java -version
@@ -144,7 +144,7 @@ java -version
 **Option 1: Adoptium (Recommended)**
 1. Download from https://adoptium.net/
 2. Select:
-   - Version: 17 (LTS)
+   - Version: 25 (LTS)
    - JVM: HotSpot
    - Operating System: Windows
 3. Run installer
@@ -154,7 +154,7 @@ java -version
    ```
 
 **Option 2: Oracle JDK**
-1. Download from https://www.oracle.com/java/technologies/javase/jdk17-archive-downloads.html
+1. Download from https://www.oracle.com/java/technologies/downloads/ (select JDK 25)
 2. Run installer
 3. Set JAVA_HOME in System Properties
 
@@ -177,14 +177,14 @@ source ./set-java-env.sh
 **Output**:
 ```
 ✅ Java environment configured:
-   JAVA_HOME: /opt/homebrew/Cellar/openjdk@17/17.0.13/libexec/openjdk.jdk/Contents/Home
+   JAVA_HOME: /opt/homebrew/Cellar/openjdk@25/25.0.2/libexec/openjdk.jdk/Contents/Home
    Java version:
-openjdk version "17.0.13" 2024-10-15
-OpenJDK Runtime Environment Homebrew (build 17.0.13+0)
-OpenJDK 64-Bit Server VM Homebrew (build 17.0.13+0, mixed mode, sharing)
+openjdk version "25.0.2" 2024-10-15
+OpenJDK Runtime Environment Homebrew (build 25.0.2+0)
+OpenJDK 64-Bit Server VM Homebrew (build 25.0.2+0, mixed mode, sharing)
 
    Maven will use:
-Java version: 17.0.13, vendor: Homebrew
+Java version: 25.0.2, vendor: Homebrew
 ```
 
 **Limitations**:
@@ -201,8 +201,8 @@ Java version: 17.0.13, vendor: Homebrew
 **Add to `~/.zshrc` or `~/.bashrc`**:
 
 ```bash
-# Java 17 for Drools Rule Engine
-export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+# Java 25 for Drools Rule Engine
+export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 export PATH="$JAVA_HOME/bin:$PATH"
 ```
 
@@ -227,7 +227,7 @@ mvn -version | grep "Java version"
 3. Click "Environment Variables"
 4. Under "System variables", click "New":
    - Variable name: `JAVA_HOME`
-   - Variable value: `C:\Program Files\Java\jdk-17`
+   - Variable value: `C:\Program Files\Java\jdk-25`
 5. Find "Path" variable, click "Edit"
 6. Add new entry: `%JAVA_HOME%\bin`
 7. Click "OK" on all dialogs
@@ -256,13 +256,13 @@ If you have multiple Java versions installed:
 ```
 Matching Java Virtual Machines (3):
     23.0.1 (arm64) "Homebrew" - "OpenJDK 23.0.1" /opt/homebrew/Cellar/openjdk/23.0.1/...
-    17.0.13 (arm64) "Homebrew" - "OpenJDK 17.0.13" /opt/homebrew/Cellar/openjdk@17/17.0.13/...
+    25.0.2 (arm64) "Homebrew" - "OpenJDK 25.0.2" /opt/homebrew/Cellar/openjdk@25/25.0.2/...
     11.0.15 (arm64) "Homebrew" - "OpenJDK 11.0.15" /opt/homebrew/Cellar/openjdk@11/11.0.15/...
 ```
 
-**Switch to Java 17**:
+**Switch to Java 25**:
 ```bash
-export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 ```
 
 ---
@@ -274,8 +274,8 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 17)
 # List available Java versions
 sudo update-alternatives --config java
 
-# Select Java 17 from the list
-# Example: Enter '2' to select java-17-openjdk
+# Select Java 25 from the list
+# Example: Enter '2' to select java-25-openjdk
 
 # Verify
 java -version
@@ -293,11 +293,11 @@ scoop install jenv
 # List versions
 jenv versions
 
-# Set Java 17 for current directory
-jenv local 17
+# Set Java 25 for current directory
+jenv local 25
 
 # Or globally
-jenv global 17
+jenv global 25
 ```
 
 ---
@@ -313,18 +313,19 @@ java -version
 
 **Expected**:
 ```
-openjdk version "17.0.x"
+openjdk version "25.0.x"
 ```
 
 **NOT**:
 ```
-openjdk version "23.0.x"  ❌ TOO NEW
-openjdk version "11.0.x"  ❌ TOO OLD
+openjdk version "26.0.x"  ❌ TOO NEW
+openjdk version "21.0.x"  ❌ TOO OLD
+openjdk version "17.0.x"  ❌ TOO OLD
 ```
 
 ---
 
-### Verify Maven Uses Java 17
+### Verify Maven Uses Java 25
 
 ```bash
 # Check Maven's Java version
@@ -334,12 +335,13 @@ mvn -version
 **Look for**:
 ```
 Apache Maven 3.x.x
-Java version: 17.0.x, vendor: Homebrew
+Java version: 25.0.x, vendor: Homebrew
 ```
 
 **NOT**:
 ```
-Java version: 23.0.x  ❌ WRONG
+Java version: 17.0.x  ❌ WRONG
+Java version: 21.0.x  ❌ WRONG
 ```
 
 ---
@@ -356,11 +358,11 @@ mvn clean compile
 
 **Success Output**:
 ```
-[INFO] --- enforcer:3.3.0:enforce (enforce-java) @ drools-rule-engine ---
+[INFO] --- enforcer:3.6.2:enforce (enforce-java) @ drools-rule-engine ---
 [INFO] Rule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion passed
 [INFO] Rule 1: org.apache.maven.enforcer.rules.version.RequireMavenVersion passed
 [INFO]
-[INFO] --- compiler:3.11.0:compile (default-compile) @ drools-rule-engine ---
+[INFO] --- compiler:3.15.0:compile (default-compile) @ drools-rule-engine ---
 [INFO] Compiling 54 source files
 [INFO] ------------------------------------------------------------------------
 [INFO] BUILD SUCCESS
@@ -369,9 +371,9 @@ mvn clean compile
 
 **Failure Output** (if wrong Java):
 ```
-[ERROR] Failed to execute goal org.apache.maven.plugins:maven-enforcer-plugin:3.3.0:enforce
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-enforcer-plugin:3.6.2:enforce
 [ERROR] Rule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion failed with message:
-[ERROR] ❌ Java 17 is required! Current version is not compatible.
+[ERROR] ❌ Java 25 is required! Current version is not compatible.
 ```
 
 ---
@@ -383,7 +385,7 @@ mvn clean compile
 **Symptom**:
 ```bash
 $ java -version
-openjdk version "17.0.13"
+openjdk version "25.0.2"
 
 $ mvn -version
 Java version: 23.0.1  ❌
@@ -394,32 +396,32 @@ Java version: 23.0.1  ❌
 **Solution**:
 ```bash
 # Set JAVA_HOME explicitly before running Maven
-export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 
 # Verify
 mvn -version
 
 # Make permanent by adding to shell config
-echo 'export JAVA_HOME=$(/usr/libexec/java_home -v 17)' >> ~/.zshrc
+echo 'export JAVA_HOME=$(/usr/libexec/java_home -v 25)' >> ~/.zshrc
 source ~/.zshrc
 ```
 
 ---
 
-### Problem 2: "Java 17 not found"
+### Problem 2: "Java 25 not found"
 
 **Symptom**:
 ```bash
-$ /usr/libexec/java_home -v 17
-Unable to find any JVMs matching version "17"
+$ /usr/libexec/java_home -v 25
+Unable to find any JVMs matching version "25"
 ```
 
-**Cause**: Java 17 not installed
+**Cause**: Java 25 not installed
 
 **Solution**:
 ```bash
 # macOS
-brew install openjdk@17
+brew install openjdk@25
 
 # Verify
 /usr/libexec/java_home -V
@@ -431,7 +433,7 @@ brew install openjdk@17
 
 **Symptom**:
 ```
-[ERROR] Java 17 is required! Current version is not compatible.
+[ERROR] Java 25 is required! Current version is not compatible.
 ```
 
 **Debug Steps**:
@@ -439,7 +441,7 @@ brew install openjdk@17
 1. **Verify JAVA_HOME is set**:
    ```bash
    echo $JAVA_HOME
-   # Should show Java 17 path
+   # Should show Java 25 path
    ```
 
 2. **Verify java command**:
@@ -455,7 +457,7 @@ brew install openjdk@17
 
 4. **Try explicit JAVA_HOME**:
    ```bash
-   export JAVA_HOME=/opt/homebrew/Cellar/openjdk@17/17.0.13/libexec/openjdk.jdk/Contents/Home
+   export JAVA_HOME=/opt/homebrew/Cellar/openjdk@25/25.0.2/libexec/openjdk.jdk/Contents/Home
    mvn clean compile
    ```
 
@@ -473,11 +475,11 @@ brew install openjdk@17
 
 1. File → Project Structure
 2. Project Settings → Project
-3. SDK: Select Java 17
-4. Language level: 17
+3. SDK: Select Java 25
+4. Language level: 25
 5. File → Settings → Build, Execution, Deployment → Build Tools → Maven
 6. Maven home directory: Point to Maven 3.8+
-7. JRE: Use Project JDK (Java 17)
+7. JRE: Use Project JDK (Java 25)
 
 ---
 
@@ -488,11 +490,11 @@ brew install openjdk@17
 1. Window → Preferences
 2. Java → Installed JREs
 3. Add → Standard VM
-4. Browse to Java 17 installation
+4. Browse to Java 25 installation
 5. Check the box to make it default
 6. Project → Properties → Java Compiler
 7. Enable project specific settings
-8. Compiler compliance level: 17
+8. Compiler compliance level: 25
 
 ---
 
@@ -505,12 +507,12 @@ Update `settings.json`:
 {
     "java.configuration.runtimes": [
         {
-            "name": "JavaSE-17",
-            "path": "/opt/homebrew/Cellar/openjdk@17/17.0.13/libexec/openjdk.jdk/Contents/Home",
+            "name": "JavaSE-25",
+            "path": "/opt/homebrew/Cellar/openjdk@25/25.0.2/libexec/openjdk.jdk/Contents/Home",
             "default": true
         }
     ],
-    "java.home": "/opt/homebrew/Cellar/openjdk@17/17.0.13/libexec/openjdk.jdk/Contents/Home"
+    "java.home": "/opt/homebrew/Cellar/openjdk@25/25.0.2/libexec/openjdk.jdk/Contents/Home"
 }
 ```
 
@@ -524,12 +526,12 @@ Update `settings.json`:
 1. File → Open
 2. Select `pom.xml`
 3. Open as Project
-4. IntelliJ will auto-detect Java 17 requirement
+4. IntelliJ will auto-detect Java 25 requirement
 
 **Verify**:
 1. File → Project Structure
-2. Project SDK should be Java 17
-3. Language level should be 17
+2. Project SDK should be Java 25
+3. Language level should be 25
 
 **Maven Configuration**:
 1. View → Tool Windows → Maven
@@ -548,7 +550,7 @@ Update `settings.json`:
 **Configuration**:
 1. Ctrl/Cmd + Shift + P
 2. "Java: Configure Java Runtime"
-3. Select Java 17 as default
+3. Select Java 25 as default
 
 **Build**:
 1. Open integrated terminal
@@ -567,7 +569,7 @@ Update `settings.json`:
 **Configure**:
 1. Project → Properties
 2. Java Compiler → Compliance level: 17
-3. Java Build Path → Libraries → Edit JRE → Select Java 17
+3. Java Build Path → Libraries → Edit JRE → Select Java 25
 
 ---
 
@@ -588,7 +590,7 @@ docker-compose exec app mvn clean package
 docker build -t drools-engine .
 ```
 
-**Container Uses**: Amazon Corretto 17 (Alpine) - built into Dockerfile
+**Container Uses**: Amazon Corretto 25 (Alpine) - built into Dockerfile
 
 **Benefits**:
 - No local Java setup needed
@@ -605,11 +607,11 @@ docker build -t drools-engine .
 # List Java versions (macOS)
 /usr/libexec/java_home -V
 
-# Set Java 17 (macOS)
-export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+# Set Java 25 (macOS)
+export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 
-# Set Java 17 (Linux)
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
+# Set Java 25 (Linux)
+export JAVA_HOME=/usr/lib/jvm/java-25-openjdk
 
 # Verify Java
 java -version
@@ -636,13 +638,13 @@ source ./set-java-env.sh
 
 ### Checklist
 
-- [ ] Java 17 installed
-- [ ] JAVA_HOME set to Java 17
+- [ ] Java 25 installed
+- [ ] JAVA_HOME set to Java 25
 - [ ] PATH updated
-- [ ] `java -version` shows 17.x.x
-- [ ] `mvn -version` shows Java 17
+- [ ] `java -version` shows 25.x.x
+- [ ] `mvn -version` shows Java 25
 - [ ] `mvn clean compile` succeeds
-- [ ] IDE configured for Java 17
+- [ ] IDE configured for Java 25
 
 ### Support
 
@@ -654,5 +656,5 @@ If issues persist:
 
 ---
 
-**Last Updated**: 2026-02-19
-**Related Docs**: troubleshooting.md, deployment.md, configuration.md
+**Last Updated**: 2026-05-09
+**Related Docs**: 31-troubleshooting.md, 06-deployment.md, 08-configuration.md

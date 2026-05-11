@@ -106,7 +106,7 @@ class RuleTest {
       Rule rule1 = new Rule("test.rule", "content1", RuleMetadata.createNew());
       Rule rule2 = new Rule("test.rule", "content2", RuleMetadata.createNew());
 
-      assertThat(rule1.hashCode()).isEqualTo(rule2.hashCode());
+      assertThat(rule1).hasSameHashCodeAs(rule2);
     }
 
     @Test
@@ -130,8 +130,7 @@ class RuleTest {
 
       String result = rule.toString();
 
-      assertThat(result).contains("pricing.discount");
-      assertThat(result).startsWith("Rule{");
+      assertThat(result).contains("pricing.discount").startsWith("Rule{");
     }
   }
 }

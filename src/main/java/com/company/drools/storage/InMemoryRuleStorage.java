@@ -26,6 +26,10 @@ public class InMemoryRuleStorage {
     log.info("Initializing sample rules for testing");
 
     // Sample rule 1: Simple discount rule
+    // NOTE: Uses Number/.doubleValue() pattern instead of (Double) direct cast.
+    // Drools 10's executable model is strict about wrapper coercion: (Double)100 (Integer)
+    // throws ClassCastException. Jackson parses JSON `100` as Integer by default. The
+    // ((Number) ...).doubleValue() chain accepts both Integer and Double.
     String discountRule =
         """
         package com.company.rules.pricing.discount
@@ -35,11 +39,11 @@ public class InMemoryRuleStorage {
 
         rule "Simple Discount Rule"
         when
-            $data : Map(this["amount"] != null, (Double)this["amount"] > 50.0)
+            $data : Map(this["amount"] != null, ((Number)this["amount"]).doubleValue() > 50.0)
         then
             Map result = new HashMap();
-            Double amount = (Double) $data.get("amount");
-            Double discount = amount * 0.10; // 10% discount
+            double amount = ((Number) $data.get("amount")).doubleValue();
+            double discount = amount * 0.10; // 10% discount
 
             result.put("amount", amount);
             result.put("discount", discount);
@@ -63,12 +67,12 @@ public class InMemoryRuleStorage {
             $data : Map(
                 this["customer_tier"] == "vip",
                 this["amount"] != null,
-                (Double)this["amount"] > 25.0
+                ((Number)this["amount"]).doubleValue() > 25.0
             )
         then
             Map result = new HashMap();
-            Double amount = (Double) $data.get("amount");
-            Double discount = amount * 0.20; // 20% discount for VIP
+            double amount = ((Number) $data.get("amount")).doubleValue();
+            double discount = amount * 0.20; // 20% discount for VIP
 
             result.put("amount", amount);
             result.put("discount", discount);

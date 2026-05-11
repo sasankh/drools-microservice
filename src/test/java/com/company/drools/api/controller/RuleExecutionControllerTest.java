@@ -23,10 +23,10 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(
@@ -41,7 +41,7 @@ class RuleExecutionControllerTest {
 
   @Autowired private MockMvc mockMvc;
 
-  @MockBean private DroolsEngineService droolsEngineService;
+  @MockitoBean private DroolsEngineService droolsEngineService;
 
   // --- Happy Path Tests (3) ---
 
@@ -294,5 +294,16 @@ class RuleExecutionControllerTest {
       controllerLogger.detachAppender(controllerAppender);
       handlerLogger.detachAppender(handlerAppender);
     }
+  }
+
+  // --- Malformed JSON (Finding #2) ---
+
+  @Test
+  void testExecuteRule_MalformedJson_Returns400InvalidInput() throws Exception {
+    mockMvc
+        .perform(post("/execute-rule").contentType(MediaType.APPLICATION_JSON).content("{"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error.code").value("INVALID_INPUT"))
+        .andExpect(jsonPath("$.error.message").value("Request body is not valid JSON"));
   }
 }

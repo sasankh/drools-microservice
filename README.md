@@ -4,7 +4,7 @@ A high-performance business rule execution microservice built with Spring Boot a
 
 > ## 📚 Full documentation
 >
-> The full documentation lives in [`project-documentation/`](project-documentation/) — 39 docs covering architecture, APIs, security, deployment, operations, and rule authoring.
+> The full documentation lives in [`project-documentation/`](project-documentation/) — 40 docs covering architecture, APIs, security, deployment, operations, and rule authoring.
 >
 > **Start here**: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md) — the entry point with role-based reading paths.
 >
@@ -33,9 +33,9 @@ Client Request → REST API → Rule Engine → Cache Layer → Storage Layer
 
 ### Tech Stack
 
-- **Java 17** - Runtime platform (enforced by Maven Enforcer Plugin)
-- **Spring Boot 3.2.5** - Application framework with security and validation
-- **Drools 8.44.0.Final** - Business rules engine
+- **Java 25** - Runtime platform (enforced by Maven Enforcer Plugin)
+- **Spring Boot 3.5.3** - Application framework with security and validation
+- **Drools 10.2.0** - Business rules engine
 - **AWS S3** - Rule storage (with LocalStack for development)
 - **Redis** - Distributed caching (optional)
 - **Micrometer** - Vendor-agnostic metrics and monitoring
@@ -60,12 +60,12 @@ Client Request → REST API → Rule Engine → Cache Layer → Storage Layer
 
 ### Prerequisites
 
-- **Java 17** (Required - enforced by Maven Enforcer Plugin)
+- **Java 25** (Required - enforced by Maven Enforcer Plugin)
 - Maven 3.8+
 - Docker and Docker Compose
 - AWS CLI (for S3 setup)
 
-**Important**: This project requires **Java 17** specifically. The build will fail if using a different Java version.
+**Important**: This project requires **Java 25** specifically. The build will fail if using a different Java version.
 
 ### 1. Clone the Repository
 
@@ -74,7 +74,7 @@ git clone <repository-url>
 cd drools-microservice
 ```
 
-### 2. Set Up Java 17 Environment
+### 2. Set Up Java 25 Environment
 
 For local development (not needed for Docker-only):
 
@@ -83,15 +83,15 @@ For local development (not needed for Docker-only):
 source ./set-java-env.sh
 
 # Option 2: Permanent setup (add to ~/.zshrc or ~/.bashrc)
-export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 export PATH="$JAVA_HOME/bin:$PATH"
 
-# Verify Java 17 is active
-java -version   # Should show "openjdk version 17.x.x"
-mvn -version    # Should show "Java version: 17.x.x"
+# Verify Java 25 is active
+java -version   # Should show "openjdk version 25.x.x"
+mvn -version    # Should show "Java version: 25.x.x"
 ```
 
-**Note**: The Maven Enforcer Plugin will automatically verify you're using Java 17 and fail the build with a clear error message if not.
+**Note**: The Maven Enforcer Plugin will automatically verify you're using Java 25 and fail the build with a clear error message if not.
 
 ### 3. One-Command Development Environment Setup
 
@@ -136,7 +136,7 @@ docker-compose logs -f app
 
 #### Option B: Local Java Development
 ```bash
-# Build the application (requires Java 17 + Maven)
+# Build the application (requires Java 25 + Maven)
 mvn clean compile
 
 # Run the application
@@ -152,7 +152,7 @@ mvn spring-boot:run -Dspring.profiles.active=dev
 docker build -t drools-rule-engine:latest .
 
 # Run comprehensive Docker validation
-./docker-build-test.sh
+./scripts/docker-build-test.sh
 
 # Run the container
 docker run -p 8080:8080 -p 8081:8081 \
@@ -199,20 +199,20 @@ Expected response:
 
 ### System Requirements
 
-- **Java**: OpenJDK 17 or Oracle JDK 17+
+- **Java**: OpenJDK 25 or Oracle JDK 25+
 - **Memory**: Minimum 2GB RAM, recommended 4GB+
 - **Storage**: 1GB free disk space
 - **Network**: Internet access for Maven dependencies
 
 ### Dependencies Installation
 
-#### Java 17
+#### Java 25
 ```bash
 # Ubuntu/Debian
-sudo apt update && sudo apt install openjdk-17-jdk
+sudo apt update && sudo apt install openjdk-25-jdk
 
 # macOS with Homebrew
-brew install openjdk@17
+brew install openjdk@25
 
 # Windows
 # Download from https://adoptium.net/temurin/releases/
@@ -572,7 +572,7 @@ done
 
 Rules are written in Drools (.drl) format and stored with hierarchical organization:
 
-#### Rule Structure (10 Sample Rules Included)
+#### Rule Structure (17 Sample Rules Included)
 ```
 sample-rules/                          # Single source of truth for all .drl files
 ├── pricing/
@@ -728,7 +728,7 @@ docker-compose up -d
 ./init-localstack.sh
 
 # Test LocalStack integration
-./test-localstack.sh
+./scripts/test-localstack.sh
 
 # View all services status
 docker-compose ps
@@ -751,7 +751,7 @@ docker-compose ps
    # Or upload manually:
    aws --endpoint-url=http://localhost:4566 s3 sync sample-rules/ s3://local-rules/
 
-   # Verify rules uploaded (should show 10 .drl files)
+   # Verify rules uploaded (should show 17 .drl files)
    aws --endpoint-url=http://localhost:4566 s3 ls s3://local-rules/ --recursive
    ```
 
@@ -821,17 +821,181 @@ mvn test -Dtest=*IntegrationTest
 mvn test -Dtest=S3StorageIntegrationTest
 ```
 
-### Performance Testing
-```bash
-# Load testing with JMeter
-mvn jmeter:jmeter
+### Quick E2E & Load Test
 
-# Manual performance test
-for i in {1..100}; do
-  curl -X POST http://localhost:8080/execute-rule \
-    -H "Content-Type: application/json" \
-    -d '{"rule_id": "simple.discount", "data": {"amount": 100}}'
+Run this whenever you want to verify the full stack is healthy — rules loading from S3, execution working, hot reload uninterrupted, memory stable.
+
+#### One-command option
+
+The script [`scripts/e2e-load-test.sh`](scripts/e2e-load-test.sh) runs the entire sequence below unattended:
+
+```bash
+# Full run (tears down stack at end)
+./scripts/e2e-load-test.sh
+
+# Keep stack running after test (useful for debugging)
+./scripts/e2e-load-test.sh --no-teardown
+
+# Skip docker compose build if image is already current
+./scripts/e2e-load-test.sh --skip-build
+```
+
+The script patches `docker-compose.yml` to disable rate limiting for the load test and restores it automatically on exit (even on failure or Ctrl-C). Exits non-zero if any check fails — CI-friendly.
+
+**Baseline from 2026-05-11**: 157,754 requests, **0 errors (0%)**, ~518 RPS, heap stable 180–340 MB, hot reload at 2 min with 0 dropped requests.
+
+---
+
+Or run the steps manually:
+
+#### Step 1 — Start the stack
+
+```bash
+docker compose up -d
+```
+
+Wait for the app to be ready (usually instant if images are cached):
+
+```bash
+curl http://localhost:8081/actuator/health   # should return {"status":"UP"}
+```
+
+#### Step 2 — Upload sample rules to LocalStack S3
+
+```bash
+./init-localstack.sh
+```
+
+This creates the `local-rules` bucket and uploads all 17 sample DRL files.
+
+#### Step 3 — Load rules into the engine
+
+```bash
+curl -s -X POST http://localhost:8080/admin/refresh-rules \
+  -H "X-Admin-API-Key: admin-secret" | jq '{status, rules_loaded, rules_failed}'
+# Expected: { "status": "completed", "rules_loaded": 17, "rules_failed": 0 }
+```
+
+#### Step 4 — Smoke test a few rules
+
+```bash
+# Simple discount
+curl -s -X POST http://localhost:8080/execute-rule \
+  -H "Content-Type: application/json" \
+  -d '{"rule_id":"pricing.discount.simple","data":{"amount":150,"customer_tier":"gold"}}' | jq .
+
+# Bulk discount
+curl -s -X POST http://localhost:8080/execute-rule \
+  -H "Content-Type: application/json" \
+  -d '{"rule_id":"pricing.discount.bulk","data":{"amount":500,"quantity":20}}' | jq .
+
+# Age validation
+curl -s -X POST http://localhost:8080/execute-rule \
+  -H "Content-Type: application/json" \
+  -d '{"rule_id":"validation.customer.age","data":{"age":25,"customer_id":"cust-001"}}' | jq .
+```
+
+#### Step 5 — Hot reload test
+
+```bash
+# Reload all rules and verify 0 failures
+curl -s -X POST http://localhost:8080/admin/refresh-rules \
+  -H "X-Admin-API-Key: admin-secret" | jq '{status, rules_loaded, rules_failed, duration_ms}'
+
+# Confirm rules still execute after reload
+curl -s -X POST http://localhost:8080/execute-rule \
+  -H "Content-Type: application/json" \
+  -d '{"rule_id":"pricing.discount.simple","data":{"amount":100,"customer_tier":"gold"}}' | jq .
+```
+
+#### Step 6 — Memory stability check (5 rapid reloads)
+
+```bash
+for i in 1 2 3 4 5; do
+  curl -s -X POST http://localhost:8080/admin/refresh-rules \
+    -H "X-Admin-API-Key: admin-secret" > /dev/null
+  sleep 2
+  curl -s http://localhost:8080/admin/memory/info | \
+    python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Reload $i: heap={d[\"heap\"][\"usedMB\"]}MB ({d[\"heap\"][\"usagePercent\"]}%)')"
 done
+```
+
+Heap should oscillate (G1GC collecting between reloads) — not grow monotonically. After 5 reloads, trigger a GC and verify:
+
+```bash
+curl -s -X POST http://localhost:8080/admin/memory/gc -H "X-Admin-API-Key: admin-secret" > /dev/null
+sleep 3
+curl -s http://localhost:8080/admin/memory/info | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Post-GC: {d[\"heap\"][\"usedMB\"]}MB / {d[\"heap\"][\"maxMB\"]}MB ({d[\"heap\"][\"usagePercent\"]}%)')"
+# Expected: < 100MB after GC (no leak)
+```
+
+#### Step 7 — 5-minute load test with hot reload mid-run
+
+> **Note:** The default rate limit is 1000 req/min per client. For load testing from a single machine (all requests share one IP), temporarily disable it:
+>
+> In `docker-compose.yml`, add `- DROOLS_RATE_LIMITING_ENABLED=false` under the app's `environment:` block, then `docker compose stop app && docker compose up -d app`. Remove it again when done.
+
+```bash
+# Save this as /tmp/loadtest.sh and run: bash /tmp/loadtest.sh
+DURATION=300; WORKERS=20; BASE_URL="http://localhost:8080/execute-rule"
+PAYLOADS=(
+  '{"rule_id":"pricing.discount.simple","data":{"amount":150,"customer_tier":"gold"}}'
+  '{"rule_id":"pricing.discount.bulk","data":{"amount":500,"quantity":20}}'
+  '{"rule_id":"seasonal.holiday.blackfriday","data":{"amount":200,"customer_tier":"silver"}}'
+  '{"rule_id":"validation.customer.age","data":{"age":30,"customer_id":"cust-100"}}'
+  '{"rule_id":"pricing.shipping.standard","data":{"amount":80,"weight":2.5}}'
+  '{"rule_id":"pricing.discount.vip","data":{"amount":300,"customer_tier":"vip"}}'
+)
+TMPDIR_LT=$(mktemp -d); START=$(date +%s); END=$((START + DURATION)); RELOAD_DONE=0
+
+worker() {
+  local pidx=$(( $1 % 6 )); local payload="${PAYLOADS[$pidx]}"
+  while [ $(date +%s) -lt $END ]; do
+    HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL" \
+      -H "Content-Type: application/json" -d "$payload" --max-time 5)
+    if [ "$HTTP" = "200" ]; then echo 1 >> $TMPDIR_LT/s; else echo "$HTTP" >> $TMPDIR_LT/e; fi
+  done
+}
+
+echo "=== Load test: $WORKERS workers × ${DURATION}s ==="
+for w in $(seq 1 $WORKERS); do worker $w & done
+
+LAST=0
+while [ $(date +%s) -lt $END ]; do
+  NOW=$(date +%s); ELAPSED=$((NOW - START))
+  if [ $RELOAD_DONE -eq 0 ] && [ $ELAPSED -ge 120 ]; then
+    echo ""; echo "  >>> HOT RELOAD at ${ELAPSED}s <<<"
+    curl -s -X POST http://localhost:8080/admin/refresh-rules \
+      -H "X-Admin-API-Key: admin-secret" | \
+      python3 -c "import sys,json; d=json.load(sys.stdin); print(f'rules={d[\"rules_loaded\"]} failed={d[\"rules_failed\"]} ms={d[\"duration_ms\"]}')"
+    RELOAD_DONE=1
+  fi
+  if [ $((NOW - LAST)) -ge 30 ] && [ $ELAPSED -gt 0 ]; then
+    SUC=$(wc -l < $TMPDIR_LT/s 2>/dev/null | tr -d ' '); SUC=${SUC:-0}
+    ERR=$(wc -l < $TMPDIR_LT/e 2>/dev/null | tr -d ' '); ERR=${ERR:-0}
+    TOT=$((SUC + ERR)); RPS=$((TOT / ELAPSED))
+    MEM=$(curl -s http://localhost:8080/admin/memory/info 2>/dev/null | \
+      python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{d['heap']['usedMB']}MB ({d['heap']['usagePercent']}%)\")" 2>/dev/null || echo "?")
+    echo "  [${ELAPSED}s] success=$SUC errors=$ERR rps~$RPS heap=$MEM"; LAST=$NOW
+  fi
+  sleep 5
+done
+
+wait; ELAPSED=$(($(date +%s) - START))
+SUC=$(wc -l < $TMPDIR_LT/s 2>/dev/null | tr -d ' '); SUC=${SUC:-0}
+ERR=$(wc -l < $TMPDIR_LT/e 2>/dev/null | tr -d ' '); ERR=${ERR:-0}
+TOT=$((SUC + ERR))
+ERR_PCT=$(echo "scale=2; $ERR * 100 / $TOT" | bc 2>/dev/null || echo "0")
+echo ""; echo "=== RESULTS: ${ELAPSED}s | total=$TOT success=$SUC errors=$ERR ($ERR_PCT%) rps~$((TOT/ELAPSED)) ==="
+echo "Final heap: $(curl -s http://localhost:8080/admin/memory/info | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{d['heap']['usedMB']}MB ({d['heap']['usagePercent']}%)\")")"
+rm -rf $TMPDIR_LT
+```
+
+#### Step 8 — Tear down
+
+```bash
+docker compose down
 ```
 
 ### Testing Different Storage Backends
@@ -862,7 +1026,7 @@ mvn spring-boot:run
 docker build -t drools-rule-engine:latest .
 
 # Test Docker build (validates image and health checks)
-./docker-build-test.sh
+./scripts/docker-build-test.sh
 
 # Run with environment variables
 docker run -p 8080:8080 -p 8081:8081 \
@@ -894,7 +1058,7 @@ docker-compose down
 
 #### Docker Image Details
 
-- **Base Image**: Amazon Corretto 17 Alpine (JDK)
+- **Base Image**: Amazon Corretto 25 Alpine (JDK)
 - **Final Image Size**: ~347MB (optimized multi-stage build)
 - **Security**: Runs as non-root user (`appuser`)
 - **Health Checks**: Built-in HTTP health endpoint monitoring
@@ -1016,7 +1180,7 @@ docker build --no-cache -t drools-rule-engine:latest .
 docker info
 
 # Verify Dockerfile syntax
-./docker-build-test.sh
+./scripts/docker-build-test.sh
 ```
 
 #### 2. Container startup issues
@@ -1057,7 +1221,7 @@ docker-compose down && docker-compose up -d
 docker-compose logs app
 
 # Local development - check Java version
-java -version  # Should be 17+
+java -version  # Should be 25
 
 # Check if ports are available
 lsof -i :8080
@@ -1133,5 +1297,5 @@ docker-compose exec app jstat -gc 1
 
 For support and questions:
 - Create an issue in this repository
-- Check the [project documentation](project-documentation/00-system-overview.md) — entry point for all 39 docs
+- Check the [project documentation](project-documentation/00-system-overview.md) — entry point for all 40 docs
 - Review the [troubleshooting guide](project-documentation/31-troubleshooting.md) and [FAQ](project-documentation/35-faq.md)

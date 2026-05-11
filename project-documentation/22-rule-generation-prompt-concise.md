@@ -165,8 +165,8 @@ I'll create a tiered discount rule for Silver customers. Let me clarify a few th
 Include this with your request for best results:
 
 **MY ENVIRONMENT:**
-- Drools Version: 8.44.0.Final
-- Spring Boot: 3.2.5
+- Drools Version: 10.2.0
+- Spring Boot: 3.5.3
 - API Endpoint: POST http://localhost:8080/execute-rule
 - S3 Bucket: local-rules (LocalStack)
 

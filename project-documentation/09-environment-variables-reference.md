@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, operators, AI agents (the lookup table for "what env var controls X?") |
 | **Purpose** | Exhaustive catalog of every environment variable the code reads. The single source of truth for runtime configuration. |
-| **Last verified against** | [`application.yml`](../src/main/resources/application.yml) and `@Value` annotations in `src/main/java/com/company/drools/config/` on 2026-05-08 |
+| **Last verified against** | [`application.yml`](../src/main/resources/application.yml) and `@Value` annotations in `src/main/java/com/company/drools/config/` on 2026-05-10 |
 | **Related docs** | [05-environments-and-profiles.md](05-environments-and-profiles.md), [08-configuration.md](08-configuration.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
