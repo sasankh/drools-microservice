@@ -137,9 +137,10 @@ class AdminAuthFilterTest extends BaseUnitTest {
       assertThat(parsed).containsKey("error");
       @SuppressWarnings("unchecked")
       java.util.Map<String, Object> error = (java.util.Map<String, Object>) parsed.get("error");
-      assertThat(error.get("code")).isEqualTo("UNAUTHORIZED");
-      assertThat(error.get("message")).isEqualTo("Admin API key required");
-      assertThat(error).containsKey("timestamp");
+      assertThat(error)
+          .containsEntry("code", "UNAUTHORIZED")
+          .containsEntry("message", "Admin API key required")
+          .containsKey("timestamp");
     }
   }
 

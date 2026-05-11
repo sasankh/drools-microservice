@@ -1,6 +1,7 @@
 package com.company.drools.storage;
 
 import com.company.drools.api.exception.RuleNotFoundException;
+import com.company.drools.api.exception.RuleStorageException;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
 import java.io.IOException;
@@ -89,8 +90,7 @@ public class LocalFileStorage implements RuleStorage {
 
       log.info("Successfully saved rule: {} to {}", rule.getRuleId(), filePath);
     } catch (IOException e) {
-      log.error("Failed to save rule: {} to {}", rule.getRuleId(), filePath, e);
-      throw new RuntimeException("Failed to save rule: " + rule.getRuleId(), e);
+      throw new RuleStorageException("Failed to save rule: " + rule.getRuleId(), e);
     }
   }
 
@@ -107,8 +107,7 @@ public class LocalFileStorage implements RuleStorage {
       Files.delete(filePath);
       log.info("Successfully deleted rule: {} from {}", ruleId, filePath);
     } catch (IOException e) {
-      log.error("Failed to delete rule: {} from {}", ruleId, filePath, e);
-      throw new RuntimeException("Failed to delete rule: " + ruleId, e);
+      throw new RuleStorageException("Failed to delete rule: " + ruleId, e);
     }
   }
 

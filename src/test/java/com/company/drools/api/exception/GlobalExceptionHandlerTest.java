@@ -3,11 +3,11 @@ package com.company.drools.api.exception;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.company.drools.api.dto.RuleExecutionResponse;
+import com.fasterxml.jackson.core.JsonParseException;
 import java.lang.reflect.Method;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import com.fasterxml.jackson.core.JsonParseException;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -88,9 +88,11 @@ class GlobalExceptionHandlerTest {
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     assertThat(response.getBody().getError().getCode()).isEqualTo("INVALID_INPUT");
-    assertThat(response.getBody().getError().getMessage()).isEqualTo("Request body is not valid JSON");
+    assertThat(response.getBody().getError().getMessage())
+        .isEqualTo("Request body is not valid JSON");
     // Raw parser cause must NOT be echoed to client.
-    assertThat(response.getBody().getError().getDetails()).doesNotContain("Unexpected end-of-input");
+    assertThat(response.getBody().getError().getDetails())
+        .doesNotContain("Unexpected end-of-input");
   }
 
   @Test

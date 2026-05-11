@@ -67,7 +67,7 @@ The `set-java-env.sh` is macOS-specific (uses `/usr/libexec/java_home`). Linux u
 ```bash
 mvn clean compile         # compile only
 # OR
-mvn clean package         # compile + run all 598 tests + package jar
+mvn clean package         # compile + run all 597 tests + package jar
 # OR
 mvn clean package -DskipTests   # if you want to skip tests
 ```
@@ -315,7 +315,7 @@ refactor(cache): extract RuleCache interface
 
 PR checklist before merging:
 - [ ] `mvn spotless:apply` ran
-- [ ] `mvn test` passes (all 589+ tests)
+- [ ] `mvn test` passes (all 597+ tests)
 - [ ] `mvn spotbugs:check` clean (or new warnings explained)
 - [ ] If env var added: documented in [09-environment-variables-reference.md](09-environment-variables-reference.md)
 - [ ] If endpoint added: documented in [10-api-reference.md](10-api-reference.md)
@@ -376,7 +376,7 @@ If any step fails locally, fix and re-run before pushing.
 
 You can:
 - Build: `mvn package`
-- Run tests: `mvn test` (all 589 pass)
+- Run tests: `mvn test` (all 597 pass)
 - Run service: `mvn spring-boot:run -Dspring-boot.run.profiles=dev`
 - Hit `/execute-rule` and get a result
 - Format code: `mvn spotless:apply`

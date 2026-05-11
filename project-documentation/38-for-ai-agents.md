@@ -44,7 +44,7 @@ If you can't cite, don't write. If you cited and the cite is wrong, the doc is w
 - "9 distinct error codes" → actual 10
 - "18 sandbox import prefixes / 13 blocked classes / 15 blocked methods" → actual 20 / 12 / 19
 - "66 cases" in `DrlSanitizerTest` → actual 23
-- "~1,181 tests" → actual 589
+- "~1,181 tests" → actual 597
 
 **The rule**: counts are cheap to verify (`find … | wc -l`, `grep -c`, `wc -l`). Always verify before quoting; never copy a count from another doc that hasn't been re-verified.
 
@@ -56,12 +56,11 @@ If you can't cite, don't write. If you cited and the cite is wrong, the doc is w
 
 ### 5. The "39/42 security findings" claim has a qualifier
 
-The corpus repeats "39 of 42 security findings closed" in 5+ places. The 3 unaddressed are:
+The corpus repeats "39 of 42 security findings closed" in 5+ places. Originally 3 were unaddressed; #30 was closed by the 2026-05-09 stack modernization (Java 25, Spring Boot 3.5.3, Drools 10.2.0). The 2 still unaddressed:
 - **#28 (HIGH)** Redis without auth/TLS — skipped per user, only one with real prod risk
-- **#30 (MEDIUM)** Outdated dependencies — skipped per user
 - **#38 (INFO)** KieContainer disposal safety — already documented in code
 
-Full breakdown in [`.ai-workspace/project-plans/security-backlog.md`](../.ai-workspace/project-plans/security-backlog.md). Don't restate "39/42" without knowing what the 3 are; if you're advising on a production deploy, surface #28 specifically.
+Full breakdown in [`.ai-workspace/project-plans/security-backlog.md`](../.ai-workspace/project-plans/security-backlog.md). Don't restate "39/42" without knowing what the remaining 2 are; if you're advising on a production deploy, surface #28 specifically.
 
 ### 6. Live-test runtime behavior, don't reason about it
 

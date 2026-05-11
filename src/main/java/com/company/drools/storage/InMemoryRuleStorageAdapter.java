@@ -3,7 +3,6 @@ package com.company.drools.storage;
 import com.company.drools.core.model.Rule;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -58,6 +57,6 @@ public class InMemoryRuleStorageAdapter implements RuleStorage {
 
   @Override
   public List<String> getRuleIds() {
-    return getAllRules().stream().map(Rule::getRuleId).collect(Collectors.toList());
+    return getAllRules().stream().map(Rule::getRuleId).toList();
   }
 }

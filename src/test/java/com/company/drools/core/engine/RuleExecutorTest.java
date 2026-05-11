@@ -145,6 +145,7 @@ class RuleExecutorTest {
   class TimeoutHandling {
 
     @Test
+    @SuppressWarnings("java:S2925")
     @DisplayName("throws TimeoutException when execution exceeds timeout")
     void testExecuteRule_ExceedsTimeout_ThrowsTimeoutException() {
       // Use a mock KieContainer that blocks the session thread
@@ -193,6 +194,7 @@ class RuleExecutorTest {
     }
 
     @Test
+    @SuppressWarnings("java:S2925")
     @DisplayName("respects custom timeout configuration")
     void testExecuteRule_CustomTimeout_RespectsConfiguration() {
       KieContainer mockContainer = mock(KieContainer.class);
@@ -220,7 +222,7 @@ class RuleExecutorTest {
         ruleExecutor.executeRule(mockContainer, "custom.timeout", inputData, 1);
       } catch (TimeoutException e) {
         assertThat(e.getTimeoutSeconds()).isEqualTo(1);
-      } catch (Exception ignored) {
+      } catch (Exception _) {
         // May get a different error on second call since thread pool is busy
       }
 
@@ -241,11 +243,7 @@ class RuleExecutorTest {
       // Track which thread runs the rule
       List<String> threadNames = new CopyOnWriteArrayList<>();
       ExecutorService customExecutor =
-          Executors.newSingleThreadExecutor(
-              r -> {
-                Thread t = new Thread(r, "custom-rule-thread");
-                return t;
-              });
+          Executors.newSingleThreadExecutor(r -> new Thread(r, "custom-rule-thread"));
 
       // Wrap to capture thread name during execution
       Executor trackingExecutor =
@@ -363,7 +361,7 @@ class RuleExecutorTest {
 
       // The result should not be an unhandled exception -- it should either succeed or fail
       assertThat(result).isNotNull();
-      verify(mockSession).dispose();
+      verify(mockSession).close();
 
       executor.shutdown();
     }

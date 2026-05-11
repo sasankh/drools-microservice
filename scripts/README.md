@@ -1,5 +1,80 @@
 # scripts/ — Load Test Orchestrator + Helpers
 
+Two scripts cover different use cases:
+
+| Script | Purpose | Duration | When to use |
+|---|---|---|---|
+| [`e2e-load-test.sh`](#e2e-load-testsh) | Quick E2E health check + 5-min load test | ~10 min | After any code change, before merging |
+| [`run-load-test.sh`](#run-load-testsh) | Full regression harness (JMeter, 1000 rules, soak) | ~5–6 hours | After Drools/Spring Boot bumps, production readiness gates |
+| [`test-localstack.sh`](#helpers) | Validates LocalStack S3 bucket and uploaded rules | < 1 min | After `init-localstack.sh` to confirm S3 state |
+| [`docker-build-test.sh`](#helpers) | Builds Docker image and validates health checks | ~5 min | After Dockerfile or dependency changes |
+
+---
+
+## e2e-load-test.sh
+
+A one-command E2E health check that spins up the full Docker stack, runs a 5-minute load test with a mid-run hot reload, and tears everything down.
+
+```bash
+# Full run (tears down stack at end)
+./scripts/e2e-load-test.sh
+
+# Keep stack running after test
+./scripts/e2e-load-test.sh --no-teardown
+
+# Skip docker compose build if image is already current
+./scripts/e2e-load-test.sh --skip-build
+```
+
+### What it checks
+
+1. Docker stack starts healthy (LocalStack + Redis + App)
+2. 17 sample rules upload to LocalStack S3
+3. All 17 rules load into the engine with 0 failures
+4. 4 smoke tests (different rule types)
+5. Hot reload: 17 rules reload in < 2s, execution works immediately after
+6. Memory stability: 5 rapid reloads, no monotonic heap growth; post-GC heap < 150 MB
+7. 5-min load test: 20 workers across 6 rules, hot reload triggered at 2 min mid-run
+8. Tear down
+
+Exits non-zero if any check fails. Auto-disables rate limiting in `docker-compose.yml` for the duration of the test and restores it on exit (even on Ctrl-C).
+
+**Baseline (2026-05-11):** 157,754 requests · 0 errors (0%) · ~518 RPS · heap 180–340 MB · hot reload 0 dropped requests
+
+### Requirements
+
+- Docker Desktop running
+- `curl`, `python3`, `bc` (all standard on macOS)
+- No JMeter needed
+
+---
+
+## Helpers
+
+### test-localstack.sh
+
+Validates that LocalStack S3 is correctly initialised — bucket exists, all 17 sample rules are present, and the app can reach them.
+
+```bash
+./scripts/test-localstack.sh
+```
+
+Run after `./init-localstack.sh` (or after `docker compose up -d`) to confirm S3 state before starting development.
+
+### docker-build-test.sh
+
+Builds the Docker image and runs a series of health and smoke checks — confirms image size, container startup, health endpoint, and basic rule execution.
+
+```bash
+./scripts/docker-build-test.sh
+```
+
+Run after Dockerfile changes, dependency updates, or a JVM/base-image bump to confirm the image still works end-to-end.
+
+---
+
+## run-load-test.sh
+
 A re-runnable, end-to-end load + stress + soak harness for verifying the rule engine's production-readiness against the docker-compose stack (app + LocalStack S3 + Redis).
 
 The orchestrator is the **regression contract**: a future engineer running `./scripts/run-load-test.sh` after a Drools/Spring Boot/cache-layer change should get a comparable PASS verdict, or fail loudly with specific deltas.

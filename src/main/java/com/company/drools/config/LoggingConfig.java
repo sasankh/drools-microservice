@@ -20,6 +20,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class LoggingConfig {
 
   private static final String CORRELATION_ID_HEADER = "X-Correlation-ID";
+  private static final String MDC_RULE_ID = "ruleId";
   private static final String REQUEST_ID_HEADER = "X-Request-ID";
   private static final Pattern SAFE_ID_PATTERN = Pattern.compile("^[a-zA-Z0-9\\-]{1,128}$");
   private static final String CORRELATION_ID_KEY = "correlationId";
@@ -84,9 +85,11 @@ public class LoggingConfig {
   /** Utility class for adding structured logging fields. */
   public static class StructuredLogging {
 
+    private StructuredLogging() {}
+
     /** Add rule execution context to MDC. */
     public static void addRuleContext(String ruleId, String operation) {
-      MDC.put("ruleId", ruleId);
+      MDC.put(MDC_RULE_ID, ruleId);
       MDC.put("operation", operation);
     }
 
@@ -94,14 +97,14 @@ public class LoggingConfig {
     public static void addCacheContext(String cacheType, String operation, String ruleId) {
       MDC.put("cacheType", cacheType);
       MDC.put("cacheOperation", operation);
-      MDC.put("ruleId", ruleId);
+      MDC.put(MDC_RULE_ID, ruleId);
     }
 
     /** Add storage operation context to MDC. */
     public static void addStorageContext(String storageType, String operation, String ruleId) {
       MDC.put("storageType", storageType);
       MDC.put("storageOperation", operation);
-      MDC.put("ruleId", ruleId);
+      MDC.put(MDC_RULE_ID, ruleId);
     }
 
     /** Add performance metrics to MDC. */
@@ -119,7 +122,7 @@ public class LoggingConfig {
 
     /** Remove rule execution context from MDC. */
     public static void clearRuleContext() {
-      MDC.remove("ruleId");
+      MDC.remove(MDC_RULE_ID);
       MDC.remove("operation");
     }
 

@@ -54,10 +54,7 @@ public class RuleExecutor {
       // Execute rule in custom thread pool to handle timeout and provide better concurrency control
       future =
           CompletableFuture.supplyAsync(
-              () -> {
-                return executeRuleInternal(kieContainer, ruleId, inputData);
-              },
-              ruleExecutionExecutor);
+              () -> executeRuleInternal(kieContainer, ruleId, inputData), ruleExecutionExecutor);
 
       Map<String, Object> result = future.get(timeoutSeconds, TimeUnit.SECONDS);
       long executionTime = System.currentTimeMillis() - startTime;
@@ -70,6 +67,12 @@ public class RuleExecutor {
       log.error("Rule {} execution timed out after {}s", ruleId, timeoutSeconds);
       throw new TimeoutException("Rule execution: " + ruleId, timeoutSeconds, e);
 
+    } catch (InterruptedException _) {
+      Thread.currentThread().interrupt();
+      future.cancel(true);
+      log.warn("Rule {} execution interrupted", ruleId);
+      return ExecutionResult.failure("Rule execution interrupted: " + ruleId);
+
     } catch (Exception e) {
       long executionTime = System.currentTimeMillis() - startTime;
       log.error("Rule {} execution failed after {}ms", ruleId, executionTime, e);
@@ -79,24 +82,11 @@ public class RuleExecutor {
 
   private Map<String, Object> executeRuleInternal(
       KieContainer kieContainer, String ruleId, Map<String, Object> inputData) {
-    // Create a new stateless session for thread safety
-    KieSession kieSession = kieContainer.newKieSession();
-
-    try {
-      // Insert input data as facts
+    try (KieSession kieSession = kieContainer.newKieSession()) {
       kieSession.insert(inputData);
-
-      // Fire rules with a safety limit to prevent infinite loops
       int rulesFired = kieSession.fireAllRules(maxRuleFirings);
       log.debug("Fired {} rules for rule ID {} (limit: {})", rulesFired, ruleId, maxRuleFirings);
-
-      // Extract results from the modified input data
-      // The rules should modify the input map to add results
       return inputData;
-
-    } finally {
-      // Always dispose of the session to prevent memory leaks
-      kieSession.dispose();
     }
   }
 

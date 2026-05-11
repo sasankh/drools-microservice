@@ -17,6 +17,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -85,9 +87,10 @@ class RequestSizeValidationFilterTest extends BaseUnitTest {
       verify(filterChain, never()).doFilter(request, response);
 
       String responseBody = stringWriter.toString();
-      assertThat(responseBody).contains("REQUEST_TOO_LARGE");
-      assertThat(responseBody).contains("Request size exceeds maximum limit");
-      assertThat(responseBody).contains("2000000");
+      assertThat(responseBody)
+          .contains("REQUEST_TOO_LARGE")
+          .contains("Request size exceeds maximum limit")
+          .contains("2000000");
     }
 
     @Test
@@ -123,32 +126,10 @@ class RequestSizeValidationFilterTest extends BaseUnitTest {
   @DisplayName("Request Method Filtering")
   class RequestMethodFiltering {
 
-    @Test
-    @DisplayName("skips validation for GET requests")
-    void testSkipsGetRequests() throws Exception {
-      when(request.getMethod()).thenReturn("GET");
-      when(request.getRequestURI()).thenReturn("/execute-rule");
-
-      filter.doFilterInternal(request, response, filterChain);
-
-      verify(filterChain).doFilter(request, response);
-    }
-
-    @Test
-    @DisplayName("skips validation for PUT requests")
-    void testSkipsPutRequests() throws Exception {
-      when(request.getMethod()).thenReturn("PUT");
-      when(request.getRequestURI()).thenReturn("/execute-rule");
-
-      filter.doFilterInternal(request, response, filterChain);
-
-      verify(filterChain).doFilter(request, response);
-    }
-
-    @Test
-    @DisplayName("skips validation for DELETE requests")
-    void testSkipsDeleteRequests() throws Exception {
-      when(request.getMethod()).thenReturn("DELETE");
+    @ParameterizedTest(name = "skips validation for {0} requests")
+    @ValueSource(strings = {"GET", "PUT", "DELETE"})
+    void testSkipsNonPostRequests(String method) throws Exception {
+      when(request.getMethod()).thenReturn(method);
       when(request.getRequestURI()).thenReturn("/execute-rule");
 
       filter.doFilterInternal(request, response, filterChain);
@@ -246,18 +227,17 @@ class RequestSizeValidationFilterTest extends BaseUnitTest {
       java.util.Map<String, Object> parsed =
           objectMapper.readValue(responseBody, java.util.Map.class);
 
-      assertThat(parsed).containsKey("rule_id");
-      assertThat(parsed).containsKey("result");
-      assertThat(parsed).containsKey("error");
+      assertThat(parsed).containsKey("rule_id").containsKey("result").containsKey("error");
       assertThat(parsed.get("rule_id")).isNull();
       assertThat(parsed.get("result")).isNull();
 
       @SuppressWarnings("unchecked")
       java.util.Map<String, Object> error = (java.util.Map<String, Object>) parsed.get("error");
-      assertThat(error.get("code")).isEqualTo("REQUEST_TOO_LARGE");
-      assertThat(error.get("message")).isEqualTo("Request size exceeds maximum limit");
+      assertThat(error)
+          .containsEntry("code", "REQUEST_TOO_LARGE")
+          .containsEntry("message", "Request size exceeds maximum limit")
+          .containsKey("timestamp");
       assertThat((String) error.get("details")).contains("5000000");
-      assertThat(error).containsKey("timestamp");
     }
   }
 }

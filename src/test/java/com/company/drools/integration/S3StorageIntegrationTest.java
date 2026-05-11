@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.company.drools.api.exception.RuleNotFoundException;
-import com.company.drools.config.TimeoutConfig;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
 import com.company.drools.storage.S3RuleStorage;
@@ -72,10 +71,9 @@ class S3StorageIntegrationTest {
 
     // Build S3RuleStorage with real dependencies
     CircuitBreaker circuitBreaker = CircuitBreaker.of("s3-test", CircuitBreakerConfig.ofDefaults());
-    TimeoutConfig timeoutConfig = new TimeoutConfig();
     SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
 
-    s3RuleStorage = new S3RuleStorage(s3Client, meterRegistry, timeoutConfig, circuitBreaker);
+    s3RuleStorage = new S3RuleStorage(s3Client, meterRegistry, circuitBreaker);
 
     // Inject bucket name via reflection (matches how @Value works)
     Field bucketNameField = S3RuleStorage.class.getDeclaredField("bucketName");
@@ -274,7 +272,7 @@ class S3StorageIntegrationTest {
     // Then
     assertThat(retrieved).isPresent();
     assertThat(retrieved.get().getContent()).isEqualTo(largeContent);
-    assertThat(retrieved.get().getContent().length()).isEqualTo(largeContent.length());
+    assertThat(retrieved.get().getContent()).hasSameSizeAs(largeContent);
   }
 
   @Test
@@ -295,11 +293,11 @@ class S3StorageIntegrationTest {
               String ruleId = "concurrent.rules.rule-" + index;
               String content =
                   String.format(
-                      "package com.company.rules.concurrent.rules\nrule \"Rule%d\" when then end",
+                      "package com.company.rules.concurrent.rules%nrule \"Rule%d\" when then end",
                       index);
               Rule rule = new Rule(ruleId, content, RuleMetadata.createNew());
               s3RuleStorage.saveRule(rule);
-            } catch (Exception e) {
+            } catch (Exception _) {
               errors.incrementAndGet();
             } finally {
               latch.countDown();

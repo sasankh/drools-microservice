@@ -1,7 +1,7 @@
 # 🚀 Drools Rule Engine - Improvement Plan
 **Date**: 2026-02-19
 **Updated**: 2026-02-20
-**Last audited**: 2026-05-08 — see "Status Delta" below for what's still relevant
+**Last audited**: 2026-05-11 — see "Status Delta" below for what's still relevant
 **Goal**: Transform from "Functionally Complete" to "Production-Ready with Confidence"
 
 ---
@@ -17,7 +17,10 @@ This 3-week sprint plan is partially superseded. About 70% has been executed via
 - **Week 3 Day 13** security hardening — done, but via a different route than the plan suggested:
   - Plan: `spring-boot-starter-security` with role-based auth.
   - Actual: custom 93-line `AdminAuthFilter` plus 39/42 security findings closed across 9 phases (Phase 7, 2026-02-26). Decision documented in [ADR-006](../../project-documentation/36-architecture-decision-records.md#adr-006-adminauthfilter-instead-of-spring-security).
-- **Week 3 Day 15** documentation refresh — done. The operational runbook the plan wanted now lives at [`30-runbooks-and-monitoring.md`](../../project-documentation/30-runbooks-and-monitoring.md); the full 39-doc corpus was rebuilt 2026-05-08.
+- **Week 3 Day 15** documentation refresh — done. The operational runbook the plan wanted now lives at [`30-runbooks-and-monitoring.md`](../../project-documentation/30-runbooks-and-monitoring.md); the full 40-doc corpus was rebuilt 2026-05-08 and refreshed through 2026-05-11.
+- **Load testing (2026-05-10)** — 1000-rule load test complete. P99=9ms baseline, safe-RPS=500, memory stable (1MB drift/98 refreshes). See [`39-load-test-findings.md`](../../project-documentation/39-load-test-findings.md).
+- **Sonar quality gates (2026-05-11)** — Maintainability 178→0, Reliability 5→0, Security hotspots 2→0. Quality Gate OK. 597 tests. See [`sonar-wave4-checklist.md`](sonar-wave4-checklist.md) + [`sonar-reliability-checklist.md`](sonar-reliability-checklist.md).
+- **Test count (final)**: 597 tests in 45 test files, 96.2% instruction / 89.7% branch coverage.
 
 ### Still pending (real backlog)
 1. **JMeter performance test suite** (Week 2 Day 10) — no `performance-tests/` directory, no JMeter in `pom.xml`. The 45 RPS sustained number on record came from memory-leak validation, not formal load testing. Also flagged as deferred at [`01-project-overview.md:78`](../../project-documentation/01-project-overview.md#L78).

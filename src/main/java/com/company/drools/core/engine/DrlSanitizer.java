@@ -97,7 +97,8 @@ public class DrlSanitizer {
           "org.drools.core");
 
   private static final Pattern IMPORT_PATTERN =
-      Pattern.compile("^\\s*import\\s+(static\\s+)?([\\w.]+\\*?)\\s*;?\\s*$", Pattern.MULTILINE);
+      Pattern.compile(
+          "^\\h*+import\\h++(static\\h++)?([\\w.]+\\*?)\\h*+;?+\\h*+$", Pattern.MULTILINE);
 
   private static final Pattern EVAL_PATTERN = Pattern.compile("\\beval\\s*\\(", Pattern.MULTILINE);
 
@@ -129,15 +130,9 @@ public class DrlSanitizer {
 
       if (isStatic) {
         violations.add("Static imports are not allowed: 'import static " + importPath + "'");
-        continue;
-      }
-
-      if (isBlockedImport(importPath)) {
+      } else if (isBlockedImport(importPath)) {
         violations.add("Blocked import: '" + importPath + "'");
-        continue;
-      }
-
-      if (!isAllowedImport(importPath)) {
+      } else if (!isAllowedImport(importPath)) {
         violations.add("Import not in allowlist: '" + importPath + "'");
       }
     }

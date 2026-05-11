@@ -31,9 +31,9 @@ import org.mockito.Mockito;
 
 /**
  * End-to-end integration tests for rule-refresh semantics, focused on the loadOrReplaceRule path
- * (which the AdminController single-rule-refresh endpoint now calls). Compiles real DRL through
- * the real {@link RuleCompiler} and executes through {@link RuleExecutor} — no mocks for the
- * engine, compiler, or executor.
+ * (which the AdminController single-rule-refresh endpoint now calls). Compiles real DRL through the
+ * real {@link RuleCompiler} and executes through {@link RuleExecutor} — no mocks for the engine,
+ * compiler, or executor.
  */
 @DisplayName("Rule Refresh Integration Tests")
 class RuleRefreshIntegrationTest {
@@ -77,10 +77,14 @@ class RuleRefreshIntegrationTest {
           }
 
           @Override
-          public void saveRule(Rule rule) {}
+          public void saveRule(Rule rule) {
+            // intentionally empty — test-only RuleStorage stub
+          }
 
           @Override
-          public void deleteRule(String ruleId) {}
+          public void deleteRule(String ruleId) {
+            // intentionally empty — test-only RuleStorage stub
+          }
 
           @Override
           public boolean ruleExists(String ruleId) {
@@ -88,10 +92,14 @@ class RuleRefreshIntegrationTest {
           }
 
           @Override
-          public void refreshCache() {}
+          public void refreshCache() {
+            // intentionally empty — test-only RuleStorage stub
+          }
 
           @Override
-          public void refreshRule(String ruleId) {}
+          public void refreshRule(String ruleId) {
+            // intentionally empty — test-only RuleStorage stub
+          }
 
           @Override
           public long getTotalRuleCount() {

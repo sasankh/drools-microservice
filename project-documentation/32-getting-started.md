@@ -154,7 +154,7 @@ You've now seen the service work. Where to go next depends on your role:
 
 → [27-development-setup.md](27-development-setup.md) — local Java setup, IDE, conventions, build/test workflow.
 → [04-architecture.md](04-architecture.md) — full architecture: filter chain, threading, Drools 10 `updateToVersion` rule-loading pattern, security layers.
-→ [28-testing-guide.md](28-testing-guide.md) — test suite map (45 files, 598 tests), how to add tests.
+→ [28-testing-guide.md](28-testing-guide.md) — test suite map (45 files, 597 tests), how to add tests.
 
 ### "I'm an architect / I want to understand the design"
 

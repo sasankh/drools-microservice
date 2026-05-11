@@ -27,9 +27,14 @@ public class DroolsEngineService {
 
   private static final Logger log = LoggerFactory.getLogger(DroolsEngineService.class);
 
+  private static final String METRIC_RULE_EXECUTION_TIME = "drools.rule.execution.time";
+  private static final String METRIC_RULE_EXECUTION_ERROR = "drools.rule.execution.error";
+  private static final String TAG_RULE_ID = "rule_id";
+  private static final String TAG_STATUS = "status";
+  private static final String STATUS_ERROR = "error";
+
   private final RuleCompiler ruleCompiler;
   private final RuleExecutor ruleExecutor;
-  private final RuleStorage ruleStorage;
   private final TimeoutConfig timeoutConfig;
   private final KieRepository kieRepository;
 
@@ -59,7 +64,6 @@ public class DroolsEngineService {
     this.ruleExecutor = ruleExecutor;
     this.kieContainer = kieContainer;
     this.kieRepository = kieRepository;
-    this.ruleStorage = ruleStorage;
     this.timeoutConfig = timeoutConfig;
     this.meterRegistry = meterRegistry;
     log.info(
@@ -82,12 +86,13 @@ public class DroolsEngineService {
       if (rule == null || metadata == null) {
         log.warn("Rule not found: {}", ruleId);
         meterRegistry
-            .counter("drools.rule.execution.error", "rule_id", "unknown", "error", "rule_not_found")
+            .counter(
+                METRIC_RULE_EXECUTION_ERROR, TAG_RULE_ID, "unknown", STATUS_ERROR, "rule_not_found")
             .increment();
         sample.stop(
-            Timer.builder("drools.rule.execution.time")
-                .tag("rule_id", "unknown")
-                .tag("status", "error")
+            Timer.builder(METRIC_RULE_EXECUTION_TIME)
+                .tag(TAG_RULE_ID, "unknown")
+                .tag(TAG_STATUS, STATUS_ERROR)
                 .register(meterRegistry));
         return RuleExecutor.ExecutionResult.failure("Rule not found: " + ruleId);
       }
@@ -96,12 +101,13 @@ public class DroolsEngineService {
       if (metadata.getStatus() != RuleMetadata.RuleStatus.ACTIVE) {
         log.warn("Rule is not active: {} (status: {})", ruleId, metadata.getStatus());
         meterRegistry
-            .counter("drools.rule.execution.error", "rule_id", ruleId, "error", "rule_not_active")
+            .counter(
+                METRIC_RULE_EXECUTION_ERROR, TAG_RULE_ID, ruleId, STATUS_ERROR, "rule_not_active")
             .increment();
         sample.stop(
-            Timer.builder("drools.rule.execution.time")
-                .tag("rule_id", ruleId)
-                .tag("status", "error")
+            Timer.builder(METRIC_RULE_EXECUTION_TIME)
+                .tag(TAG_RULE_ID, ruleId)
+                .tag(TAG_STATUS, STATUS_ERROR)
                 .register(meterRegistry));
         return RuleExecutor.ExecutionResult.failure("Rule is not active: " + ruleId);
       }
@@ -109,10 +115,7 @@ public class DroolsEngineService {
       // Execute the rule with configured timeout
       RuleExecutor.ExecutionResult result =
           ruleExecutor.executeRule(
-              kieContainer,
-              ruleId,
-              inputData,
-              timeoutConfig.getRuleExecutionTimeoutSeconds());
+              kieContainer, ruleId, inputData, timeoutConfig.getRuleExecutionTimeoutSeconds());
 
       // Update execution statistics and metrics
       if (result.isSuccess()) {
@@ -120,21 +123,22 @@ public class DroolsEngineService {
         ruleMetadata.put(ruleId, updatedMetadata);
 
         // Record successful execution metrics
-        meterRegistry.counter("drools.rule.execution.success", "rule_id", ruleId).increment();
+        meterRegistry.counter("drools.rule.execution.success", TAG_RULE_ID, ruleId).increment();
         sample.stop(
-            Timer.builder("drools.rule.execution.time")
-                .tag("rule_id", ruleId)
-                .tag("status", "success")
+            Timer.builder(METRIC_RULE_EXECUTION_TIME)
+                .tag(TAG_RULE_ID, ruleId)
+                .tag(TAG_STATUS, "success")
                 .register(meterRegistry));
       } else {
         // Record failed execution metrics
         meterRegistry
-            .counter("drools.rule.execution.error", "rule_id", ruleId, "error", "execution_failed")
+            .counter(
+                METRIC_RULE_EXECUTION_ERROR, TAG_RULE_ID, ruleId, STATUS_ERROR, "execution_failed")
             .increment();
         sample.stop(
-            Timer.builder("drools.rule.execution.time")
-                .tag("rule_id", ruleId)
-                .tag("status", "error")
+            Timer.builder(METRIC_RULE_EXECUTION_TIME)
+                .tag(TAG_RULE_ID, ruleId)
+                .tag(TAG_STATUS, STATUS_ERROR)
                 .register(meterRegistry));
       }
 
@@ -179,8 +183,7 @@ public class DroolsEngineService {
       Results updateResults = kieContainer.updateToVersion(newReleaseId);
       if (updateResults.hasMessages(Message.Level.ERROR)) {
         log.error(
-            "Failed to apply rule update: {}",
-            updateResults.getMessages(Message.Level.ERROR));
+            "Failed to apply rule update: {}", updateResults.getMessages(Message.Level.ERROR));
         // KieBase remains at the previous version — Drools guarantees no partial swap on error.
         // Same reasoning as compile-failure path above: don't mutate ACTIVE metadata.
         return false;
@@ -206,9 +209,7 @@ public class DroolsEngineService {
       }
 
       log.info(
-          "Successfully loaded {} rules at release {}",
-          rules.size(),
-          newReleaseId.getVersion());
+          "Successfully loaded {} rules at release {}", rules.size(), newReleaseId.getVersion());
     } finally {
       rulesLock.writeLock().unlock();
     }
@@ -236,13 +237,13 @@ public class DroolsEngineService {
 
   /**
    * Replace (or add) a single rule, preserving all other currently-loaded rules. Reads the current
-   * loaded rule set, swaps in the new rule, and re-runs the standard {@link #loadRules} path so
-   * the resulting KieBase contains both the new rule and all the unchanged ones. Fixes the bug
-   * where calling loadRules with a single-rule list discarded all other rules.
+   * loaded rule set, swaps in the new rule, and re-runs the standard {@link #loadRules} path so the
+   * resulting KieBase contains both the new rule and all the unchanged ones. Fixes the bug where
+   * calling loadRules with a single-rule list discarded all other rules.
    *
    * <p>Holds the write lock for the full snapshot+compile+update sequence so concurrent merges
-   * cannot lose each other's updates. The lock is reentrant, so the inner {@link #loadRules}
-   * call re-acquires it without deadlock. Rule-execution reads block until the merge completes.
+   * cannot lose each other's updates. The lock is reentrant, so the inner {@link #loadRules} call
+   * re-acquires it without deadlock. Rule-execution reads block until the merge completes.
    */
   public boolean loadOrReplaceRule(Rule rule) {
     rulesLock.writeLock().lock();

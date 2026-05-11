@@ -67,7 +67,7 @@ See [10-api-reference.md](10-api-reference.md) `POST /admin/refresh-rules` for t
 
 [`DrlSanitizer.java:124-144`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java#L124-L144)
 
-The import scanner uses regex `^\s*import\s+(static\s+)?([\w.]+\*?)\s*;?\s*$` and inspects every match.
+The import scanner uses regex `^\h*+import\h++(static\h++)?([\w.]+\*?)\h*+;?+\h*+$` (`\h` = horizontal whitespace, possessive quantifiers `*+`/`++`/`?+` prevent ReDoS backtracking on malformed DRL — S5852 fix) and inspects every match.
 
 For each import the sanitizer applies three rules:
 

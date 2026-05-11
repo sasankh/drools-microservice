@@ -27,6 +27,9 @@ public class MetricsConfig {
   @Value("${spring.application.name:drools-rule-engine}")
   private String applicationName;
 
+  private static final String TAG_APPLICATION = "application";
+  private static final String TAG_ENVIRONMENT = "environment";
+
   @Value("${SPRING_PROFILES_ACTIVE:local}")
   private String environment;
 
@@ -63,8 +66,8 @@ public class MetricsConfig {
   public Timer ruleExecutionTimer(MeterRegistry meterRegistry) {
     return Timer.builder("drools.rule.execution.time")
         .description("Time taken to execute a rule")
-        .tag("application", applicationName)
-        .tag("environment", environment)
+        .tag(TAG_APPLICATION, applicationName)
+        .tag(TAG_ENVIRONMENT, environment)
         .register(meterRegistry);
   }
 
@@ -76,8 +79,8 @@ public class MetricsConfig {
   public Counter ruleExecutionSuccessCounter(MeterRegistry meterRegistry) {
     return Counter.builder("drools.rule.execution.success")
         .description("Number of successful rule executions")
-        .tag("application", applicationName)
-        .tag("environment", environment)
+        .tag(TAG_APPLICATION, applicationName)
+        .tag(TAG_ENVIRONMENT, environment)
         .register(meterRegistry);
   }
 
@@ -86,8 +89,8 @@ public class MetricsConfig {
   public Counter ruleExecutionErrorCounter(MeterRegistry meterRegistry) {
     return Counter.builder("drools.rule.execution.error")
         .description("Number of failed rule executions")
-        .tag("application", applicationName)
-        .tag("environment", environment)
+        .tag(TAG_APPLICATION, applicationName)
+        .tag(TAG_ENVIRONMENT, environment)
         .register(meterRegistry);
   }
 
@@ -96,8 +99,8 @@ public class MetricsConfig {
   public Counter cacheHitCounter(MeterRegistry meterRegistry) {
     return Counter.builder("drools.cache.hits")
         .description("Number of cache hits")
-        .tag("application", applicationName)
-        .tag("environment", environment)
+        .tag(TAG_APPLICATION, applicationName)
+        .tag(TAG_ENVIRONMENT, environment)
         .register(meterRegistry);
   }
 
@@ -106,8 +109,8 @@ public class MetricsConfig {
   public Counter cacheMissCounter(MeterRegistry meterRegistry) {
     return Counter.builder("drools.cache.misses")
         .description("Number of cache misses")
-        .tag("application", applicationName)
-        .tag("environment", environment)
+        .tag(TAG_APPLICATION, applicationName)
+        .tag(TAG_ENVIRONMENT, environment)
         .register(meterRegistry);
   }
 
@@ -116,8 +119,8 @@ public class MetricsConfig {
   public Counter cacheEvictionCounter(MeterRegistry meterRegistry) {
     return Counter.builder("drools.cache.evictions")
         .description("Number of cache evictions")
-        .tag("application", applicationName)
-        .tag("environment", environment)
+        .tag(TAG_APPLICATION, applicationName)
+        .tag(TAG_ENVIRONMENT, environment)
         .register(meterRegistry);
   }
 
@@ -132,8 +135,8 @@ public class MetricsConfig {
   public Gauge cacheSizeGauge(MeterRegistry meterRegistry) {
     return Gauge.builder("drools.cache.size", cacheSize, AtomicInteger::doubleValue)
         .description("Current number of items in cache")
-        .tag("application", applicationName)
-        .tag("environment", environment)
+        .tag(TAG_APPLICATION, applicationName)
+        .tag(TAG_ENVIRONMENT, environment)
         .register(meterRegistry);
   }
 
@@ -142,8 +145,8 @@ public class MetricsConfig {
   public Gauge loadedRulesGauge(MeterRegistry meterRegistry) {
     return Gauge.builder("drools.rules.loaded", loadedRulesCount, AtomicInteger::doubleValue)
         .description("Number of rules currently loaded")
-        .tag("application", applicationName)
-        .tag("environment", environment)
+        .tag(TAG_APPLICATION, applicationName)
+        .tag(TAG_ENVIRONMENT, environment)
         .register(meterRegistry);
   }
 
@@ -162,8 +165,8 @@ public class MetricsConfig {
   public Counter apiRequestCounter(MeterRegistry meterRegistry) {
     return Counter.builder("drools.api.requests")
         .description("Number of API requests")
-        .tag("application", applicationName)
-        .tag("environment", environment)
+        .tag(TAG_APPLICATION, applicationName)
+        .tag(TAG_ENVIRONMENT, environment)
         .register(meterRegistry);
   }
 
@@ -172,8 +175,8 @@ public class MetricsConfig {
   public Counter apiErrorCounter(MeterRegistry meterRegistry) {
     return Counter.builder("drools.api.errors")
         .description("Number of API errors")
-        .tag("application", applicationName)
-        .tag("environment", environment)
+        .tag(TAG_APPLICATION, applicationName)
+        .tag(TAG_ENVIRONMENT, environment)
         .register(meterRegistry);
   }
 
@@ -182,8 +185,8 @@ public class MetricsConfig {
   public Timer storageOperationTimer(MeterRegistry meterRegistry) {
     return Timer.builder("drools.storage.operation.time")
         .description("Time taken for storage operations")
-        .tag("application", applicationName)
-        .tag("environment", environment)
+        .tag(TAG_APPLICATION, applicationName)
+        .tag(TAG_ENVIRONMENT, environment)
         .register(meterRegistry);
   }
 }

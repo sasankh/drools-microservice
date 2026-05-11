@@ -11,10 +11,14 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -289,48 +293,21 @@ class RateLimitingFilterTest extends BaseUnitTest {
       verify(filterChain).doFilter(otherRequest, otherResponse);
     }
 
-    @Test
-    @DisplayName("ignores empty X-API-Key and falls through to next identifier")
-    void testFilter_EmptyApiKey_FallsThrough() throws Exception {
-      when(request.getRequestURI()).thenReturn("/execute-rule");
-      when(request.getHeader("X-API-Key")).thenReturn("");
-      when(request.getRemoteAddr()).thenReturn("10.0.0.99");
-
-      filter.doFilter(request, response, filterChain);
-
-      verify(filterChain).doFilter(request, response);
+    static Stream<Arguments> fallthroughHeaders() {
+      return Stream.of(
+          Arguments.of("X-API-Key", "", "10.0.0.99"),
+          Arguments.of("Authorization", "Basic dXNlcjpwYXNz", "10.0.0.88"),
+          Arguments.of("X-Client-Id", "", "10.0.0.77"),
+          Arguments.of("X-Forwarded-For", "198.51.100.5", "10.0.0.1"));
     }
 
-    @Test
-    @DisplayName("ignores non-Bearer Authorization header")
-    void testFilter_BasicAuth_FallsThrough() throws Exception {
+    @ParameterizedTest(name = "falls through with header [{0}]")
+    @MethodSource("fallthroughHeaders")
+    void testFilter_HeaderVariants_FallsThrough(
+        String headerName, String headerValue, String remoteAddr) throws Exception {
       when(request.getRequestURI()).thenReturn("/execute-rule");
-      when(request.getHeader("Authorization")).thenReturn("Basic dXNlcjpwYXNz");
-      when(request.getRemoteAddr()).thenReturn("10.0.0.88");
-
-      filter.doFilter(request, response, filterChain);
-
-      verify(filterChain).doFilter(request, response);
-    }
-
-    @Test
-    @DisplayName("ignores empty X-Client-Id and falls through to IP")
-    void testFilter_EmptyClientId_FallsThrough() throws Exception {
-      when(request.getRequestURI()).thenReturn("/execute-rule");
-      when(request.getHeader("X-Client-Id")).thenReturn("");
-      when(request.getRemoteAddr()).thenReturn("10.0.0.77");
-
-      filter.doFilter(request, response, filterChain);
-
-      verify(filterChain).doFilter(request, response);
-    }
-
-    @Test
-    @DisplayName("uses remote address even when X-Forwarded-For is set")
-    void testFilter_ForwardedFor_UsesRemoteAddr() throws Exception {
-      when(request.getRequestURI()).thenReturn("/execute-rule");
-      when(request.getHeader("X-Forwarded-For")).thenReturn("198.51.100.5");
-      when(request.getRemoteAddr()).thenReturn("10.0.0.1");
+      when(request.getHeader(headerName)).thenReturn(headerValue);
+      when(request.getRemoteAddr()).thenReturn(remoteAddr);
 
       filter.doFilter(request, response, filterChain);
 
@@ -367,11 +344,10 @@ class RateLimitingFilterTest extends BaseUnitTest {
       org.assertj.core.api.Assertions.assertThat(parsed).containsKey("error");
       @SuppressWarnings("unchecked")
       java.util.Map<String, Object> error = (java.util.Map<String, Object>) parsed.get("error");
-      org.assertj.core.api.Assertions.assertThat(error.get("code"))
-          .isEqualTo("RATE_LIMIT_EXCEEDED");
-      org.assertj.core.api.Assertions.assertThat(error.get("message"))
-          .isEqualTo("Rate limit exceeded");
-      org.assertj.core.api.Assertions.assertThat(error).containsKey("timestamp");
+      org.assertj.core.api.Assertions.assertThat(error)
+          .containsEntry("code", "RATE_LIMIT_EXCEEDED")
+          .containsEntry("message", "Rate limit exceeded")
+          .containsKey("timestamp");
     }
 
     @Test

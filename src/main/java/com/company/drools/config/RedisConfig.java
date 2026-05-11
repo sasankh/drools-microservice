@@ -65,9 +65,7 @@ public class RedisConfig {
             .build();
     objectMapper.activateDefaultTyping(ptv, ObjectMapper.DefaultTyping.NON_FINAL);
 
-    Jackson2JsonRedisSerializer<Rule> serializer =
-        new Jackson2JsonRedisSerializer<>(objectMapper, Rule.class);
-    return serializer;
+    return new Jackson2JsonRedisSerializer<>(objectMapper, Rule.class);
   }
 
   /** Provides the configured TTL duration for cache entries. */

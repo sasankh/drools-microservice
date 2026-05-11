@@ -58,7 +58,7 @@ This service externalizes business rules into a dedicated execution layer. Engin
 The service is **production-ready** as of 2026-02-26:
 
 - **39 of 42 security findings closed** across 9 security phases.
-- **598 tests** across 45 test files. All passing (1 pre-existing testcontainers env error in `S3StorageIntegrationTest`, unrelated).
+- **597 tests** across 45 test files. All passing (1 pre-existing testcontainers env error in `S3StorageIntegrationTest`, unrelated).
 - **Docker integration test plan**: 30 checks across 9 steps, all passing as of last run.
 - **Memory leak fixed** (2026-02-19, hardened 2026-05-10): KieContainer lifecycle now uses Drools 10's `updateToVersion` + explicit `KieRepository.removeKieModule(oldReleaseId)` cleanup. Verified leak-free under sustained refresh load (1 MB drift / 98 refreshes — see [39-load-test-findings.md](39-load-test-findings.md)).
 - **Java 25 enforced** at build time via Maven Enforcer Plugin (bumped from Java 17 on 2026-05-09 — see [ADR-013](36-architecture-decision-records.md#adr-013-java-17--25--spring-boot-modernization-2026-05-09)).

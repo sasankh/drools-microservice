@@ -117,8 +117,8 @@ class RedisConfigTest {
   void testRuleRedisTemplateTransactionSupport() {
     RedisTemplate<String, Rule> template = redisConfig.ruleRedisTemplate(connectionFactory);
 
-    // Verify afterPropertiesSet was called by checking the template is fully initialized
-    // The template should be usable (afterPropertiesSet was called in the config method)
-    assertThat(template).isNotNull();
+    boolean txEnabled =
+        (Boolean) ReflectionTestUtils.getField(template, "enableTransactionSupport");
+    assertThat(txEnabled).isTrue();
   }
 }

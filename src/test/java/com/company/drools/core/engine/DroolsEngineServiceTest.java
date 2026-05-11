@@ -167,7 +167,7 @@ class DroolsEngineServiceTest {
       assertThat(metadata.getStatus()).isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
       assertThat(metadata.getVersion()).isEqualTo("1.0");
       assertThat(metadata.getLoadedAt()).isNotNull();
-      assertThat(metadata.getExecutionCount()).isEqualTo(0);
+      assertThat(metadata.getExecutionCount()).isZero();
       assertThat(metadata.getAverageExecutionTimeMs()).isEqualTo(0.0);
       assertThat(metadata.getErrorMessage()).isNull();
     }
@@ -219,7 +219,7 @@ class DroolsEngineServiceTest {
                 RuleExecutor.ExecutionResult r =
                     service.executeRule("concurrent.rule", new HashMap<>(inputData));
                 results.add(r);
-              } catch (Exception e) {
+              } catch (Exception _) {
                 errorCount.incrementAndGet();
               } finally {
                 doneLatch.countDown();
@@ -232,12 +232,13 @@ class DroolsEngineServiceTest {
       executor.shutdown();
 
       assertThat(completed).isTrue();
-      assertThat(errorCount.get()).isEqualTo(0);
+      assertThat(errorCount.get()).isZero();
       assertThat(results).hasSize(threadCount);
       results.forEach(r -> assertThat(r.isSuccess()).isTrue());
     }
 
     @Test
+    @SuppressWarnings("java:S2925")
     @DisplayName("loadOrReplaceRule allows concurrent compilation but serialized swap")
     void testLoadOrReplaceRule_ConcurrentAccess_WriteLockBehavior() throws Exception {
       when(ruleCompiler.compileRules(anyList()))
@@ -264,7 +265,7 @@ class DroolsEngineServiceTest {
                 // own rule on top of whatever is already loaded, exercising both the read-lock
                 // (snapshot of current set) and write-lock (atomic update) paths.
                 service.loadOrReplaceRule(rule);
-              } catch (Exception e) {
+              } catch (Exception _) {
                 // ignore
               } finally {
                 doneLatch.countDown();
@@ -282,6 +283,7 @@ class DroolsEngineServiceTest {
     }
 
     @Test
+    @SuppressWarnings("java:S2925")
     @DisplayName("executeRule and loadRules coordinate via read/write locks")
     void testExecuteRule_WhileLoadingRules_ProperLocking() throws Exception {
       Rule rule = RuleTestUtils.createSimpleRule("locking.test.rule");
@@ -323,7 +325,7 @@ class DroolsEngineServiceTest {
               startLatch.await();
               Rule newRule = RuleTestUtils.createSimpleRule("locking.test.rule");
               service.loadRules(List.of(newRule));
-            } catch (Exception e) {
+            } catch (Exception _) {
               // ignore
             } finally {
               doneLatch.countDown();
@@ -337,7 +339,7 @@ class DroolsEngineServiceTest {
               startLatch.await();
               Thread.sleep(50); // give write lock time to acquire
               service.executeRule("locking.test.rule", Map.of("key", "value"));
-            } catch (Exception e) {
+            } catch (Exception _) {
               // ignore
             } finally {
               doneLatch.countDown();
@@ -392,7 +394,7 @@ class DroolsEngineServiceTest {
                 data.put("value", threadId * 10);
                 RuleExecutor.ExecutionResult r = service.executeRule("corruption.test.rule", data);
                 results.add(r);
-              } catch (Exception e) {
+              } catch (Exception _) {
                 // ignore
               } finally {
                 doneLatch.countDown();
@@ -438,7 +440,8 @@ class DroolsEngineServiceTest {
     }
 
     @Test
-    @DisplayName("loadRules with compile failure preserves prior ACTIVE rules (no spurious downgrade)")
+    @DisplayName(
+        "loadRules with compile failure preserves prior ACTIVE rules (no spurious downgrade)")
     void testLoadRules_CompilationFailure_PreservesPriorActive() {
       // Load rule successfully first so it's ACTIVE and present in loadedRules.
       Rule rule = RuleTestUtils.createSimpleRule("preserved.rule");
@@ -493,11 +496,12 @@ class DroolsEngineServiceTest {
       boolean result = service.loadRules(Collections.emptyList());
 
       assertThat(result).isTrue();
-      assertThat(service.getLoadedRulesCount()).isEqualTo(0);
+      assertThat(service.getLoadedRulesCount()).isZero();
     }
 
     @Test
-    @DisplayName("loadRules handles invalid DRL gracefully (returns false, leaves engine state untouched)")
+    @DisplayName(
+        "loadRules handles invalid DRL gracefully (returns false, leaves engine state untouched)")
     void testLoadRules_InvalidDRL_FailsGracefully() {
       Rule invalidRule = RuleTestUtils.createInvalidRule("invalid.drl.rule");
       String errorMsg = "Compilation errors: missing package declaration";
@@ -526,8 +530,7 @@ class DroolsEngineServiceTest {
     void testLoadRules_UpdatesContainerInPlace_NoSwap() {
       Rule rule = RuleTestUtils.createSimpleRule("update.test.rule");
       ReleaseId newReleaseId = mock(ReleaseId.class);
-      RuleCompiler.CompilationResult result =
-          RuleCompiler.CompilationResult.success(newReleaseId);
+      RuleCompiler.CompilationResult result = RuleCompiler.CompilationResult.success(newReleaseId);
       when(ruleCompiler.compileRules(List.of(rule))).thenReturn(result);
 
       service.loadRules(List.of(rule));
@@ -547,8 +550,7 @@ class DroolsEngineServiceTest {
         Rule rule = RuleTestUtils.createSimpleRule("refresh.rule." + i);
         ReleaseId releaseId = mock(ReleaseId.class, "release-" + i);
         releaseIds.add(releaseId);
-        RuleCompiler.CompilationResult result =
-            RuleCompiler.CompilationResult.success(releaseId);
+        RuleCompiler.CompilationResult result = RuleCompiler.CompilationResult.success(releaseId);
         when(ruleCompiler.compileRules(List.of(rule))).thenReturn(result);
 
         service.loadRules(List.of(rule));
@@ -745,9 +747,7 @@ class DroolsEngineServiceTest {
 
       Map<String, RuleMetadata> allMetadata = service.getAllRuleMetadata();
 
-      assertThat(allMetadata).hasSize(2);
-      assertThat(allMetadata).containsKey("meta.rule.one");
-      assertThat(allMetadata).containsKey("meta.rule.two");
+      assertThat(allMetadata).hasSize(2).containsKey("meta.rule.one").containsKey("meta.rule.two");
       assertThat(allMetadata.get("meta.rule.one").getStatus())
           .isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
     }
@@ -762,8 +762,8 @@ class DroolsEngineServiceTest {
 
       service.loadRules(List.of(rule));
 
-      assertThat(service.getActiveRulesCount()).isEqualTo(0);
-      assertThat(service.getLoadedRulesCount()).isEqualTo(0);
+      assertThat(service.getActiveRulesCount()).isZero();
+      assertThat(service.getLoadedRulesCount()).isZero();
     }
 
     @Test
@@ -771,8 +771,7 @@ class DroolsEngineServiceTest {
     void testLoadRules_UpdateToVersionError_ReturnsFalse() {
       Rule rule = RuleTestUtils.createSimpleRule("update.error.rule");
       ReleaseId newReleaseId = mock(ReleaseId.class);
-      RuleCompiler.CompilationResult result =
-          RuleCompiler.CompilationResult.success(newReleaseId);
+      RuleCompiler.CompilationResult result = RuleCompiler.CompilationResult.success(newReleaseId);
       when(ruleCompiler.compileRules(List.of(rule))).thenReturn(result);
 
       // Override the default no-error stub for this test only.

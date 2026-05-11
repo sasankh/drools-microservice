@@ -80,6 +80,7 @@ public class RuleListResponse {
 
     public RuleInfo() {}
 
+    @SuppressWarnings("java:S107") // DTO constructor — 8 fields represent distinct rule state
     public RuleInfo(
         String ruleId,
         String status,
