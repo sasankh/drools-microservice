@@ -67,7 +67,7 @@ public class RuleExecutor {
       log.error("Rule {} execution timed out after {}s", ruleId, timeoutSeconds);
       throw new TimeoutException("Rule execution: " + ruleId, timeoutSeconds, e);
 
-    } catch (InterruptedException ie) {
+    } catch (InterruptedException _) {
       Thread.currentThread().interrupt();
       future.cancel(true);
       log.warn("Rule {} execution interrupted", ruleId);
