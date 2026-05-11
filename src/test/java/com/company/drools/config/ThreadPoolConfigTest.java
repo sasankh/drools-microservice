@@ -31,8 +31,7 @@ class ThreadPoolConfigTest {
   void testRuleExecutionExecutor() {
     Executor executor = config.ruleExecutionExecutor();
 
-    assertThat(executor).isNotNull();
-    assertThat(executor).isInstanceOf(ThreadPoolTaskExecutor.class);
+    assertThat(executor).isNotNull().isInstanceOf(ThreadPoolTaskExecutor.class);
 
     ThreadPoolTaskExecutor taskExecutor = (ThreadPoolTaskExecutor) executor;
     assertThat(taskExecutor.getCorePoolSize()).isEqualTo(4);
@@ -45,8 +44,7 @@ class ThreadPoolConfigTest {
   void testStorageExecutor() {
     Executor executor = config.storageExecutor();
 
-    assertThat(executor).isNotNull();
-    assertThat(executor).isInstanceOf(ThreadPoolTaskExecutor.class);
+    assertThat(executor).isNotNull().isInstanceOf(ThreadPoolTaskExecutor.class);
 
     ThreadPoolTaskExecutor taskExecutor = (ThreadPoolTaskExecutor) executor;
     assertThat(taskExecutor.getCorePoolSize()).isEqualTo(2);
@@ -61,9 +59,7 @@ class ThreadPoolConfigTest {
     config.ruleExecutionExecutor();
 
     String stats = config.getRuleExecutionPoolStats();
-    assertThat(stats).contains("RuleExecutionPool[");
-    assertThat(stats).contains("active=");
-    assertThat(stats).contains("pool=");
+    assertThat(stats).contains("RuleExecutionPool[").contains("active=").contains("pool=");
   }
 
   @Test
@@ -73,8 +69,7 @@ class ThreadPoolConfigTest {
     config.storageExecutor();
 
     String stats = config.getStoragePoolStats();
-    assertThat(stats).contains("StoragePool[");
-    assertThat(stats).contains("active=");
+    assertThat(stats).contains("StoragePool[").contains("active=");
   }
 
   private void setField(Object target, String fieldName, Object value) throws Exception {

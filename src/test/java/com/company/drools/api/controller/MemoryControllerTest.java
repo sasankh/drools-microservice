@@ -190,8 +190,9 @@ class MemoryControllerTest {
 
       List<String> warnings = invokeGetMemoryWarnings(50.0, heapUsed, heapMax);
 
-      assertThat(warnings).anyMatch(w -> w.contains("INFO"));
-      assertThat(warnings).anyMatch(w -> w.contains("less than 1GB"));
+      assertThat(warnings)
+          .anyMatch(w -> w.contains("INFO"))
+          .anyMatch(w -> w.contains("less than 1GB"));
     }
 
     @Test
@@ -213,9 +214,10 @@ class MemoryControllerTest {
 
       List<String> warnings = invokeGetMemoryWarnings(95.0, heapUsed, heapMax);
 
-      assertThat(warnings).hasSize(2);
-      assertThat(warnings).anyMatch(w -> w.contains("CRITICAL"));
-      assertThat(warnings).anyMatch(w -> w.contains("INFO"));
+      assertThat(warnings)
+          .hasSize(2)
+          .anyMatch(w -> w.contains("CRITICAL"))
+          .anyMatch(w -> w.contains("INFO"));
     }
   }
 }

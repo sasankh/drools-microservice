@@ -75,7 +75,7 @@ class AdminControllerTest {
     appContext.registerBean(
         "validationConfig",
         com.company.drools.config.ValidationConfig.class,
-        () -> ValidationConfigTestHelper.createTestValidationConfig());
+        ValidationConfigTestHelper::createTestValidationConfig);
     appContext.refresh();
 
     LocalValidatorFactoryBean validatorFactory = new LocalValidatorFactoryBean();

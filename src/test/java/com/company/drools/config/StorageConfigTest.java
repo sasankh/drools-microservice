@@ -93,7 +93,7 @@ class StorageConfigTest {
     @Test
     @DisplayName("default endpoint is empty string")
     void testDefaultEndpoint() {
-      assertThat(s3Config.getEndpoint()).isEqualTo("");
+      assertThat(s3Config.getEndpoint()).isEmpty();
     }
 
     @Test

@@ -219,7 +219,7 @@ class RateLimitingConfigTest {
       service.isAllowed("another-client");
 
       // persistent-client should still exist because cleanup did not run
-      assertThat(map.containsKey("persistent-client")).isTrue();
+      assertThat(map).containsKey("persistent-client");
     }
   }
 

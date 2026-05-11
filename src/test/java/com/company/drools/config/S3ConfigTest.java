@@ -3,10 +3,14 @@ package com.company.drools.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 @DisplayName("S3Config")
 class S3ConfigTest {
@@ -84,37 +88,20 @@ class S3ConfigTest {
       client.close();
     }
 
-    @Test
-    @DisplayName("s3Client creates client without endpoint (default credentials)")
-    void testS3ClientWithoutEndpoint() throws Exception {
-      setField(s3Config, "endpoint", "");
-      setField(s3Config, "accessKeyId", "");
-      setField(s3Config, "secretAccessKey", "");
-
-      // This will use default credentials provider
-      var client = s3Config.s3Client();
-      assertThat(client).isNotNull();
-      client.close();
+    static Stream<Arguments> credentialCombinations() {
+      return Stream.of(
+          Arguments.of("", "", ""),
+          Arguments.of("http://localhost:4566", "test-key", ""),
+          Arguments.of("http://localhost:4566", "", "test-secret"));
     }
 
-    @Test
-    @DisplayName("s3Client with key but no secret uses default credentials")
-    void testS3ClientKeyButNoSecret() throws Exception {
-      setField(s3Config, "endpoint", "http://localhost:4566");
-      setField(s3Config, "accessKeyId", "test-key");
-      setField(s3Config, "secretAccessKey", "");
-
-      var client = s3Config.s3Client();
-      assertThat(client).isNotNull();
-      client.close();
-    }
-
-    @Test
-    @DisplayName("s3Client with secret but no key uses default credentials")
-    void testS3ClientSecretButNoKey() throws Exception {
-      setField(s3Config, "endpoint", "http://localhost:4566");
-      setField(s3Config, "accessKeyId", "");
-      setField(s3Config, "secretAccessKey", "test-secret");
+    @ParameterizedTest(name = "s3Client creates client with endpoint=[{0}]")
+    @MethodSource("credentialCombinations")
+    void testS3ClientWithCredentialCombinations(
+        String endpoint, String accessKeyId, String secretAccessKey) throws Exception {
+      setField(s3Config, "endpoint", endpoint);
+      setField(s3Config, "accessKeyId", accessKeyId);
+      setField(s3Config, "secretAccessKey", secretAccessKey);
 
       var client = s3Config.s3Client();
       assertThat(client).isNotNull();

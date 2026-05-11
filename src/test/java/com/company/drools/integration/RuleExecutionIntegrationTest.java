@@ -74,10 +74,10 @@ class RuleExecutionIntegrationTest {
           }
 
           @Override
-          public void saveRule(Rule rule) {}
+          public void saveRule(Rule rule) { /* test stub — no persistence needed */ }
 
           @Override
-          public void deleteRule(String ruleId) {}
+          public void deleteRule(String ruleId) { /* test stub — no persistence needed */ }
 
           @Override
           public boolean ruleExists(String ruleId) {
@@ -572,11 +572,12 @@ class RuleExecutionIntegrationTest {
                     data.put("shippingType", "standard");
                     data.put("weight", 1.0 + index);
                   }
+                  default -> { /* no data setup needed for other rule IDs */ }
                 }
 
                 RuleExecutor.ExecutionResult result = droolsEngineService.executeRule(ruleId, data);
                 results.add(result);
-              } catch (Exception e) {
+              } catch (Exception _) {
                 errorCount.incrementAndGet();
               } finally {
                 doneLatch.countDown();
@@ -590,7 +591,7 @@ class RuleExecutionIntegrationTest {
       concurrentExecutor.shutdown();
 
       assertThat(completed).as("All concurrent executions should complete").isTrue();
-      assertThat(errorCount.get()).as("No exceptions during concurrent execution").isEqualTo(0);
+      assertThat(errorCount.get()).as("No exceptions during concurrent execution").isZero();
       assertThat(results).hasSize(threadCount);
 
       // Every execution should succeed

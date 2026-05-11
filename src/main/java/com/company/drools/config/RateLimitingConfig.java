@@ -145,12 +145,8 @@ public class RateLimitingConfig {
         long minuteCount = requestCountMinute.incrementAndGet();
         long hourCount = requestCountHour.incrementAndGet();
 
-        if (minuteCount > config.getRequestsPerMinute()
-            || hourCount > config.getRequestsPerHour()) {
-          return false;
-        }
-
-        return true;
+        return minuteCount <= config.getRequestsPerMinute()
+            && hourCount <= config.getRequestsPerHour();
       }
 
       public RateLimitInfo getRateLimitInfo(long now, RateLimitingConfig config) {

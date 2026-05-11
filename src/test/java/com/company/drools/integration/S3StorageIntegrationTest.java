@@ -274,7 +274,7 @@ class S3StorageIntegrationTest {
     // Then
     assertThat(retrieved).isPresent();
     assertThat(retrieved.get().getContent()).isEqualTo(largeContent);
-    assertThat(retrieved.get().getContent().length()).isEqualTo(largeContent.length());
+    assertThat(retrieved.get().getContent()).hasSameSizeAs(largeContent);
   }
 
   @Test
@@ -295,11 +295,11 @@ class S3StorageIntegrationTest {
               String ruleId = "concurrent.rules.rule-" + index;
               String content =
                   String.format(
-                      "package com.company.rules.concurrent.rules\nrule \"Rule%d\" when then end",
+                      "package com.company.rules.concurrent.rules%nrule \"Rule%d\" when then end",
                       index);
               Rule rule = new Rule(ruleId, content, RuleMetadata.createNew());
               s3RuleStorage.saveRule(rule);
-            } catch (Exception e) {
+            } catch (Exception _) {
               errors.incrementAndGet();
             } finally {
               latch.countDown();

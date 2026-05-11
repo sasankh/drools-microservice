@@ -101,7 +101,7 @@ class LoggingConfigTest {
             (req, res) -> {
               throw new RuntimeException("test error");
             });
-      } catch (RuntimeException e) {
+      } catch (RuntimeException _) {
         // expected
       }
 

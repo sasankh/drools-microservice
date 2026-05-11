@@ -23,7 +23,7 @@ class StorageFactoryTest {
   private StorageFactory storageFactory;
 
   @BeforeEach
-  void setUp() throws Exception {
+  void setUp() {
     storageFactory = new StorageFactory(applicationContext);
   }
 

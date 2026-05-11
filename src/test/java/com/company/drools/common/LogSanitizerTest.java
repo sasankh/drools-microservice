@@ -80,9 +80,10 @@ class LogSanitizerTest extends BaseUnitTest {
 
       String result = LogSanitizer.sanitizeMessage(message);
 
-      assertThat(result).doesNotContain("4111-1111-1111-1111");
-      assertThat(result).doesNotContain("5500 0000 0000 0004");
-      assertThat(result).contains("[CC-REDACTED]");
+      assertThat(result)
+          .doesNotContain("4111-1111-1111-1111")
+          .doesNotContain("5500 0000 0000 0004")
+          .contains("[CC-REDACTED]");
     }
 
     @Test
@@ -92,8 +93,7 @@ class LogSanitizerTest extends BaseUnitTest {
 
       String result = LogSanitizer.sanitizeMessage(message);
 
-      assertThat(result).doesNotContain("4111111111111111");
-      assertThat(result).doesNotContain("123-45-6789");
+      assertThat(result).doesNotContain("4111111111111111").doesNotContain("123-45-6789");
     }
 
     @Test
@@ -215,9 +215,7 @@ class LogSanitizerTest extends BaseUnitTest {
 
       String result = LogSanitizer.safeDataRepresentation(data);
 
-      assertThat(result).contains("amount");
-      assertThat(result).contains("currency");
-      assertThat(result).doesNotContain("more fields");
+      assertThat(result).contains("amount").contains("currency").doesNotContain("more fields");
     }
   }
 

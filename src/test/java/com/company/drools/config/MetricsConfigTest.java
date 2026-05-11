@@ -142,14 +142,14 @@ class MetricsConfigTest {
   @DisplayName("getCacheSize returns atomic integer")
   void testGetCacheSize() {
     assertThat(metricsConfig.getCacheSize()).isNotNull();
-    assertThat(metricsConfig.getCacheSize().get()).isEqualTo(0);
+    assertThat(metricsConfig.getCacheSize().get()).isZero();
   }
 
   @Test
   @DisplayName("getLoadedRulesCount returns atomic integer")
   void testGetLoadedRulesCount() {
     assertThat(metricsConfig.getLoadedRulesCount()).isNotNull();
-    assertThat(metricsConfig.getLoadedRulesCount().get()).isEqualTo(0);
+    assertThat(metricsConfig.getLoadedRulesCount().get()).isZero();
   }
 
   private void setField(Object target, String fieldName, Object value) throws Exception {

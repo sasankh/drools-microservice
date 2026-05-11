@@ -11,11 +11,15 @@ import jakarta.validation.ConstraintValidatorContext;
 import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 @DisplayName("RuleDataValidator")
@@ -90,54 +94,18 @@ class RuleDataValidatorTest {
   @DisplayName("Injection Prevention")
   class InjectionPrevention {
 
-    @Test
-    @DisplayName("rejects SQL injection patterns")
-    void testValidate_SQLInjection_Rejected() {
-      // Semicolon is blocked by SAFE_STRING_PATTERN
-      Map<String, Object> data = Map.of("name", "Robert; DROP TABLE users;--");
-
-      boolean result = validator.isValid(data, context);
-
-      assertThat(result).isFalse();
+    static Stream<Arguments> injectionInputs() {
+      return Stream.of(
+          Arguments.of("name", "Robert; DROP TABLE users;--"),
+          Arguments.of("input", "noscript bypass"),
+          Arguments.of("cmd", "ls | cat /etc/passwd"),
+          Arguments.of("path", "../../etc/passwd; cat"));
     }
 
-    @Test
-    @DisplayName("rejects script tag injection")
-    void testValidate_ScriptTag_Rejected() {
-      // "script" matches DANGEROUS_PATTERNS and "<>" is blocked by SAFE_STRING_PATTERN
-      Map<String, Object> data = Map.of("input", "noscript bypass");
-
-      boolean result = validator.isValid(data, context);
-
-      // The word "script" is matched by the dangerous pattern regex
-      assertThat(result).isFalse();
-    }
-
-    @Test
-    @DisplayName("rejects command injection patterns")
-    void testValidate_CommandInjection_Rejected() {
-      // Pipe character "|" is blocked by SAFE_STRING_PATTERN
-      Map<String, Object> data = Map.of("cmd", "ls | cat /etc/passwd");
-
-      boolean result = validator.isValid(data, context);
-
-      assertThat(result).isFalse();
-    }
-
-    @Test
-    @DisplayName("rejects path traversal patterns in keys")
-    void testValidate_PathTraversal_Rejected() {
-      // Keys containing dangerous characters are caught by SAFE_STRING_PATTERN via
-      // containsDangerousPattern,
-      // but path traversal with ".." alone isn't caught by the current patterns.
-      // However, using angle brackets or semicolons in a traversal attempt will be caught.
-      // The key validator checks containsDangerousPattern, and values check SAFE_STRING_PATTERN.
-      // A typical path traversal in a value uses "../" which passes SAFE_STRING_PATTERN but
-      // we can test with a value that combines traversal with other unsafe chars.
-      Map<String, Object> data = Map.of("path", "../../etc/passwd; cat");
-
-      boolean result = validator.isValid(data, context);
-
+    @ParameterizedTest(name = "rejects injection in field [{0}]")
+    @MethodSource("injectionInputs")
+    void testValidate_InjectionPatterns_Rejected(String key, String value) {
+      boolean result = validator.isValid(Map.of(key, value), context);
       assertThat(result).isFalse();
     }
   }
@@ -231,30 +199,15 @@ class RuleDataValidatorTest {
       assertThat(validator.isValid(data, context)).isTrue();
     }
 
-    @Test
-    @DisplayName("rejects key containing dangerous pattern")
-    void testKeyWithDangerousPattern() {
-      Map<String, Object> data = new HashMap<>();
-      data.put("javascript", 123);
-
-      assertThat(validator.isValid(data, context)).isFalse();
+    static Stream<String> dangerousKeys() {
+      return Stream.of("javascript", "eval(", "exec(cmd)");
     }
 
-    @Test
-    @DisplayName("rejects key containing eval pattern")
-    void testKeyWithEvalPattern() {
+    @ParameterizedTest(name = "rejects key [{0}] containing dangerous pattern")
+    @MethodSource("dangerousKeys")
+    void testKeyWithDangerousPattern(String key) {
       Map<String, Object> data = new HashMap<>();
-      data.put("eval(", 123);
-
-      assertThat(validator.isValid(data, context)).isFalse();
-    }
-
-    @Test
-    @DisplayName("rejects key containing exec pattern")
-    void testKeyWithExecPattern() {
-      Map<String, Object> data = new HashMap<>();
-      data.put("exec(cmd)", 123);
-
+      data.put(key, 123);
       assertThat(validator.isValid(data, context)).isFalse();
     }
   }

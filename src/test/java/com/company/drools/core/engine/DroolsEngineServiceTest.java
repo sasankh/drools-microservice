@@ -167,7 +167,7 @@ class DroolsEngineServiceTest {
       assertThat(metadata.getStatus()).isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
       assertThat(metadata.getVersion()).isEqualTo("1.0");
       assertThat(metadata.getLoadedAt()).isNotNull();
-      assertThat(metadata.getExecutionCount()).isEqualTo(0);
+      assertThat(metadata.getExecutionCount()).isZero();
       assertThat(metadata.getAverageExecutionTimeMs()).isEqualTo(0.0);
       assertThat(metadata.getErrorMessage()).isNull();
     }
@@ -219,7 +219,7 @@ class DroolsEngineServiceTest {
                 RuleExecutor.ExecutionResult r =
                     service.executeRule("concurrent.rule", new HashMap<>(inputData));
                 results.add(r);
-              } catch (Exception e) {
+              } catch (Exception _) {
                 errorCount.incrementAndGet();
               } finally {
                 doneLatch.countDown();
@@ -232,12 +232,13 @@ class DroolsEngineServiceTest {
       executor.shutdown();
 
       assertThat(completed).isTrue();
-      assertThat(errorCount.get()).isEqualTo(0);
+      assertThat(errorCount.get()).isZero();
       assertThat(results).hasSize(threadCount);
       results.forEach(r -> assertThat(r.isSuccess()).isTrue());
     }
 
     @Test
+    @SuppressWarnings("java:S2925")
     @DisplayName("loadOrReplaceRule allows concurrent compilation but serialized swap")
     void testLoadOrReplaceRule_ConcurrentAccess_WriteLockBehavior() throws Exception {
       when(ruleCompiler.compileRules(anyList()))
@@ -264,7 +265,7 @@ class DroolsEngineServiceTest {
                 // own rule on top of whatever is already loaded, exercising both the read-lock
                 // (snapshot of current set) and write-lock (atomic update) paths.
                 service.loadOrReplaceRule(rule);
-              } catch (Exception e) {
+              } catch (Exception _) {
                 // ignore
               } finally {
                 doneLatch.countDown();
@@ -282,6 +283,7 @@ class DroolsEngineServiceTest {
     }
 
     @Test
+    @SuppressWarnings("java:S2925")
     @DisplayName("executeRule and loadRules coordinate via read/write locks")
     void testExecuteRule_WhileLoadingRules_ProperLocking() throws Exception {
       Rule rule = RuleTestUtils.createSimpleRule("locking.test.rule");
@@ -494,7 +496,7 @@ class DroolsEngineServiceTest {
       boolean result = service.loadRules(Collections.emptyList());
 
       assertThat(result).isTrue();
-      assertThat(service.getLoadedRulesCount()).isEqualTo(0);
+      assertThat(service.getLoadedRulesCount()).isZero();
     }
 
     @Test
@@ -745,9 +747,10 @@ class DroolsEngineServiceTest {
 
       Map<String, RuleMetadata> allMetadata = service.getAllRuleMetadata();
 
-      assertThat(allMetadata).hasSize(2);
-      assertThat(allMetadata).containsKey("meta.rule.one");
-      assertThat(allMetadata).containsKey("meta.rule.two");
+      assertThat(allMetadata)
+          .hasSize(2)
+          .containsKey("meta.rule.one")
+          .containsKey("meta.rule.two");
       assertThat(allMetadata.get("meta.rule.one").getStatus())
           .isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
     }
@@ -762,8 +765,8 @@ class DroolsEngineServiceTest {
 
       service.loadRules(List.of(rule));
 
-      assertThat(service.getActiveRulesCount()).isEqualTo(0);
-      assertThat(service.getLoadedRulesCount()).isEqualTo(0);
+      assertThat(service.getActiveRulesCount()).isZero();
+      assertThat(service.getLoadedRulesCount()).isZero();
     }
 
     @Test

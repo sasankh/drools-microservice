@@ -8,6 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 @DisplayName("DrlSanitizer")
@@ -48,10 +49,8 @@ class DrlSanitizerTest {
       assertThat(result.getViolations()).isEmpty();
     }
 
-    @Test
-    @DisplayName("accepts rules importing java.util classes")
-    void testAcceptsJavaUtilImports() {
-      String drl =
+    static Stream<String> allowedDrls() {
+      return Stream.of(
           """
           package com.company.rules.test
 
@@ -66,17 +65,7 @@ class DrlSanitizerTest {
           then
               $data.put("executed", true);
           end
-          """;
-
-      DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
-      assertThat(result.isAccepted()).isTrue();
-    }
-
-    @Test
-    @DisplayName("accepts rules importing java.math classes")
-    void testAcceptsJavaMathImports() {
-      String drl =
+          """,
           """
           package com.company.rules.test
 
@@ -89,17 +78,7 @@ class DrlSanitizerTest {
           then
               $data.put("total", new java.math.BigDecimal("99.99"));
           end
-          """;
-
-      DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
-      assertThat(result.isAccepted()).isTrue();
-    }
-
-    @Test
-    @DisplayName("accepts rules importing java.time classes")
-    void testAcceptsJavaTimeImports() {
-      String drl =
+          """,
           """
           package com.company.rules.test
 
@@ -112,17 +91,7 @@ class DrlSanitizerTest {
           then
               $data.put("today", java.time.LocalDate.now().toString());
           end
-          """;
-
-      DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
-      assertThat(result.isAccepted()).isTrue();
-    }
-
-    @Test
-    @DisplayName("accepts rules with no imports")
-    void testAcceptsNoImports() {
-      String drl =
+          """,
           """
           package com.company.rules.test
 
@@ -132,17 +101,7 @@ class DrlSanitizerTest {
           then
               $data.put("executed", true);
           end
-          """;
-
-      DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
-      assertThat(result.isAccepted()).isTrue();
-    }
-
-    @Test
-    @DisplayName("accepts rules with if/else control flow in then block")
-    void testAcceptsControlFlow() {
-      String drl =
+          """,
           """
           package com.company.rules.test
 
@@ -159,10 +118,13 @@ class DrlSanitizerTest {
                   $data.put("tier", "standard");
               }
           end
-          """;
+          """);
+    }
 
+    @ParameterizedTest(name = "accepts valid DRL [{index}]")
+    @MethodSource("allowedDrls")
+    void testAcceptsValidDrl(String drl) {
       DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
       assertThat(result.isAccepted()).isTrue();
     }
   }
@@ -211,96 +173,56 @@ class DrlSanitizerTest {
   @DisplayName("Blocked Class References")
   class BlockedClassReferences {
 
-    @Test
-    @DisplayName("rejects Runtime reference in then block")
-    void testRejectsRuntime() {
-      String drl =
-          """
-          package com.company.rules.test
-
-          import java.util.Map
-
-          rule "Runtime Rule"
-          when
-              $data : Map()
-          then
-              Runtime rt = Runtime.getRuntime();
-          end
-          """;
-
-      DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
-      assertThat(result.isAccepted()).isFalse();
-      assertThat(result.getViolations()).anyMatch(v -> v.contains("Runtime"));
+    static Stream<Arguments> blockedClassReferences() {
+      return Stream.of(
+          Arguments.of(
+              """
+              package com.company.rules.test
+              import java.util.Map
+              rule "Runtime Rule"
+              when $data : Map()
+              then Runtime rt = Runtime.getRuntime();
+              end
+              """,
+              "Runtime"),
+          Arguments.of(
+              """
+              package com.company.rules.test
+              import java.util.Map
+              rule "Process Rule"
+              when $data : Map()
+              then new ProcessBuilder("ls").start();
+              end
+              """,
+              "ProcessBuilder"),
+          Arguments.of(
+              """
+              package com.company.rules.test
+              import java.util.Map
+              rule "Thread Rule"
+              when $data : Map()
+              then Thread.sleep(10000);
+              end
+              """,
+              "Thread"),
+          Arguments.of(
+              """
+              package com.company.rules.test
+              import java.util.Map
+              rule "ClassLoader Rule"
+              when $data : Map()
+              then ClassLoader cl = $data.getClass().getClassLoader();
+              end
+              """,
+              "ClassLoader"));
     }
 
-    @Test
-    @DisplayName("rejects ProcessBuilder reference")
-    void testRejectsProcessBuilder() {
-      String drl =
-          """
-          package com.company.rules.test
-
-          import java.util.Map
-
-          rule "Process Rule"
-          when
-              $data : Map()
-          then
-              new ProcessBuilder("ls").start();
-          end
-          """;
-
+    @ParameterizedTest(name = "rejects class reference [{1}]")
+    @MethodSource("blockedClassReferences")
+    void testRejectsBlockedClassReference(String drl, String violationClass) {
       DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
       assertThat(result.isAccepted()).isFalse();
-      assertThat(result.getViolations()).anyMatch(v -> v.contains("ProcessBuilder"));
-    }
-
-    @Test
-    @DisplayName("rejects Thread reference")
-    void testRejectsThread() {
-      String drl =
-          """
-          package com.company.rules.test
-
-          import java.util.Map
-
-          rule "Thread Rule"
-          when
-              $data : Map()
-          then
-              Thread.sleep(10000);
-          end
-          """;
-
-      DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
-      assertThat(result.isAccepted()).isFalse();
-      assertThat(result.getViolations()).anyMatch(v -> v.contains("Thread"));
-    }
-
-    @Test
-    @DisplayName("rejects ClassLoader reference")
-    void testRejectsClassLoader() {
-      String drl =
-          """
-          package com.company.rules.test
-
-          import java.util.Map
-
-          rule "ClassLoader Rule"
-          when
-              $data : Map()
-          then
-              ClassLoader cl = $data.getClass().getClassLoader();
-          end
-          """;
-
-      DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
-      assertThat(result.isAccepted()).isFalse();
-      assertThat(result.getViolations()).anyMatch(v -> v.contains("ClassLoader"));
+      assertThat(result.getViolations()).anyMatch(v -> v.contains(violationClass));
     }
   }
 
@@ -308,27 +230,46 @@ class DrlSanitizerTest {
   @DisplayName("Blocked Method Calls")
   class BlockedMethodCalls {
 
-    @Test
-    @DisplayName("rejects System.exit call")
-    void testRejectsSystemExit() {
-      String drl =
-          """
-          package com.company.rules.test
+    static Stream<Arguments> blockedMethodCalls() {
+      return Stream.of(
+          Arguments.of(
+              """
+              package com.company.rules.test
+              import java.util.Map
+              rule "Exit Rule"
+              when $data : Map()
+              then System.exit(0);
+              end
+              """,
+              "System.exit"),
+          Arguments.of(
+              """
+              package com.company.rules.test
+              import java.util.Map
+              rule "Reflection Rule"
+              when $data : Map()
+              then Class.forName("java.lang.Runtime");
+              end
+              """,
+              "Class.forName"),
+          Arguments.of(
+              """
+              package com.company.rules.test
+              import java.util.Map
+              rule "Env Rule"
+              when $data : Map()
+              then String secret = System.getenv("SECRET_KEY");
+              end
+              """,
+              "System.getenv"));
+    }
 
-          import java.util.Map
-
-          rule "Exit Rule"
-          when
-              $data : Map()
-          then
-              System.exit(0);
-          end
-          """;
-
+    @ParameterizedTest(name = "rejects method call [{1}]")
+    @MethodSource("blockedMethodCalls")
+    void testRejectsBlockedMethodCall(String drl, String violationMethod) {
       DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
       assertThat(result.isAccepted()).isFalse();
-      assertThat(result.getViolations()).anyMatch(v -> v.contains("System.exit"));
+      assertThat(result.getViolations()).anyMatch(v -> v.contains(violationMethod));
     }
 
     @Test
@@ -353,51 +294,6 @@ class DrlSanitizerTest {
       assertThat(result.isAccepted()).isFalse();
     }
 
-    @Test
-    @DisplayName("rejects Class.forName call")
-    void testRejectsClassForName() {
-      String drl =
-          """
-          package com.company.rules.test
-
-          import java.util.Map
-
-          rule "Reflection Rule"
-          when
-              $data : Map()
-          then
-              Class.forName("java.lang.Runtime");
-          end
-          """;
-
-      DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
-      assertThat(result.isAccepted()).isFalse();
-      assertThat(result.getViolations()).anyMatch(v -> v.contains("Class.forName"));
-    }
-
-    @Test
-    @DisplayName("rejects System.getenv call")
-    void testRejectsSystemGetenv() {
-      String drl =
-          """
-          package com.company.rules.test
-
-          import java.util.Map
-
-          rule "Env Rule"
-          when
-              $data : Map()
-          then
-              String secret = System.getenv("SECRET_KEY");
-          end
-          """;
-
-      DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
-      assertThat(result.isAccepted()).isFalse();
-      assertThat(result.getViolations()).anyMatch(v -> v.contains("System.getenv"));
-    }
   }
 
   @Nested
@@ -456,7 +352,7 @@ class DrlSanitizerTest {
       DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
 
       assertThat(result.isAccepted()).isFalse();
-      assertThat(result.getViolations().size()).isGreaterThanOrEqualTo(4);
+      assertThat(result.getViolations()).hasSizeGreaterThanOrEqualTo(4);
     }
   }
 }

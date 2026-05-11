@@ -129,15 +129,9 @@ public class DrlSanitizer {
 
       if (isStatic) {
         violations.add("Static imports are not allowed: 'import static " + importPath + "'");
-        continue;
-      }
-
-      if (isBlockedImport(importPath)) {
+      } else if (isBlockedImport(importPath)) {
         violations.add("Blocked import: '" + importPath + "'");
-        continue;
-      }
-
-      if (!isAllowedImport(importPath)) {
+      } else if (!isAllowedImport(importPath)) {
         violations.add("Import not in allowlist: '" + importPath + "'");
       }
     }
