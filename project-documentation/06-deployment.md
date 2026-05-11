@@ -47,7 +47,7 @@ This guide covers deployment options for the Drools Rule Engine Microservice, fr
 ## 📋 Prerequisites
 
 ### System Requirements
-- **Java**: 17 or higher (Oracle JDK or OpenJDK)
+- **Java**: 25 (enforced by Maven Enforcer Plugin — build will fail on other versions)
 - **Memory**: Minimum 1GB RAM (2GB+ recommended for production)
 - **CPU**: 2+ cores for production workloads
 - **Disk**: 500MB+ available space
@@ -204,7 +204,7 @@ cd drools-microservice
 mvn clean compile
 
 # Verify Java version
-java -version  # Should be 17+
+java -version  # Should be 25
 ```
 
 ### 2. Start LocalStack & Redis (Docker Compose)
@@ -561,7 +561,7 @@ aws ec2 run-instances \
 cat > user-data.sh << 'EOF'
 #!/bin/bash
 yum update -y
-yum install -y java-17-amazon-corretto
+yum install -y java-25-amazon-corretto
 
 # Download and install application
 wget https://releases.company.com/drools-rule-engine-1.0.0.jar
