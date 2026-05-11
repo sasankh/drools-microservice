@@ -1,5 +1,6 @@
 package com.company.drools.config;
 
+import com.company.drools.cache.RuleRefreshSubscriber;
 import com.company.drools.core.model.Rule;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
@@ -14,6 +15,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.listener.PatternTopic;
+import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
@@ -72,5 +75,23 @@ public class RedisConfig {
   @Bean
   public Duration redisTtlDuration() {
     return Duration.ofMinutes(ttlMinutes);
+  }
+
+  /**
+   * Subscribes {@link RuleRefreshSubscriber} to the pub/sub channel so this task receives refresh
+   * events from sibling ECS tasks. Active only when {@code redis.pubsub.enabled=true} (default on
+   * when Redis is on). Container auto-reconnects on Redis connection drops.
+   */
+  @Bean
+  @ConditionalOnProperty(name = "redis.pubsub.enabled", havingValue = "true", matchIfMissing = true)
+  public RedisMessageListenerContainer redisMessageListenerContainer(
+      RedisConnectionFactory connectionFactory,
+      RuleRefreshSubscriber subscriber,
+      @Value("${redis.pubsub.channel:drools:rule:events}") String channel) {
+    log.info("Configuring Redis pub/sub listener on channel: {}", channel);
+    RedisMessageListenerContainer container = new RedisMessageListenerContainer();
+    container.setConnectionFactory(connectionFactory);
+    container.addMessageListener(subscriber, new PatternTopic(channel));
+    return container;
   }
 }
