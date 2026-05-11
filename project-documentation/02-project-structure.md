@@ -38,8 +38,8 @@ drools-microservice/
 ├── set-java-env.sh                   # Source to set JAVA_HOME=Java 25 (macOS)
 ├── setup-dev-environment.sh          # One-command full dev stack bootstrap
 ├── init-localstack.sh                # Auto-runs in LocalStack container; uploads sample-rules to S3
-├── test-localstack.sh                # Validates LocalStack S3 setup; ⚠️ embedded curl uses wrong field name
-├── docker-build-test.sh              # Build + isolated container health-check test (port 9080/9081)
+├── scripts/test-localstack.sh        # Validates LocalStack S3 setup
+├── scripts/docker-build-test.sh     # Build + isolated container health-check test (port 9080/9081)
 │
 ├── .env / .env.example               # Local env var defaults (gitignored / committed template)
 ├── .gitignore
@@ -269,10 +269,13 @@ The path → rule ID transformation: `pricing/discount/vip.drl` ↔ `pricing.dis
 | Script | What it does | When to run |
 |---|---|---|
 | `set-java-env.sh` | `source` to set `JAVA_HOME` and `PATH` to Java 25 (macOS via `/usr/libexec/java_home -v 25`). | Before running `mvn` or local `java` commands. |
-| `setup-dev-environment.sh` | Full bootstrap: Maven build → Docker build → `docker-compose up -d` → wait for healthy → run `test-localstack.sh`. Flags: `--skip-build`, `--skip-tests`, `--force-rebuild`. | First time on a clean clone. |
+| `setup-dev-environment.sh` | Full bootstrap: Maven build → Docker build → `docker-compose up -d` → wait for healthy → run `scripts/test-localstack.sh`. Flags: `--skip-build`, `--skip-tests`, `--force-rebuild`. | First time on a clean clone. |
 | `init-localstack.sh` | Runs **inside** the LocalStack container as a ready-hook (mounted to `/etc/localstack/init/ready.d/init-aws.sh`). Creates `local-rules` bucket, syncs `sample-rules/` into it, applies a permissive Principal:`*` policy (LocalStack-guarded). | Automatic — fires when LocalStack starts. |
-| `test-localstack.sh` | 5 sequential checks against LocalStack: connectivity, bucket exists, rules uploaded, rule content valid, optional rule execution. ⚠️ Step 5 uses `ruleId` (camelCase) instead of `rule_id` (snake_case) — fails silently against the real DTO. See `CODE_FINDINGS.md` F-025. | After LocalStack is up; manually or via setup script. |
-| `docker-build-test.sh` | Isolated build + container test on ports 9080/9081 (avoids conflict with the compose stack). Uses `RULE_SOURCE=memory` so no S3/Redis needed. | CI-style validation that the Docker image works. |
+
+| Script under `scripts/` (validation helpers) | What it does | When to run |
+|---|---|---|
+| `scripts/test-localstack.sh` | 5 sequential checks against LocalStack: connectivity, bucket exists, rules uploaded, rule content valid, optional rule execution. | After LocalStack is up; manually or via setup script. |
+| `scripts/docker-build-test.sh` | Isolated build + container test on ports 9080/9081 (avoids conflict with the compose stack). Uses `RULE_SOURCE=memory` so no S3/Redis needed. | CI-style validation that the Docker image works. |
 
 | Script under `scripts/` | What it does |
 |---|---|
