@@ -83,10 +83,7 @@ public class CorsConfig implements WebMvcConfigurer {
     if (value == null || value.trim().isEmpty()) {
       return List.of();
     }
-    return Arrays.stream(value.split(","))
-        .map(String::trim)
-        .filter(s -> !s.isEmpty())
-        .toList();
+    return Arrays.stream(value.split(",")).map(String::trim).filter(s -> !s.isEmpty()).toList();
   }
 
   private void warnIfWildcardOrigins() {

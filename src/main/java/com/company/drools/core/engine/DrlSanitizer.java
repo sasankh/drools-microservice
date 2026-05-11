@@ -97,7 +97,8 @@ public class DrlSanitizer {
           "org.drools.core");
 
   private static final Pattern IMPORT_PATTERN =
-      Pattern.compile("^\\h*+import\\h++(static\\h++)?([\\w.]+\\*?)\\h*+;?+\\h*+$", Pattern.MULTILINE);
+      Pattern.compile(
+          "^\\h*+import\\h++(static\\h++)?([\\w.]+\\*?)\\h*+;?+\\h*+$", Pattern.MULTILINE);
 
   private static final Pattern EVAL_PATTERN = Pattern.compile("\\beval\\s*\\(", Pattern.MULTILINE);
 
