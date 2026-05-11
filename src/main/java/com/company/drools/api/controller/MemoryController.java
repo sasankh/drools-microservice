@@ -9,7 +9,6 @@ import java.lang.management.MemoryUsage;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -36,11 +35,17 @@ public class MemoryController {
 
   private static final Logger logger = LoggerFactory.getLogger(MemoryController.class);
 
+  private static final String KEY_USED_MB       = "usedMB";
+  private static final String KEY_MAX_MB        = "maxMB";
+  private static final String KEY_USAGE_PERCENT = "usagePercent";
+  private static final String KEY_COMMITTED_MB  = "committedMB";
+
   /**
    * Get comprehensive memory information including heap, non-heap, and memory pool statistics.
    *
    * @return Memory statistics including used, free, max memory, and usage percentages
    */
+  @SuppressWarnings("java:S2629") // String.format() inside debug log is intentional
   @GetMapping("/info")
   public ResponseEntity<Map<String, Object>> getMemoryInfo() {
     Runtime runtime = Runtime.getRuntime();
@@ -65,17 +70,17 @@ public class MemoryController {
 
     // Heap statistics (in MB)
     Map<String, Object> heap = new HashMap<>();
-    heap.put("usedMB", heapUsed / 1024 / 1024);
-    heap.put("committedMB", heapCommitted / 1024 / 1024);
-    heap.put("maxMB", heapMax / 1024 / 1024);
-    heap.put("usagePercent", String.format("%.2f", (heapUsed * 100.0) / heapMax));
+    heap.put(KEY_USED_MB,heapUsed / 1024 / 1024);
+    heap.put(KEY_COMMITTED_MB,heapCommitted / 1024 / 1024);
+    heap.put(KEY_MAX_MB,heapMax / 1024 / 1024);
+    heap.put(KEY_USAGE_PERCENT,String.format("%.2f", (heapUsed * 100.0) / heapMax));
     memoryInfo.put("heap", heap);
 
     // Non-heap statistics
     Map<String, Object> nonHeap = new HashMap<>();
-    nonHeap.put("usedMB", nonHeapUsage.getUsed() / 1024 / 1024);
-    nonHeap.put("committedMB", nonHeapUsage.getCommitted() / 1024 / 1024);
-    nonHeap.put("maxMB", nonHeapUsage.getMax() / 1024 / 1024);
+    nonHeap.put(KEY_USED_MB,nonHeapUsage.getUsed() / 1024 / 1024);
+    nonHeap.put(KEY_COMMITTED_MB,nonHeapUsage.getCommitted() / 1024 / 1024);
+    nonHeap.put(KEY_MAX_MB,nonHeapUsage.getMax() / 1024 / 1024);
     memoryInfo.put("nonHeap", nonHeap);
 
     // Runtime statistics
@@ -84,7 +89,7 @@ public class MemoryController {
     runtimeStats.put("totalMemoryMB", totalMemory / 1024 / 1024);
     runtimeStats.put("usedMemoryMB", usedMemory / 1024 / 1024);
     runtimeStats.put("freeMemoryMB", freeMemory / 1024 / 1024);
-    runtimeStats.put("usagePercent", String.format("%.2f", (usedMemory * 100.0) / maxMemory));
+    runtimeStats.put(KEY_USAGE_PERCENT,String.format("%.2f", (usedMemory * 100.0) / maxMemory));
     memoryInfo.put("runtime", runtimeStats);
 
     // Memory pools (Eden, Survivor, Old Gen, Metaspace, etc.)
@@ -97,16 +102,16 @@ public class MemoryController {
                   Map<String, Object> poolInfo = new HashMap<>();
                   poolInfo.put("name", pool.getName());
                   poolInfo.put("type", pool.getType().toString());
-                  poolInfo.put("usedMB", usage.getUsed() / 1024 / 1024);
-                  poolInfo.put("maxMB", usage.getMax() > 0 ? usage.getMax() / 1024 / 1024 : -1);
+                  poolInfo.put(KEY_USED_MB,usage.getUsed() / 1024 / 1024);
+                  poolInfo.put(KEY_MAX_MB,usage.getMax() > 0 ? usage.getMax() / 1024 / 1024 : -1);
                   poolInfo.put(
-                      "usagePercent",
+                      KEY_USAGE_PERCENT,
                       usage.getMax() > 0
                           ? String.format("%.2f", (usage.getUsed() * 100.0) / usage.getMax())
                           : "N/A");
                   return poolInfo;
                 })
-            .collect(Collectors.toList());
+            .toList();
     memoryInfo.put("memoryPools", pools);
 
     // Garbage collection statistics
@@ -121,7 +126,7 @@ public class MemoryController {
                   gcInfo.put("collectionTimeMs", gc.getCollectionTime());
                   return gcInfo;
                 })
-            .collect(Collectors.toList());
+            .toList();
     memoryInfo.put("garbageCollectors", gcStats);
 
     // Warning flags
@@ -158,7 +163,7 @@ public class MemoryController {
     // Wait a bit for GC to complete
     try {
       Thread.sleep(100);
-    } catch (InterruptedException e) {
+    } catch (InterruptedException _) {
       Thread.currentThread().interrupt();
     }
 

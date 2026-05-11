@@ -120,8 +120,7 @@ public class LogSanitizer {
     }
 
     // Additional checks for string values that might contain sensitive data
-    if (value instanceof String) {
-      String stringValue = (String) value;
+    if (value instanceof String stringValue) {
 
       // Check for potential credit card numbers (simplified pattern)
       if (stringValue.matches("\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}")) {
@@ -238,7 +237,7 @@ public class LogSanitizer {
     Map<String, Object> nestedMap;
     try {
       nestedMap = (Map<String, Object>) value;
-    } catch (ClassCastException e) {
+    } catch (ClassCastException _) {
       return value;
     }
     Map<String, Object> result = new HashMap<>();

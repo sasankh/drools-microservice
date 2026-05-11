@@ -36,7 +36,6 @@ public class RedisRuleCache implements RuleCache {
 
   private static final Logger log = LoggerFactory.getLogger(RedisRuleCache.class);
   private static final String CACHE_KEY_PREFIX = "drools:rule:";
-  private static final String CACHE_STATS_KEY = "drools:stats:";
   private static final String METRIC_CACHE_MISSES = "drools.cache.misses";
   private static final String TAG_CACHE_TYPE = "cache_type";
   private static final String CACHE_TYPE_REDIS = "redis";
@@ -99,7 +98,7 @@ public class RedisRuleCache implements RuleCache {
 
       return result;
 
-    } catch (CallNotPermittedException e) {
+    } catch (CallNotPermittedException _) {
       // Circuit breaker is open - treat as cache miss
       log.warn("Redis circuit breaker is open - treating as cache miss for rule: {}", ruleId);
       localMisses.incrementAndGet();
@@ -142,7 +141,7 @@ public class RedisRuleCache implements RuleCache {
 
       redisOperation.run();
 
-    } catch (CallNotPermittedException e) {
+    } catch (CallNotPermittedException _) {
       // Circuit breaker is open - silently fail the cache write
       log.warn("Redis circuit breaker is open - cannot cache rule: {}", rule.getRuleId());
 

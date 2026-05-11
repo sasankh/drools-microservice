@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@SuppressWarnings("java:S2629") // LogSanitizer.sanitizeMessage() calls are security-motivated
 public class RuleExecutionController {
 
   private static final Logger log = LoggerFactory.getLogger(RuleExecutionController.class);
@@ -126,10 +127,6 @@ public class RuleExecutionController {
               .register(meterRegistry));
       throw e;
     } catch (Exception e) {
-      log.error(
-          "Unexpected error executing rule: {}",
-          LogSanitizer.sanitizeMessage(request.getRuleId()),
-          e);
       // Record API error
       meterRegistry
           .counter(

@@ -66,7 +66,7 @@ public class RequestTimeoutConfig {
               request.getRequestURI());
         }
 
-      } catch (Exception e) {
+      } catch (Exception e) { // NOSONAR java:S2139 — logs duration+URI before rethrowing; context not available in caller
         long duration = System.currentTimeMillis() - startTime;
         log.error(
             "Request failed after {}ms (URI: {}): {}",

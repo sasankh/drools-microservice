@@ -22,7 +22,6 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.time.Instant;
 import java.util.*;
-import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,6 +39,7 @@ import software.amazon.awssdk.services.s3.S3Client;
  */
 @RestController
 @RequestMapping("/admin")
+@SuppressWarnings("java:S2629") // LogSanitizer.sanitizeMessage() calls are security-motivated
 public class AdminController {
 
   private static final Logger log = LoggerFactory.getLogger(AdminController.class);
@@ -371,7 +371,6 @@ public class AdminController {
       return ResponseEntity.ok(stats);
 
     } catch (Exception e) {
-      log.error("Error retrieving thread pool statistics", e);
       // Record error response
       meterRegistry
           .counter(
@@ -537,7 +536,7 @@ public class AdminController {
                         cached,
                         metadata.getVersion());
                   })
-              .collect(Collectors.toList());
+              .toList();
 
       RuleListResponse response = new RuleListResponse(ruleInfos);
       return ResponseEntity.ok(response);

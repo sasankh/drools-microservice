@@ -54,9 +54,7 @@ public class RuleExecutor {
       // Execute rule in custom thread pool to handle timeout and provide better concurrency control
       future =
           CompletableFuture.supplyAsync(
-              () -> {
-                return executeRuleInternal(kieContainer, ruleId, inputData);
-              },
+              () -> executeRuleInternal(kieContainer, ruleId, inputData),
               ruleExecutionExecutor);
 
       Map<String, Object> result = future.get(timeoutSeconds, TimeUnit.SECONDS);

@@ -2,6 +2,7 @@ package com.company.drools.storage;
 
 import com.company.drools.api.exception.CircuitBreakerException;
 import com.company.drools.api.exception.RuleNotFoundException;
+import com.company.drools.api.exception.RuleStorageException;
 import com.company.drools.config.TimeoutConfig;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
@@ -13,7 +14,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -108,9 +108,6 @@ public class S3RuleStorage implements RuleStorage {
       return result;
 
     } catch (CallNotPermittedException e) {
-      // Circuit breaker is open
-      log.error("S3 circuit breaker is open - cannot load rule: {}", ruleId, e);
-
       // Record circuit breaker open
       sample.stop(
           Timer.builder(METRIC_STORAGE_OPERATION_TIME)
@@ -121,8 +118,6 @@ public class S3RuleStorage implements RuleStorage {
 
       throw new CircuitBreakerException(STORAGE_TYPE_S3, s3CircuitBreaker.getState().toString(), e);
     } catch (SdkException e) {
-      log.error("Failed to load rule from S3: {} (key: {})", ruleId, s3Key, e);
-
       // Record failed storage operation
       sample.stop(
           Timer.builder(METRIC_STORAGE_OPERATION_TIME)
@@ -131,7 +126,7 @@ public class S3RuleStorage implements RuleStorage {
               .tag(TAG_STATUS, "error")
               .register(meterRegistry));
 
-      throw new RuntimeException("Failed to load rule from S3: " + ruleId, e);
+      throw new RuleStorageException("Failed to load rule from S3: " + ruleId, e);
     }
   }
 
@@ -187,14 +182,13 @@ public class S3RuleStorage implements RuleStorage {
                 .continuationToken(response.nextContinuationToken())
                 .build();
 
-      } while (response.isTruncated());
+      } while (Boolean.TRUE.equals(response.isTruncated()));
 
       log.info("Loaded {} rules from S3 bucket: {}", rules.size(), bucketName);
       return rules;
 
     } catch (SdkException e) {
-      log.error("Failed to list rules from S3 bucket: {}", bucketName, e);
-      throw new RuntimeException("Failed to load rules from S3", e);
+      throw new RuleStorageException("Failed to load rules from S3", e);
     }
   }
 
@@ -216,8 +210,7 @@ public class S3RuleStorage implements RuleStorage {
       log.info("Successfully saved rule: {} to S3 key: {}", rule.getRuleId(), s3Key);
 
     } catch (SdkException e) {
-      log.error("Failed to save rule to S3: {} (key: {})", rule.getRuleId(), s3Key, e);
-      throw new RuntimeException("Failed to save rule to S3: " + rule.getRuleId(), e);
+      throw new RuleStorageException("Failed to save rule to S3: " + rule.getRuleId(), e);
     }
   }
 
@@ -240,8 +233,7 @@ public class S3RuleStorage implements RuleStorage {
       log.info("Successfully deleted rule: {} from S3 key: {}", ruleId, s3Key);
 
     } catch (SdkException e) {
-      log.error("Failed to delete rule from S3: {} (key: {})", ruleId, s3Key, e);
-      throw new RuntimeException("Failed to delete rule from S3: " + ruleId, e);
+      throw new RuleStorageException("Failed to delete rule from S3: " + ruleId, e);
     }
   }
 
@@ -255,7 +247,7 @@ public class S3RuleStorage implements RuleStorage {
       s3Client.headObject(request);
       return true;
 
-    } catch (NoSuchKeyException e) {
+    } catch (NoSuchKeyException _) {
       return false;
     } catch (SdkException e) {
       log.warn("Error checking if rule exists: {} (key: {})", ruleId, s3Key, e);
@@ -296,7 +288,7 @@ public class S3RuleStorage implements RuleStorage {
                 .continuationToken(response.nextContinuationToken())
                 .build();
 
-      } while (response.isTruncated());
+      } while (Boolean.TRUE.equals(response.isTruncated()));
 
       return count;
 
@@ -320,7 +312,7 @@ public class S3RuleStorage implements RuleStorage {
             response.contents().stream()
                 .filter(obj -> obj.key().endsWith(FILE_EXT_DRL))
                 .map(obj -> s3KeyToRuleId(obj.key()))
-                .collect(Collectors.toList());
+                .toList();
         ruleIds.addAll(pageRuleIds);
 
         request =
@@ -329,7 +321,7 @@ public class S3RuleStorage implements RuleStorage {
                 .continuationToken(response.nextContinuationToken())
                 .build();
 
-      } while (response.isTruncated());
+      } while (Boolean.TRUE.equals(response.isTruncated()));
 
       return ruleIds;
 

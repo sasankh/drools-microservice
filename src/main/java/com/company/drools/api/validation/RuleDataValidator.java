@@ -87,8 +87,7 @@ public class RuleDataValidator implements ConstraintValidator<ValidRuleData, Map
     }
 
     // String validation
-    if (value instanceof String) {
-      String strValue = (String) value;
+    if (value instanceof String strValue) {
 
       if (strValue.length() > validationConfig.getDataMaxStringLength()) {
         addViolation(
@@ -113,8 +112,7 @@ public class RuleDataValidator implements ConstraintValidator<ValidRuleData, Map
       }
     }
     // Number validation
-    else if (value instanceof Number) {
-      Number numValue = (Number) value;
+    else if (value instanceof Number numValue) {
 
       if (Math.abs(numValue.longValue()) > validationConfig.getDataMaxNumberValue()) {
         addViolation(
