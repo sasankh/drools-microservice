@@ -77,10 +77,14 @@ class RuleRefreshIntegrationTest {
           }
 
           @Override
-          public void saveRule(Rule rule) {}
+          public void saveRule(Rule rule) {
+            // intentionally empty — test-only RuleStorage stub
+          }
 
           @Override
-          public void deleteRule(String ruleId) {}
+          public void deleteRule(String ruleId) {
+            // intentionally empty — test-only RuleStorage stub
+          }
 
           @Override
           public boolean ruleExists(String ruleId) {
@@ -88,10 +92,14 @@ class RuleRefreshIntegrationTest {
           }
 
           @Override
-          public void refreshCache() {}
+          public void refreshCache() {
+            // intentionally empty — test-only RuleStorage stub
+          }
 
           @Override
-          public void refreshRule(String ruleId) {}
+          public void refreshRule(String ruleId) {
+            // intentionally empty — test-only RuleStorage stub
+          }
 
           @Override
           public long getTotalRuleCount() {

@@ -85,10 +85,14 @@ class RuleExecutionIntegrationTest {
           }
 
           @Override
-          public void refreshCache() {}
+          public void refreshCache() {
+            // intentionally empty — test-only RuleStorage stub
+          }
 
           @Override
-          public void refreshRule(String ruleId) {}
+          public void refreshRule(String ruleId) {
+            // intentionally empty — test-only RuleStorage stub
+          }
 
           @Override
           public long getTotalRuleCount() {

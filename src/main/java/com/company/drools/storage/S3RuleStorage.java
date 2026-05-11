@@ -29,6 +29,14 @@ public class S3RuleStorage implements RuleStorage {
 
   private static final Logger log = LoggerFactory.getLogger(S3RuleStorage.class);
 
+  private static final String METRIC_STORAGE_OPERATION_TIME = "drools.storage.operation.time";
+  private static final String TAG_OPERATION    = "operation";
+  private static final String TAG_STORAGE_TYPE = "storage_type";
+  private static final String STORAGE_TYPE_S3  = "s3";
+  private static final String TAG_STATUS       = "status";
+  private static final String FILE_EXT_DRL     = ".drl";
+  private static final String OP_GET_RULE      = "getRule";
+
   private final S3Client s3Client;
   private final MeterRegistry meterRegistry;
   private final TimeoutConfig timeoutConfig;
@@ -91,10 +99,10 @@ public class S3RuleStorage implements RuleStorage {
 
       // Record successful storage operation
       sample.stop(
-          Timer.builder("drools.storage.operation.time")
-              .tag("operation", "getRule")
-              .tag("storage_type", "s3")
-              .tag("status", result.isPresent() ? "success" : "not_found")
+          Timer.builder(METRIC_STORAGE_OPERATION_TIME)
+              .tag(TAG_OPERATION, OP_GET_RULE)
+              .tag(TAG_STORAGE_TYPE, STORAGE_TYPE_S3)
+              .tag(TAG_STATUS, result.isPresent() ? "success" : "not_found")
               .register(meterRegistry));
 
       return result;
@@ -105,22 +113,22 @@ public class S3RuleStorage implements RuleStorage {
 
       // Record circuit breaker open
       sample.stop(
-          Timer.builder("drools.storage.operation.time")
-              .tag("operation", "getRule")
-              .tag("storage_type", "s3")
-              .tag("status", "circuit_breaker_open")
+          Timer.builder(METRIC_STORAGE_OPERATION_TIME)
+              .tag(TAG_OPERATION, OP_GET_RULE)
+              .tag(TAG_STORAGE_TYPE, STORAGE_TYPE_S3)
+              .tag(TAG_STATUS, "circuit_breaker_open")
               .register(meterRegistry));
 
-      throw new CircuitBreakerException("s3", s3CircuitBreaker.getState().toString(), e);
+      throw new CircuitBreakerException(STORAGE_TYPE_S3, s3CircuitBreaker.getState().toString(), e);
     } catch (SdkException e) {
       log.error("Failed to load rule from S3: {} (key: {})", ruleId, s3Key, e);
 
       // Record failed storage operation
       sample.stop(
-          Timer.builder("drools.storage.operation.time")
-              .tag("operation", "getRule")
-              .tag("storage_type", "s3")
-              .tag("status", "error")
+          Timer.builder(METRIC_STORAGE_OPERATION_TIME)
+              .tag(TAG_OPERATION, OP_GET_RULE)
+              .tag(TAG_STORAGE_TYPE, STORAGE_TYPE_S3)
+              .tag(TAG_STATUS, "error")
               .register(meterRegistry));
 
       throw new RuntimeException("Failed to load rule from S3: " + ruleId, e);
@@ -138,7 +146,7 @@ public class S3RuleStorage implements RuleStorage {
 
     } catch (CallNotPermittedException e) {
       log.warn("S3 circuit breaker is open — cannot load all rules");
-      throw new CircuitBreakerException("s3", "OPEN");
+      throw new CircuitBreakerException(STORAGE_TYPE_S3, "OPEN");
     }
   }
 
@@ -153,7 +161,7 @@ public class S3RuleStorage implements RuleStorage {
         response = s3Client.listObjectsV2(request);
 
         for (S3Object s3Object : response.contents()) {
-          if (s3Object.key().endsWith(".drl")) {
+          if (s3Object.key().endsWith(FILE_EXT_DRL)) {
             String ruleId = s3KeyToRuleId(s3Object.key());
 
             try {
@@ -279,7 +287,7 @@ public class S3RuleStorage implements RuleStorage {
 
       do {
         response = s3Client.listObjectsV2(request);
-        count += response.contents().stream().filter(obj -> obj.key().endsWith(".drl")).count();
+        count += response.contents().stream().filter(obj -> obj.key().endsWith(FILE_EXT_DRL)).count();
 
         request =
             ListObjectsV2Request.builder()
@@ -309,7 +317,7 @@ public class S3RuleStorage implements RuleStorage {
         response = s3Client.listObjectsV2(request);
         List<String> pageRuleIds =
             response.contents().stream()
-                .filter(obj -> obj.key().endsWith(".drl"))
+                .filter(obj -> obj.key().endsWith(FILE_EXT_DRL))
                 .map(obj -> s3KeyToRuleId(obj.key()))
                 .collect(Collectors.toList());
         ruleIds.addAll(pageRuleIds);
@@ -335,7 +343,7 @@ public class S3RuleStorage implements RuleStorage {
    * "pricing/discount/simple.drl"
    */
   private String ruleIdToS3Key(String ruleId) {
-    String s3Key = ruleId.replace(".", "/") + ".drl";
+    String s3Key = ruleId.replace(".", "/") + FILE_EXT_DRL;
     if (s3Key.contains("../") || s3Key.startsWith("/")) {
       throw new IllegalArgumentException("Invalid rule ID: path traversal detected");
     }
@@ -348,7 +356,7 @@ public class S3RuleStorage implements RuleStorage {
    */
   private String s3KeyToRuleId(String s3Key) {
     String ruleId = s3Key;
-    if (ruleId.endsWith(".drl")) {
+    if (ruleId.endsWith(FILE_EXT_DRL)) {
       ruleId = ruleId.substring(0, ruleId.length() - 4);
     }
     return ruleId.replace("/", ".");

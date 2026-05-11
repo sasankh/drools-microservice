@@ -27,6 +27,12 @@ public class DroolsEngineService {
 
   private static final Logger log = LoggerFactory.getLogger(DroolsEngineService.class);
 
+  private static final String METRIC_RULE_EXECUTION_TIME  = "drools.rule.execution.time";
+  private static final String METRIC_RULE_EXECUTION_ERROR = "drools.rule.execution.error";
+  private static final String TAG_RULE_ID                 = "rule_id";
+  private static final String TAG_STATUS                  = "status";
+  private static final String STATUS_ERROR                = "error";
+
   private final RuleCompiler ruleCompiler;
   private final RuleExecutor ruleExecutor;
   private final RuleStorage ruleStorage;
@@ -82,12 +88,12 @@ public class DroolsEngineService {
       if (rule == null || metadata == null) {
         log.warn("Rule not found: {}", ruleId);
         meterRegistry
-            .counter("drools.rule.execution.error", "rule_id", "unknown", "error", "rule_not_found")
+            .counter(METRIC_RULE_EXECUTION_ERROR, TAG_RULE_ID, "unknown", STATUS_ERROR, "rule_not_found")
             .increment();
         sample.stop(
-            Timer.builder("drools.rule.execution.time")
-                .tag("rule_id", "unknown")
-                .tag("status", "error")
+            Timer.builder(METRIC_RULE_EXECUTION_TIME)
+                .tag(TAG_RULE_ID, "unknown")
+                .tag(TAG_STATUS, STATUS_ERROR)
                 .register(meterRegistry));
         return RuleExecutor.ExecutionResult.failure("Rule not found: " + ruleId);
       }
@@ -96,12 +102,12 @@ public class DroolsEngineService {
       if (metadata.getStatus() != RuleMetadata.RuleStatus.ACTIVE) {
         log.warn("Rule is not active: {} (status: {})", ruleId, metadata.getStatus());
         meterRegistry
-            .counter("drools.rule.execution.error", "rule_id", ruleId, "error", "rule_not_active")
+            .counter(METRIC_RULE_EXECUTION_ERROR, TAG_RULE_ID, ruleId, STATUS_ERROR, "rule_not_active")
             .increment();
         sample.stop(
-            Timer.builder("drools.rule.execution.time")
-                .tag("rule_id", ruleId)
-                .tag("status", "error")
+            Timer.builder(METRIC_RULE_EXECUTION_TIME)
+                .tag(TAG_RULE_ID, ruleId)
+                .tag(TAG_STATUS, STATUS_ERROR)
                 .register(meterRegistry));
         return RuleExecutor.ExecutionResult.failure("Rule is not active: " + ruleId);
       }
@@ -117,21 +123,21 @@ public class DroolsEngineService {
         ruleMetadata.put(ruleId, updatedMetadata);
 
         // Record successful execution metrics
-        meterRegistry.counter("drools.rule.execution.success", "rule_id", ruleId).increment();
+        meterRegistry.counter("drools.rule.execution.success", TAG_RULE_ID, ruleId).increment();
         sample.stop(
-            Timer.builder("drools.rule.execution.time")
-                .tag("rule_id", ruleId)
-                .tag("status", "success")
+            Timer.builder(METRIC_RULE_EXECUTION_TIME)
+                .tag(TAG_RULE_ID, ruleId)
+                .tag(TAG_STATUS, "success")
                 .register(meterRegistry));
       } else {
         // Record failed execution metrics
         meterRegistry
-            .counter("drools.rule.execution.error", "rule_id", ruleId, "error", "execution_failed")
+            .counter(METRIC_RULE_EXECUTION_ERROR, TAG_RULE_ID, ruleId, STATUS_ERROR, "execution_failed")
             .increment();
         sample.stop(
-            Timer.builder("drools.rule.execution.time")
-                .tag("rule_id", ruleId)
-                .tag("status", "error")
+            Timer.builder(METRIC_RULE_EXECUTION_TIME)
+                .tag(TAG_RULE_ID, ruleId)
+                .tag(TAG_STATUS, STATUS_ERROR)
                 .register(meterRegistry));
       }
 

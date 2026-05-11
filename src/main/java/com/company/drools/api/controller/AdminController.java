@@ -43,6 +43,17 @@ public class AdminController {
 
   private static final Logger log = LoggerFactory.getLogger(AdminController.class);
 
+  private static final String METRIC_API_RESPONSE_TIME    = "drools.api.response.time";
+  private static final String TAG_ENDPOINT                = "endpoint";
+  private static final String TAG_STATUS                  = "status";
+  private static final String TAG_ERROR_TYPE              = "error_type";
+  private static final String STATUS_UP                   = "UP";
+  private static final String STATUS_DOWN                 = "DOWN";
+  private static final String STATUS_SUCCESS              = "success";
+  private static final String STATUS_ERROR                = "error";
+  private static final String ENDPOINT_ADMIN_HEALTH       = "/admin/health";
+  private static final String ENDPOINT_ADMIN_THREAD_POOLS = "/admin/thread-pools";
+
   private final DroolsEngineService droolsEngineService;
   private final StorageFactory storageFactory;
   private final RuleCache ruleCache;
@@ -93,23 +104,23 @@ public class AdminController {
 
     try {
       // Record API request
-      meterRegistry.counter("drools.api.requests", "endpoint", "/admin/health").increment();
+      meterRegistry.counter("drools.api.requests", TAG_ENDPOINT, ENDPOINT_ADMIN_HEALTH).increment();
 
       Map<String, ComponentHealth> components = new HashMap<>();
-      String overallStatus = "UP";
+      String overallStatus = STATUS_UP;
 
       // Check Drools engine health
       ComponentHealth droolsHealth = checkDroolsHealth();
       components.put("drools", droolsHealth);
-      if (!"UP".equals(droolsHealth.getStatus())) {
-        overallStatus = "DOWN";
+      if (!STATUS_UP.equals(droolsHealth.getStatus())) {
+        overallStatus = STATUS_DOWN;
       }
 
       // Check storage health (S3/Local/Memory)
       ComponentHealth storageHealth = checkStorageHealth();
       components.put("storage", storageHealth);
-      if (!"UP".equals(storageHealth.getStatus())) {
-        overallStatus = "DOWN";
+      if (!STATUS_UP.equals(storageHealth.getStatus())) {
+        overallStatus = STATUS_DOWN;
       }
 
       // Check cache health
@@ -133,9 +144,9 @@ public class AdminController {
 
       // Record successful response timing
       sample.stop(
-          Timer.builder("drools.api.response.time")
-              .tag("endpoint", "/admin/health")
-              .tag("status", "success")
+          Timer.builder(METRIC_API_RESPONSE_TIME)
+              .tag(TAG_ENDPOINT, ENDPOINT_ADMIN_HEALTH)
+              .tag(TAG_STATUS, STATUS_SUCCESS)
               .register(meterRegistry));
 
       return ResponseEntity.ok(response);
@@ -143,12 +154,12 @@ public class AdminController {
     } catch (Exception e) {
       // Record error response timing
       meterRegistry
-          .counter("drools.api.errors", "endpoint", "/admin/health", "error_type", "unexpected")
+          .counter("drools.api.errors", TAG_ENDPOINT, ENDPOINT_ADMIN_HEALTH, TAG_ERROR_TYPE, "unexpected")
           .increment();
       sample.stop(
-          Timer.builder("drools.api.response.time")
-              .tag("endpoint", "/admin/health")
-              .tag("status", "error")
+          Timer.builder(METRIC_API_RESPONSE_TIME)
+              .tag(TAG_ENDPOINT, ENDPOINT_ADMIN_HEALTH)
+              .tag(TAG_STATUS, STATUS_ERROR)
               .register(meterRegistry));
       throw e;
     }
@@ -165,15 +176,15 @@ public class AdminController {
       details.put("cache_hit_rate", calculateCacheHitRate());
 
       // Check if we have at least one rule loaded
-      String status = loadedRules > 0 ? "UP" : "DOWN";
+      String status = loadedRules > 0 ? STATUS_UP : STATUS_DOWN;
       if (loadedRules == 0) {
-        details.put("error", "No rules loaded");
+        details.put(STATUS_ERROR,"No rules loaded");
       }
 
       return new ComponentHealth(status, details);
     } catch (Exception e) {
-      details.put("error", e.getMessage());
-      return new ComponentHealth("DOWN", details);
+      details.put(STATUS_ERROR,e.getMessage());
+      return new ComponentHealth(STATUS_DOWN,details);
     }
   }
 
@@ -194,7 +205,7 @@ public class AdminController {
           details.put("s3_bucket", s3BucketName);
           details.put("s3_accessible", false);
           details.put("s3_error", e.getMessage());
-          return new ComponentHealth("DOWN", details);
+          return new ComponentHealth(STATUS_DOWN,details);
         }
       }
 
@@ -202,10 +213,10 @@ public class AdminController {
       long ruleCount = storage.getTotalRuleCount();
       details.put("total_rules", ruleCount);
 
-      return new ComponentHealth("UP", details);
+      return new ComponentHealth(STATUS_UP,details);
     } catch (Exception e) {
-      details.put("error", e.getMessage());
-      return new ComponentHealth("DOWN", details);
+      details.put(STATUS_ERROR,e.getMessage());
+      return new ComponentHealth(STATUS_DOWN,details);
     }
   }
 
@@ -226,10 +237,10 @@ public class AdminController {
         details.put("statistics", statsMap);
       }
 
-      return new ComponentHealth("UP", details);
+      return new ComponentHealth(STATUS_UP,details);
     } catch (Exception e) {
-      details.put("error", e.getMessage());
-      return new ComponentHealth("DOWN", details);
+      details.put(STATUS_ERROR,e.getMessage());
+      return new ComponentHealth(STATUS_DOWN,details);
     }
   }
 
@@ -238,7 +249,7 @@ public class AdminController {
     try {
       if (redisConnectionFactory == null) {
         details.put("enabled", false);
-        return new ComponentHealth("UP", details);
+        return new ComponentHealth(STATUS_UP,details);
       }
 
       // Try to ping Redis (close connection to prevent leak)
@@ -255,11 +266,11 @@ public class AdminController {
         details.put("cache_type", "RedisRuleCache");
       }
 
-      return new ComponentHealth("UP", details);
+      return new ComponentHealth(STATUS_UP,details);
     } catch (Exception e) {
       details.put("connected", false);
-      details.put("error", e.getMessage());
-      return new ComponentHealth("DOWN", details);
+      details.put(STATUS_ERROR,e.getMessage());
+      return new ComponentHealth(STATUS_DOWN,details);
     }
   }
 
@@ -295,11 +306,11 @@ public class AdminController {
 
       details.put(
           "circuit_breakers_enabled", s3CircuitBreaker != null || redisCircuitBreaker != null);
-      return new ComponentHealth("UP", details);
+      return new ComponentHealth(STATUS_UP,details);
 
     } catch (Exception e) {
-      details.put("error", e.getMessage());
-      return new ComponentHealth("UP", details); // Circuit breaker errors don't affect health
+      details.put(STATUS_ERROR,e.getMessage());
+      return new ComponentHealth(STATUS_UP,details); // Circuit breaker errors don't affect health
     }
   }
 
@@ -332,7 +343,7 @@ public class AdminController {
 
     try {
       // Record API request
-      meterRegistry.counter("drools.api.requests", "endpoint", "/admin/thread-pools").increment();
+      meterRegistry.counter("drools.api.requests", TAG_ENDPOINT, ENDPOINT_ADMIN_THREAD_POOLS).increment();
 
       Map<String, Object> stats = new HashMap<>();
       stats.put("rule_execution_pool", threadPoolConfig.getRuleExecutionPoolStats());
@@ -341,9 +352,9 @@ public class AdminController {
 
       // Record successful response
       sample.stop(
-          Timer.builder("drools.api.response.time")
-              .tag("endpoint", "/admin/thread-pools")
-              .tag("status", "success")
+          Timer.builder(METRIC_API_RESPONSE_TIME)
+              .tag(TAG_ENDPOINT, ENDPOINT_ADMIN_THREAD_POOLS)
+              .tag(TAG_STATUS, STATUS_SUCCESS)
               .register(meterRegistry));
 
       return ResponseEntity.ok(stats);
@@ -353,12 +364,12 @@ public class AdminController {
       // Record error response
       meterRegistry
           .counter(
-              "drools.api.errors", "endpoint", "/admin/thread-pools", "error_type", "unexpected")
+              "drools.api.errors", TAG_ENDPOINT, ENDPOINT_ADMIN_THREAD_POOLS, TAG_ERROR_TYPE, "unexpected")
           .increment();
       sample.stop(
-          Timer.builder("drools.api.response.time")
-              .tag("endpoint", "/admin/thread-pools")
-              .tag("status", "error")
+          Timer.builder(METRIC_API_RESPONSE_TIME)
+              .tag(TAG_ENDPOINT, ENDPOINT_ADMIN_THREAD_POOLS)
+              .tag(TAG_STATUS, STATUS_ERROR)
               .register(meterRegistry));
       throw e;
     }
@@ -460,19 +471,19 @@ public class AdminController {
 
         RefreshRuleResponse response =
             new RefreshRuleResponse(
-                ruleId, "success", previousVersion, currentVersion, compilationTime);
+                ruleId, STATUS_SUCCESS, previousVersion, currentVersion, compilationTime);
 
         log.info("Successfully refreshed rule: {}", LogSanitizer.sanitizeMessage(ruleId));
         return ResponseEntity.ok(response);
       } else {
-        RefreshRuleResponse response = new RefreshRuleResponse(ruleId, "error");
+        RefreshRuleResponse response = new RefreshRuleResponse(ruleId, STATUS_ERROR);
         response.setError("Failed to compile rule");
         return ResponseEntity.internalServerError().body(response);
       }
 
     } catch (Exception e) {
       log.error("Error refreshing rule: {}", LogSanitizer.sanitizeMessage(ruleId), e);
-      RefreshRuleResponse response = new RefreshRuleResponse(ruleId, "error");
+      RefreshRuleResponse response = new RefreshRuleResponse(ruleId, STATUS_ERROR);
       response.setError(LogSanitizer.sanitizeMessage(e.getMessage()));
       return ResponseEntity.internalServerError().body(response);
     }

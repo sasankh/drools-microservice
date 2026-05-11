@@ -1,6 +1,7 @@
 package com.company.drools.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -58,15 +59,15 @@ class S3ConfigTest {
     @Test
     @DisplayName("setAccessKeyId does not throw")
     void testSetAccessKeyId() {
-      s3Config.setAccessKeyId("new-key");
       // No public getter — credential getters removed to prevent secret exposure
+      assertDoesNotThrow(() -> s3Config.setAccessKeyId("new-key"));
     }
 
     @Test
     @DisplayName("setSecretAccessKey does not throw")
     void testSetSecretAccessKey() {
-      s3Config.setSecretAccessKey("new-secret");
       // No public getter — credential getters removed to prevent secret exposure
+      assertDoesNotThrow(() -> s3Config.setSecretAccessKey("new-secret"));
     }
   }
 

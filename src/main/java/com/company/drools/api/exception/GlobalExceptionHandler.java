@@ -20,6 +20,8 @@ public class GlobalExceptionHandler {
 
   private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+  private static final String ERROR_CODE_INVALID_INPUT = "INVALID_INPUT";
+
   @ExceptionHandler(RuleNotFoundException.class)
   public ResponseEntity<RuleExecutionResponse> handleRuleNotFoundException(
       RuleNotFoundException ex) {
@@ -55,7 +57,7 @@ public class GlobalExceptionHandler {
             .collect(Collectors.joining(", "));
 
     RuleExecutionResponse response =
-        RuleExecutionResponse.failure(null, "INVALID_INPUT", "Request validation failed", errors);
+        RuleExecutionResponse.failure(null, ERROR_CODE_INVALID_INPUT, "Request validation failed", errors);
 
     return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
   }
@@ -102,7 +104,7 @@ public class GlobalExceptionHandler {
     log.warn("Invalid argument: {}", ex.getMessage());
 
     RuleExecutionResponse response =
-        RuleExecutionResponse.failure(null, "INVALID_INPUT", "Invalid request parameter");
+        RuleExecutionResponse.failure(null, ERROR_CODE_INVALID_INPUT, "Invalid request parameter");
 
     return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
   }
@@ -124,7 +126,7 @@ public class GlobalExceptionHandler {
     RuleExecutionResponse response =
         RuleExecutionResponse.failure(
             null,
-            "INVALID_INPUT",
+            ERROR_CODE_INVALID_INPUT,
             "Request body is not valid JSON",
             "Verify the request body is well-formed JSON matching the documented schema");
 

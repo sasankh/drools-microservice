@@ -24,6 +24,13 @@ public class RuleExecutionController {
 
   private static final Logger log = LoggerFactory.getLogger(RuleExecutionController.class);
 
+  private static final String METRIC_API_RESPONSE_TIME = "drools.api.response.time";
+  private static final String TAG_ENDPOINT             = "endpoint";
+  private static final String TAG_STATUS               = "status";
+  private static final String STATUS_ERROR             = "error";
+  private static final String TAG_ERROR_TYPE           = "error_type";
+  private static final String ENDPOINT_EXECUTE_RULE    = "/execute-rule";
+
   private final DroolsEngineService droolsEngineService;
   private final MeterRegistry meterRegistry;
 
@@ -46,7 +53,7 @@ public class RuleExecutionController {
 
     try {
       // Record API request
-      meterRegistry.counter("drools.api.requests", "endpoint", "/execute-rule").increment();
+      meterRegistry.counter("drools.api.requests", TAG_ENDPOINT, ENDPOINT_EXECUTE_RULE).increment();
       // Check if rule exists
       if (!droolsEngineService.hasRule(request.getRuleId())) {
         throw new RuleNotFoundException(request.getRuleId());
@@ -67,9 +74,9 @@ public class RuleExecutionController {
 
         // Record successful response
         sample.stop(
-            Timer.builder("drools.api.response.time")
-                .tag("endpoint", "/execute-rule")
-                .tag("status", "success")
+            Timer.builder(METRIC_API_RESPONSE_TIME)
+                .tag(TAG_ENDPOINT, ENDPOINT_EXECUTE_RULE)
+                .tag(TAG_STATUS,"success")
                 .register(meterRegistry));
 
         RuleExecutionResponse response =
@@ -88,24 +95,24 @@ public class RuleExecutionController {
     } catch (RuleNotFoundException e) {
       // Record API error
       meterRegistry
-          .counter("drools.api.errors", "endpoint", "/execute-rule", "error_type", "rule_not_found")
+          .counter("drools.api.errors", TAG_ENDPOINT, ENDPOINT_EXECUTE_RULE, TAG_ERROR_TYPE, "rule_not_found")
           .increment();
       sample.stop(
-          Timer.builder("drools.api.response.time")
-              .tag("endpoint", "/execute-rule")
-              .tag("status", "error")
+          Timer.builder(METRIC_API_RESPONSE_TIME)
+              .tag(TAG_ENDPOINT, ENDPOINT_EXECUTE_RULE)
+              .tag(TAG_STATUS, STATUS_ERROR)
               .register(meterRegistry));
       throw e;
     } catch (RuleExecutionException e) {
       // Record API error
       meterRegistry
           .counter(
-              "drools.api.errors", "endpoint", "/execute-rule", "error_type", "execution_failed")
+              "drools.api.errors", TAG_ENDPOINT, ENDPOINT_EXECUTE_RULE, TAG_ERROR_TYPE, "execution_failed")
           .increment();
       sample.stop(
-          Timer.builder("drools.api.response.time")
-              .tag("endpoint", "/execute-rule")
-              .tag("status", "error")
+          Timer.builder(METRIC_API_RESPONSE_TIME)
+              .tag(TAG_ENDPOINT, ENDPOINT_EXECUTE_RULE)
+              .tag(TAG_STATUS, STATUS_ERROR)
               .register(meterRegistry));
       throw e;
     } catch (Exception e) {
@@ -115,12 +122,12 @@ public class RuleExecutionController {
           e);
       // Record API error
       meterRegistry
-          .counter("drools.api.errors", "endpoint", "/execute-rule", "error_type", "unexpected")
+          .counter("drools.api.errors", TAG_ENDPOINT, ENDPOINT_EXECUTE_RULE, TAG_ERROR_TYPE, "unexpected")
           .increment();
       sample.stop(
-          Timer.builder("drools.api.response.time")
-              .tag("endpoint", "/execute-rule")
-              .tag("status", "error")
+          Timer.builder(METRIC_API_RESPONSE_TIME)
+              .tag(TAG_ENDPOINT, ENDPOINT_EXECUTE_RULE)
+              .tag(TAG_STATUS, STATUS_ERROR)
               .register(meterRegistry));
       throw new RuleExecutionException(
           request.getRuleId(), "Unexpected error during rule execution", e);
