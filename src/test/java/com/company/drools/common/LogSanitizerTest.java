@@ -27,7 +27,7 @@ class LogSanitizerTest extends BaseUnitTest {
 
       Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
 
-      assertThat(result.get("payment")).isEqualTo("****-****-****-1111");
+      assertThat(result).containsEntry("payment", "****-****-****-1111");
     }
 
     @Test
@@ -38,7 +38,7 @@ class LogSanitizerTest extends BaseUnitTest {
 
       Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
 
-      assertThat(result.get("identifier")).isEqualTo("***-**-6789");
+      assertThat(result).containsEntry("identifier", "***-**-6789");
     }
 
     @Test
@@ -49,7 +49,7 @@ class LogSanitizerTest extends BaseUnitTest {
 
       Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
 
-      assertThat(result.get("user_email")).isEqualTo("u***@example.com");
+      assertThat(result).containsEntry("user_email", "u***@example.com");
     }
 
     @Test
@@ -62,9 +62,10 @@ class LogSanitizerTest extends BaseUnitTest {
 
       Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
 
-      assertThat(result.get("password")).isEqualTo("[REDACTED]");
-      assertThat(result.get("ssn")).isEqualTo("[REDACTED]");
-      assertThat(result.get("api_key")).isEqualTo("[REDACTED]");
+      assertThat(result)
+          .containsEntry("password", "[REDACTED]")
+          .containsEntry("ssn", "[REDACTED]")
+          .containsEntry("api_key", "[REDACTED]");
     }
   }
 
@@ -105,9 +106,10 @@ class LogSanitizerTest extends BaseUnitTest {
 
       Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
 
-      assertThat(result.get("amount")).isEqualTo(100);
-      assertThat(result.get("currency")).isEqualTo("USD");
-      assertThat(result.get("status")).isEqualTo("active");
+      assertThat(result)
+          .containsEntry("amount", 100)
+          .containsEntry("currency", "USD")
+          .containsEntry("status", "active");
     }
 
     @Test
@@ -134,7 +136,7 @@ class LogSanitizerTest extends BaseUnitTest {
 
       Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
 
-      assertThat(result.get("payment")).isEqualTo("****-****-****-1111");
+      assertThat(result).containsEntry("payment", "****-****-****-1111");
     }
 
     @Test
@@ -146,7 +148,7 @@ class LogSanitizerTest extends BaseUnitTest {
       Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
 
       // 9-digit numbers without dashes/spaces should pass through (could be order IDs, etc.)
-      assertThat(result.get("identifier")).isEqualTo("123456789");
+      assertThat(result).containsEntry("identifier", "123456789");
     }
 
     @Test
@@ -157,7 +159,7 @@ class LogSanitizerTest extends BaseUnitTest {
 
       Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
 
-      assertThat(result.get("email")).isEqualTo("not-an-email");
+      assertThat(result).containsEntry("email", "not-an-email");
     }
 
     @Test
@@ -168,7 +170,7 @@ class LogSanitizerTest extends BaseUnitTest {
 
       Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
 
-      assertThat(result.get("email")).isEqualTo("[REDACTED]");
+      assertThat(result).containsEntry("email", "[REDACTED]");
     }
 
     @Test
@@ -231,7 +233,7 @@ class LogSanitizerTest extends BaseUnitTest {
 
       Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
 
-      assertThat(result.get("shipping")).isEqualTo("express");
+      assertThat(result).containsEntry("shipping", "express");
     }
 
     @Test
@@ -242,7 +244,7 @@ class LogSanitizerTest extends BaseUnitTest {
 
       Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
 
-      assertThat(result.get("author")).isEqualTo("Jane Doe");
+      assertThat(result).containsEntry("author", "Jane Doe");
     }
 
     @Test
@@ -253,7 +255,7 @@ class LogSanitizerTest extends BaseUnitTest {
 
       Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
 
-      assertThat(result.get("pin")).isEqualTo("[REDACTED]");
+      assertThat(result).containsEntry("pin", "[REDACTED]");
     }
 
     @Test
@@ -264,7 +266,7 @@ class LogSanitizerTest extends BaseUnitTest {
 
       Map<String, Object> result = LogSanitizer.sanitizeDataMap(data);
 
-      assertThat(result.get("auth")).isEqualTo("[REDACTED]");
+      assertThat(result).containsEntry("auth", "[REDACTED]");
     }
 
     @Test
@@ -296,8 +298,9 @@ class LogSanitizerTest extends BaseUnitTest {
 
       @SuppressWarnings("unchecked")
       Map<String, Object> resultNested = (Map<String, Object>) result.get("user");
-      assertThat(resultNested.get("password")).isEqualTo("[REDACTED]");
-      assertThat(resultNested.get("name")).isEqualTo("John");
+      assertThat(resultNested)
+          .containsEntry("password", "[REDACTED]")
+          .containsEntry("name", "John");
     }
 
     @Test
@@ -323,7 +326,7 @@ class LogSanitizerTest extends BaseUnitTest {
       Map<String, Object> r2 = (Map<String, Object>) r1.get("settings");
       @SuppressWarnings("unchecked")
       Map<String, Object> r3 = (Map<String, Object>) r2.get("config");
-      assertThat(r3.get("token")).isEqualTo("[REDACTED]");
+      assertThat(r3).containsEntry("token", "[REDACTED]");
     }
   }
 }

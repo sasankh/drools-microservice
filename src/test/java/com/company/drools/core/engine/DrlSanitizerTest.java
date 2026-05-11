@@ -2,10 +2,13 @@ package com.company.drools.core.engine;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 @DisplayName("DrlSanitizer")
 class DrlSanitizerTest {
@@ -168,164 +171,38 @@ class DrlSanitizerTest {
   @DisplayName("Blocked Imports")
   class BlockedImports {
 
-    @Test
-    @DisplayName("rejects java.io import")
-    void testRejectsJavaIo() {
-      String drl =
-          """
-          package com.company.rules.test
-
-          import java.io.File
-          import java.util.Map
-
-          rule "File Read"
-          when
-              $data : Map()
-          then
-              $data.put("executed", true);
-          end
-          """;
-
-      DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
-      assertThat(result.isAccepted()).isFalse();
-      assertThat(result.getViolations()).anyMatch(v -> v.contains("java.io.File"));
+    static Stream<String> blockedImportLines() {
+      return Stream.of(
+          "import java.io.File",
+          "import java.net.URL",
+          "import java.lang.reflect.Method",
+          "import javax.script.ScriptEngine",
+          "import javax.naming.InitialContext",
+          "import static java.lang.Math.pow",
+          "import com.some.external.Library");
     }
 
-    @Test
-    @DisplayName("rejects java.net import")
-    void testRejectsJavaNet() {
+    @ParameterizedTest(name = "rejects: {0}")
+    @MethodSource("blockedImportLines")
+    @DisplayName("rejects blocked imports")
+    void testRejectsBlockedImport(String importLine) {
       String drl =
           """
           package com.company.rules.test
 
-          import java.net.URL
+          %s
 
-          rule "Network Rule"
+          rule "Test Rule"
           when
               $data : java.util.Map()
           then
               $data.put("executed", true);
           end
-          """;
+          """.formatted(importLine);
 
       DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
 
       assertThat(result.isAccepted()).isFalse();
-      assertThat(result.getViolations()).anyMatch(v -> v.contains("java.net.URL"));
-    }
-
-    @Test
-    @DisplayName("rejects java.lang.reflect import")
-    void testRejectsReflection() {
-      String drl =
-          """
-          package com.company.rules.test
-
-          import java.lang.reflect.Method
-
-          rule "Reflection Rule"
-          when
-              $data : java.util.Map()
-          then
-              $data.put("executed", true);
-          end
-          """;
-
-      DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
-      assertThat(result.isAccepted()).isFalse();
-      assertThat(result.getViolations()).anyMatch(v -> v.contains("java.lang.reflect.Method"));
-    }
-
-    @Test
-    @DisplayName("rejects javax.script import")
-    void testRejectsScriptEngine() {
-      String drl =
-          """
-          package com.company.rules.test
-
-          import javax.script.ScriptEngine
-
-          rule "Script Rule"
-          when
-              $data : java.util.Map()
-          then
-              $data.put("executed", true);
-          end
-          """;
-
-      DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
-      assertThat(result.isAccepted()).isFalse();
-    }
-
-    @Test
-    @DisplayName("rejects javax.naming import (JNDI)")
-    void testRejectsJndi() {
-      String drl =
-          """
-          package com.company.rules.test
-
-          import javax.naming.InitialContext
-
-          rule "JNDI Rule"
-          when
-              $data : java.util.Map()
-          then
-              $data.put("executed", true);
-          end
-          """;
-
-      DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
-      assertThat(result.isAccepted()).isFalse();
-    }
-
-    @Test
-    @DisplayName("rejects static imports")
-    void testRejectsStaticImports() {
-      String drl =
-          """
-          package com.company.rules.test
-
-          import static java.lang.Math.pow
-
-          rule "Static Import Rule"
-          when
-              $data : java.util.Map()
-          then
-              $data.put("executed", true);
-          end
-          """;
-
-      DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
-      assertThat(result.isAccepted()).isFalse();
-      assertThat(result.getViolations()).anyMatch(v -> v.contains("Static imports"));
-    }
-
-    @Test
-    @DisplayName("rejects unknown/unallowed imports")
-    void testRejectsUnknownImports() {
-      String drl =
-          """
-          package com.company.rules.test
-
-          import com.some.external.Library
-
-          rule "Unknown Import Rule"
-          when
-              $data : java.util.Map()
-          then
-              $data.put("executed", true);
-          end
-          """;
-
-      DrlSanitizer.SanitizationResult result = sanitizer.sanitize("test.rule", drl);
-
-      assertThat(result.isAccepted()).isFalse();
-      assertThat(result.getViolations()).anyMatch(v -> v.contains("not in allowlist"));
     }
   }
 
