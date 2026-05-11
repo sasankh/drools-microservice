@@ -1134,6 +1134,32 @@ curl http://localhost:8080/admin/rules | jq '.rules[].avg_execution_time_ms'
 - **Availability**: 99.9% uptime
 - **Cache Hit Ratio**: > 90%
 
+### Rule Capacity & Memory Sizing
+
+There are two limits to understand: the **LRU cache cap** (how many compiled rules stay hot in memory) and the **heap limit** (how many can fit before GC pressure becomes a problem).
+
+**LRU cache cap** — controlled by `LRU_CACHE_MAX_SIZE` (default `100`). Rules beyond this are evicted and re-compiled on next access. Raise this freely; the only real constraint is heap.
+
+**Heap capacity** — compiled `KieBase` objects vary in size by rule complexity. With the default `-Xmx2048m` (2 GB):
+
+| Rule complexity | Approx compiled KieBase size | Comfortable fit in 2 GB heap |
+|---|---|---|
+| Simple (1–2 conditions) | ~0.5 MB | ~1,500–2,000 rules |
+| Medium (accumulate, joins) | ~2–3 MB | ~400–600 rules |
+| Complex (forall, multi-join, salience chains) | ~5–10 MB | ~150–300 rules |
+
+**Load-test baseline (2026-05-11):** 1,000 synthetic rules compiled in ~46s, heap settled at ~47 MB post-GC, peak during compilation ~400–600 MB.
+
+To increase capacity, raise both `LRU_CACHE_MAX_SIZE` and `-Xmx` together:
+
+```bash
+# Example: 500 complex rules on a 4 vCPU / 8 GB instance
+LRU_CACHE_MAX_SIZE=500
+JAVA_OPTS="-Xms1g -Xmx6g -XX:+UseG1GC"
+```
+
+S3 storage has no rule count limit — only the JVM heap constrains what is compiled and cached locally per instance.
+
 ### Alerting
 
 Monitor these metrics:
