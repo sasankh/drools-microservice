@@ -13,8 +13,7 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
-import software.amazon.awssdk.core.retry.RetryPolicy;
-import software.amazon.awssdk.core.retry.backoff.BackoffStrategy;
+import software.amazon.awssdk.awscore.retry.AwsRetryStrategy;
 import software.amazon.awssdk.http.SdkHttpClient;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import software.amazon.awssdk.regions.Region;
@@ -69,7 +68,7 @@ public class S3Config {
             .region(Region.of(region))
             .credentialsProvider(createCredentialsProvider())
             .httpClient(httpClient)
-            .overrideConfiguration(builder -> builder.retryPolicy(createRetryPolicy()));
+            .overrideConfiguration(builder -> builder.retryStrategy(AwsRetryStrategy.defaultRetryStrategy()));
 
     // Configure endpoint for LocalStack or custom S3-compatible services
     if (StringUtils.hasText(endpoint)) {
@@ -113,14 +112,6 @@ public class S3Config {
         .tcpKeepAlive(true)
         // Expect-continue handshake
         .expectContinueEnabled(false)
-        .build();
-  }
-
-  private RetryPolicy createRetryPolicy() {
-    return RetryPolicy.builder()
-        .numRetries(3)
-        .backoffStrategy(BackoffStrategy.defaultStrategy())
-        .throttlingBackoffStrategy(BackoffStrategy.defaultThrottlingStrategy())
         .build();
   }
 

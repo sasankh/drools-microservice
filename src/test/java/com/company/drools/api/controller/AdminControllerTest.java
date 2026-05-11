@@ -58,7 +58,8 @@ class AdminControllerTest {
 
     adminController =
         new AdminController(
-            droolsEngineService, storageFactory, ruleCache, meterRegistry, threadPoolConfig);
+            droolsEngineService, storageFactory, ruleCache, meterRegistry, threadPoolConfig,
+            null, null, null, null);
 
     // Create a Spring context with ValidationConfig so @ValidRuleId validator works.
     // The SpringConstraintValidatorFactory allows Hibernate Validator to inject Spring beans

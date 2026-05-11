@@ -89,7 +89,7 @@ public class S3RuleStorage implements RuleStorage {
 
                   return Optional.of(rule);
 
-                } catch (NoSuchKeyException e) {
+                } catch (NoSuchKeyException _) {
                   log.warn("Rule not found in S3: {} (key: {})", ruleId, s3Key);
                   return Optional.empty();
                 }
@@ -144,7 +144,7 @@ public class S3RuleStorage implements RuleStorage {
           CircuitBreaker.decorateSupplier(s3CircuitBreaker, this::loadAllRulesFromS3);
       return s3Operation.get();
 
-    } catch (CallNotPermittedException e) {
+    } catch (CallNotPermittedException _) {
       log.warn("S3 circuit breaker is open — cannot load all rules");
       throw new CircuitBreakerException(STORAGE_TYPE_S3, "OPEN");
     }

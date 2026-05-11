@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.lang.Nullable;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -66,34 +67,37 @@ public class AdminController {
   @Value("${redis.enabled:false}")
   private boolean redisEnabled;
 
-  @Autowired(required = false)
   private RedisConnectionFactory redisConnectionFactory;
 
-  @Autowired(required = false)
   private S3Client s3Client;
 
   @Value("${drools.s3.bucket-name:}")
   private String s3BucketName;
 
-  @Autowired(required = false)
-  @Qualifier("s3CircuitBreaker")
   private CircuitBreaker s3CircuitBreaker;
 
-  @Autowired(required = false)
-  @Qualifier("redisCircuitBreaker")
   private CircuitBreaker redisCircuitBreaker;
 
+  @Autowired
   public AdminController(
       DroolsEngineService droolsEngineService,
       StorageFactory storageFactory,
       RuleCache ruleCache,
       MeterRegistry meterRegistry,
-      ThreadPoolConfig threadPoolConfig) {
+      ThreadPoolConfig threadPoolConfig,
+      @Nullable RedisConnectionFactory redisConnectionFactory,
+      @Nullable S3Client s3Client,
+      @Nullable @Qualifier("s3CircuitBreaker") CircuitBreaker s3CircuitBreaker,
+      @Nullable @Qualifier("redisCircuitBreaker") CircuitBreaker redisCircuitBreaker) {
     this.droolsEngineService = droolsEngineService;
     this.storageFactory = storageFactory;
     this.ruleCache = ruleCache;
     this.meterRegistry = meterRegistry;
     this.threadPoolConfig = threadPoolConfig;
+    this.redisConnectionFactory = redisConnectionFactory;
+    this.s3Client = s3Client;
+    this.s3CircuitBreaker = s3CircuitBreaker;
+    this.redisCircuitBreaker = redisCircuitBreaker;
   }
 
   /** Enhanced health check endpoint with component status. */

@@ -28,7 +28,7 @@ public class DotenvConfig implements ApplicationContextInitializer<ConfigurableA
       ConfigurableEnvironment environment = applicationContext.getEnvironment();
       environment.getPropertySources().addLast(new MapPropertySource("dotenv", dotenvMap));
 
-    } catch (Exception e) {
+    } catch (Exception _) {
       // Silently ignore .env loading errors - it's optional
       System.out.println("Note: .env file not found or could not be loaded (this is optional)");
     }
