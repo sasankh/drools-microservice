@@ -205,17 +205,11 @@ public class AdminController {
       details.put("rule_source", ruleSource);
 
       // For S3, check bucket accessibility
-      if (storage instanceof S3RuleStorage && s3Client != null && !s3BucketName.isEmpty()) {
-        try {
-          s3Client.headBucket(builder -> builder.bucket(s3BucketName));
-          details.put("s3_bucket", s3BucketName);
-          details.put("s3_accessible", true);
-        } catch (Exception e) {
-          details.put("s3_bucket", s3BucketName);
-          details.put("s3_accessible", false);
-          details.put("s3_error", e.getMessage());
-          return new ComponentHealth(STATUS_DOWN, details);
-        }
+      if (storage instanceof S3RuleStorage
+          && s3Client != null
+          && !s3BucketName.isEmpty()
+          && !checkS3BucketAccessibility(details)) {
+        return new ComponentHealth(STATUS_DOWN, details);
       }
 
       // Try to get rule count
@@ -226,6 +220,20 @@ public class AdminController {
     } catch (Exception e) {
       details.put(STATUS_ERROR, e.getMessage());
       return new ComponentHealth(STATUS_DOWN, details);
+    }
+  }
+
+  private boolean checkS3BucketAccessibility(Map<String, Object> details) {
+    try {
+      s3Client.headBucket(builder -> builder.bucket(s3BucketName));
+      details.put("s3_bucket", s3BucketName);
+      details.put("s3_accessible", true);
+      return true;
+    } catch (Exception e) {
+      details.put("s3_bucket", s3BucketName);
+      details.put("s3_accessible", false);
+      details.put("s3_error", e.getMessage());
+      return false;
     }
   }
 

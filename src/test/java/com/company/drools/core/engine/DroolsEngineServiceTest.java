@@ -394,7 +394,7 @@ class DroolsEngineServiceTest {
                 data.put("value", threadId * 10);
                 RuleExecutor.ExecutionResult r = service.executeRule("corruption.test.rule", data);
                 results.add(r);
-              } catch (Exception e) {
+              } catch (Exception _) {
                 // ignore
               } finally {
                 doneLatch.countDown();

@@ -155,20 +155,7 @@ public class S3RuleStorage implements RuleStorage {
           if (s3Object.key().endsWith(FILE_EXT_DRL)) {
             String ruleId = s3KeyToRuleId(s3Object.key());
 
-            try {
-              String content =
-                  s3Client
-                      .getObjectAsBytes(
-                          GetObjectRequest.builder().bucket(bucketName).key(s3Object.key()).build())
-                      .asUtf8String();
-
-              RuleMetadata metadata = createMetadataFromS3Object(s3Object);
-              rules.add(new Rule(ruleId, content, metadata));
-
-            } catch (Exception e) {
-              log.warn("Failed to load rule: {} from S3 key: {}", ruleId, s3Object.key(), e);
-              // Continue loading other rules
-            }
+            tryLoadAndAddRule(ruleId, s3Object, rules);
           }
         }
 
@@ -343,6 +330,20 @@ public class S3RuleStorage implements RuleStorage {
    * Transforms S3 key path to rule ID. Example: "pricing/discount/simple.drl" ->
    * "pricing.discount.simple"
    */
+  private void tryLoadAndAddRule(String ruleId, S3Object s3Object, List<Rule> rules) {
+    try {
+      String content =
+          s3Client
+              .getObjectAsBytes(
+                  GetObjectRequest.builder().bucket(bucketName).key(s3Object.key()).build())
+              .asUtf8String();
+      RuleMetadata metadata = createMetadataFromS3Object(s3Object);
+      rules.add(new Rule(ruleId, content, metadata));
+    } catch (Exception e) {
+      log.warn("Failed to load rule: {} from S3 key: {}", ruleId, s3Object.key(), e);
+    }
+  }
+
   private String s3KeyToRuleId(String s3Key) {
     String ruleId = s3Key;
     if (ruleId.endsWith(FILE_EXT_DRL)) {

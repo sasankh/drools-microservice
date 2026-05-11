@@ -95,7 +95,7 @@ public class S3Config {
 
     // Use default credentials chain for production (IAM roles, etc.)
     log.debug("Using default credentials provider chain");
-    return DefaultCredentialsProvider.create();
+    return DefaultCredentialsProvider.builder().build();
   }
 
   private SdkHttpClient createHttpClientWithPooling() {
