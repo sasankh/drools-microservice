@@ -84,3 +84,8 @@ gc-logs/
 
 # Load test artifacts (orchestrator output: JTL files, HTML reports, heap dumps, memory CSVs)
 scripts/load-test-results/
+
+# Claude Code MCP server config — local-only, contains a SonarQube token.
+# Each developer creates their own; see CLAUDE.md "SonarQube MCP" note
+# and .env.example "SONARQUBE MCP" section for setup instructions.
+.mcp.json

@@ -18,12 +18,25 @@ The legacy consolidated context file at `.ai-workspace/ai-initial-context/ai-ini
 ## ⚠️ Important: Recent change log (most recent first)
 
 ### Tooling: SonarQube MCP wired into Claude Code (2026-05-10)
-The repo ships [`.mcp.json`](.mcp.json) with a SonarQube MCP server (project scope). To use it:
-1. Set `SONARQUBE_TOKEN` and `SONARQUBE_URL` in your shell env (see [`.env.example`](.env.example) — the "SONARQUBE MCP" section).
-2. Start Claude Code from the repo root.
-3. The `sonarqube` MCP tools become available automatically.
+This repo supports a SonarQube MCP server, but **`.mcp.json` is gitignored** because it holds a SonarQube token. Each developer creates their own. To set it up:
 
-Docker must be running; the MCP launches `mcp/sonarqube` per session. The committed `.mcp.json` contains `${VAR}` placeholders only — real tokens stay in each developer's shell env.
+1. Get a SonarQube user token (SonarQube UI → My Account → Security → Generate Tokens).
+2. From the repo root, run:
+   ```bash
+   claude mcp add sonarqube \
+     --scope project \
+     --env SONARQUBE_TOKEN=<your-token> \
+     --env SONARQUBE_URL=http://host.docker.internal:9000 \
+     -- docker run -i --rm \
+          -e SONARQUBE_TOKEN \
+          -e SONARQUBE_URL \
+          mcp/sonarqube
+   ```
+   This creates a local `.mcp.json` (gitignored, never committed). On macOS use `host.docker.internal:9000` so the MCP container can reach SonarQube on your host; on Linux use `localhost:9000`.
+3. Verify: `claude mcp list` should show `sonarqube` as `✓ Connected`.
+4. Restart Claude Code so the new MCP is loaded.
+
+Docker must be running; the MCP launches `mcp/sonarqube` per session. See [`.env.example`](.env.example) "SONARQUBE MCP" section for additional notes.
 
 ### Load test + sample-rules expansion + rule-loading rework (2026-05-10)
 - **Drools 10 rule-loading rework**: `DroolsEngineService` now holds a **single long-lived `KieContainer`** updated in place via `KieContainer.updateToVersion(ReleaseId)`, with an explicit `KieRepository.removeKieModule(oldReleaseId)` after each swap (Drools 10 does **not** auto-clean). Replaces the earlier two-container atomic-swap-with-`dispose()` pattern. See [ADR-003 2026-05-10 update](project-documentation/36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal).
