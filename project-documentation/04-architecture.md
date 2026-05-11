@@ -1442,7 +1442,7 @@ Response:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    STAGE 1: BUILD                            │
-│  Base: maven:3.9-amazoncorretto-17                           │
+│  Base: maven:3.9-eclipse-temurin-25                          │
 │  - Copy pom.xml and source code                              │
 │  - Run: mvn clean package -DskipTests                        │
 │  - Output: target/drools-rule-engine.jar (~50MB)             │

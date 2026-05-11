@@ -34,7 +34,7 @@ Read these files **in this exact order** to understand what the Drools project i
 
 **After Phase 1, you should know:**
 - What the Drools Rule Engine Microservice is (high-performance business rule execution)
-- Tech stack (Java 17, Spring Boot 3.x, Drools 8.44.0, AWS S3, Redis, Docker)
+- Tech stack (Java 25, Spring Boot 3.5.3, Drools 10.2.0, AWS S3, Redis, Docker)
 - Performance targets (100-1000 RPS, P99 < 100ms)
 - Current status (All 5 phases complete, production-ready)
 
@@ -171,7 +171,7 @@ I've loaded the Drools Rule Engine Microservice context. Here's what I understan
 
 - **Project**: High-performance business rule execution microservice
 - **Status**: All 5 phases complete - Production ready
-- **Tech Stack**: Java 17, Spring Boot 3.x, Drools 8.44.0, Docker
+- **Tech Stack**: Java 25, Spring Boot 3.5.3, Drools 10.2.0, Docker
 - **Performance**: 1.5s startup, 1-40ms rule execution, 347MB Docker image
 - **Features**: S3 storage, multi-tier caching, 10 sample rules, LocalStack dev setup
 - **Next Steps**: [Based on latest snap-memory or user request]
