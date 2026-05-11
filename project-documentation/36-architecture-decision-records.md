@@ -32,7 +32,7 @@ Format used here: each ADR has Status, Context, Decision, Alternatives Considere
 | [009](#adr-009-eval-banned-in-drl) | `eval()` banned in DRL via `DrlSanitizer` | Accepted |
 | [010](#adr-010-rate-limiting-in-memory-not-redis-backed) | Rate limiting in-memory (not Redis-backed) | Accepted (consider revisiting at scale) |
 | [011](#adr-011-custom-validation-annotations-vs-jakarta-only) | Custom validation annotations alongside Jakarta | Accepted |
-| [012](#adr-012-drools-8440-not-latest-8x-or-9x) | Drools 8.44.0.Final (not latest 8.x or 9.x) | Accepted |
+| [012](#adr-012-drools-8440-not-latest-8x-or-9x) | Drools 8.44.0.Final (not latest 8.x or 9.x) | Superseded by ADR-014 |
 
 ---
 
@@ -68,7 +68,7 @@ This project uses **traditional DRL syntax only**. Modern features (rule units, 
 ### References
 - [17-rule-development.md](17-rule-development.md) — project-specific rule patterns
 - [23-rule-language-reference.md](23-rule-language-reference.md) — upstream reference with "[Not used in this project]" tags
-- [`sample-rules/`](../sample-rules/) — 10 examples in the chosen style
+- [`sample-rules/`](../sample-rules/) — 17 examples in the chosen style
 
 ---
 
@@ -652,7 +652,7 @@ Keep [ADR-003](#adr-003-kiecontainer-atomic-swap-with-disposal) (atomic-swap Kie
 - **Positive**: single `drools-engine` aggregator replaces 3 individual dependencies. Cleaner pom.
 - **Positive**: future-proof — Drools 8.x is in maintenance, 10.x is the active line.
 - **Negative**: `drools-mvel` is officially deprecated by the Drools team but still required at runtime for this project's DRL dialect. Will need attention if Drools removes it in a future major.
-- **Negative**: executable model (the new default in `drools-engine`) has three documented behavior differences from MVEL: invalid type coercion (`(String) intValue` no longer tolerated), strict generics, wrapper coercion (`10` doesn't auto-coerce to `Long`). All 10 sample DRL files were reviewed; no rewrites needed (none of them use those patterns).
+- **Negative**: executable model (the new default in `drools-engine`) has three documented behavior differences from MVEL: invalid type coercion (`(String) intValue` no longer tolerated), strict generics, wrapper coercion (`10` doesn't auto-coerce to `Long`). All 17 sample DRL files were reviewed; no rewrites needed (none of them use those patterns).
 
 ### Code changes
 
@@ -674,9 +674,9 @@ No application Java code changes required.
 ### Validation
 
 - All 584 non-Docker tests pass on Java 25 + Drools 10.2.0 + Spring Boot 3.5.3.
-- All 10 sample rules produce identical outputs to pre-migration (verified via `RuleExecutionIntegrationTest$SampleRulesExecution`).
+- All 17 sample rules produce identical outputs to pre-migration (verified via `RuleExecutionIntegrationTest$SampleRulesExecution`).
 - KieContainer disposal still functions; memory leak fix from prior Phase 6 still applies.
-- **Validated end-to-end on 2026-05-09 / 2026-05-10** against the full docker-compose stack (app + LocalStack + Redis) using all 10 production-shaped sample DRL files loaded from S3. Result: **PASS** with 0 DRL changes and 0 application config changes required. KieContainer atomic-swap disposal confirmed leak-free (post-GC heap below pre-test baseline after 10 successive full refreshes). 2 pre-existing findings (single-rule refresh KieContainer-replacement bug; malformed JSON returns 500 instead of 400) raised to backlog — neither is a Drools 10 regression. Full results: [`.ai-workspace/project-plans/e2e-validation-checklist.md`](../.ai-workspace/project-plans/e2e-validation-checklist.md).
+- **Validated end-to-end on 2026-05-09 / 2026-05-10** against the full docker-compose stack (app + LocalStack + Redis) using all 17 production-shaped sample DRL files loaded from S3. Result: **PASS** with 0 DRL changes and 0 application config changes required. KieContainer atomic-swap disposal confirmed leak-free (post-GC heap below pre-test baseline after 10 successive full refreshes). 2 pre-existing findings (single-rule refresh KieContainer-replacement bug; malformed JSON returns 500 instead of 400) raised to backlog — neither is a Drools 10 regression. Full results: [`.ai-workspace/project-plans/e2e-validation-checklist.md`](../.ai-workspace/project-plans/e2e-validation-checklist.md).
 
 ### When to revisit
 

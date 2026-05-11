@@ -290,9 +290,9 @@ Watch the trend. Climbing steadily = leak. Stable = healthy. Sawtooth = normal G
 
 #### F1: Heap usage growing steadily (looks like a leak)
 
-The KieContainer disposal fix from 2026-02-19 should prevent the most common leak (rule refresh accumulating containers). Verify:
+The KieContainer lifecycle was overhauled on 2026-05-10: a single long-lived container is updated in place via `updateToVersion(ReleaseId)`, and old `KieModule`s are explicitly removed with `kieRepository.removeKieModule(oldReleaseId)`. Verify the current pattern is in place:
 
-- Look at recent commits to `DroolsEngineService` — `oldContainer.dispose()` should be called.
+- Look at `DroolsEngineService.loadRules` — confirm it calls `kieRepository.removeKieModule(oldReleaseId)` after `container.updateToVersion(newReleaseId)`. The old `oldContainer.dispose()` two-container pattern is superseded.
 - Run a refresh storm test:
   ```bash
   for i in {1..20}; do

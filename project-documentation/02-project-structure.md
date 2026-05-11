@@ -79,7 +79,8 @@ com/company/drools/
 │   │   ├── RuleNotFoundException.java     # → 404
 │   │   ├── RuleExecutionException.java    # → 400
 │   │   ├── TimeoutException.java          # → 408
-│   │   └── CircuitBreakerException.java   # → 503
+│   │   ├── CircuitBreakerException.java   # → 503
+│   │   └── RuleStorageException.java      # wraps S3/filesystem storage failures → 500
 │   │
 │   ├── filter/                        # Spring servlet filters (@Order matters)
 │   │   ├── SecurityHeadersFilter.java     # @Order(-1) — adds 7 response headers
@@ -158,7 +159,7 @@ The `application.yml` is the most-referenced config file in the codebase. See [0
 
 ### `src/test/java/com/company/drools/`
 
-45 test files, 598 tests passing (1 pre-existing testcontainers env error, unrelated). Coverage roughly preserved from the 96.2% / 89.7% pre-modernization baseline.
+44 test files, 597 tests passing (1 pre-existing testcontainers env error, unrelated). Coverage roughly preserved from the 96.2% / 89.7% pre-modernization baseline.
 
 ```
 src/test/java/com/company/drools/

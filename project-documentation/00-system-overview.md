@@ -117,12 +117,12 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 
 | Stat | Value |
 |---|---|
-| Total documentation files | **39** (including this one) |
+| Total documentation files | **40** (including this one) |
 | Total Java source files | 57 |
 | Total test files | 44 |
-| Total tests (`@Test` + `@ParameterizedTest`) | **589** |
+| Total tests (`@Test` + `@ParameterizedTest`) | **597** |
 | Test coverage (instruction / branch) | 96.2% / 89.7% |
-| Sample rules in `sample-rules/` | 10 |
+| Sample rules in `sample-rules/` | 17 |
 | Environment variables actually read | 66 |
 | Distinct error codes | 10 |
 | Spring profiles | 4 (`local`, `dev`, `prod`, `docker`) |
@@ -131,12 +131,12 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 | Ports exposed | 2 (8080 main+admin, 8081 actuator) |
 | Sustained throughput target / measured | 100-1000 RPS / 45+ RPS sustained |
 | P99 latency target / measured (cached) | < 100ms / 1-40ms |
-| Docker image size | ~347 MB (Corretto 17 Alpine multi-stage) |
+| Docker image size | ~347 MB (Corretto 25 Alpine multi-stage) |
 | Production-ready security findings | 39 of 42 closed |
 
 ---
 
-## The 39-doc corpus, by category
+## The 40-doc corpus, by category
 
 ### Foundation (00-04)
 - [00-system-overview.md](00-system-overview.md) — this file

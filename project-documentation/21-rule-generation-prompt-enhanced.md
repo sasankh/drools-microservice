@@ -2,7 +2,7 @@
 
 ## For AI Assistants - Complete Rule Generation Guide
 
-This prompt incorporates official Drools 8 documentation and best practices for generating production-ready rules.
+This prompt incorporates official Drools 10 documentation and best practices for generating production-ready rules.
 
 ---
 
