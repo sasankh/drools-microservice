@@ -363,11 +363,13 @@ For the canonical narrative — phase history, ADRs, performance targets, testin
 
 - [`project-documentation/`](project-documentation/) — full 40-doc corpus, the canonical reference
 - [`set-java-env.sh`](set-java-env.sh) — Java 25 environment setup script
-- [`docker-build-test.sh`](scripts/docker-build-test.sh) — automated Docker build and validation
 - [`setup-dev-environment.sh`](setup-dev-environment.sh) — one-command local dev setup
 - [`init-localstack.sh`](init-localstack.sh) — LocalStack bootstrap (reads from `sample-rules/`)
 - [`sample-rules/`](sample-rules/) — 17 sample DRL files (single source of truth: 10 original + 7 added 2026-05-10 covering accumulate/exists/not/salience/regex/temporal/accumulate-with-collect patterns)
-- [`scripts/run-load-test.sh`](scripts/run-load-test.sh) — load-test orchestrator (Phase 0–8, 1000 rules, JMeter)
+- [`scripts/test-localstack.sh`](scripts/test-localstack.sh) — validates LocalStack S3 bucket and uploaded rules
+- [`scripts/docker-build-test.sh`](scripts/docker-build-test.sh) — automated Docker build and validation
+- [`scripts/e2e-load-test.sh`](scripts/e2e-load-test.sh) — one-command E2E + 5-min load test with hot reload
+- [`scripts/run-load-test.sh`](scripts/run-load-test.sh) — full load-test orchestrator (Phase 0–8, 1000 rules, JMeter)
 - `gc-logs/`, `heap-dumps/` — runtime diagnostics output (gitignored content)
 - [`.ai-workspace/snap-memory/`](.ai-workspace/snap-memory/) — session memory files for `snap-memory` AI workflow
 
