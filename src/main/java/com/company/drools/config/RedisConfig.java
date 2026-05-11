@@ -27,7 +27,7 @@ public class RedisConfig {
 
   private static final Logger log = LoggerFactory.getLogger(RedisConfig.class);
 
-  @Value("${redis.ttl-minutes:60}")
+  @Value("${redis.drl-rules.ttl-minutes:15}")
   private long ttlMinutes;
 
   /** Configures RedisTemplate for Rule objects with JSON serialization. */

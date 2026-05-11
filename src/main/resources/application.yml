@@ -64,7 +64,6 @@ drools:
   local:
     rules-directory: ${LOCAL_RULES_DIRECTORY:src/main/resources/rules}
   cache:
-    lru-max-size: ${LRU_CACHE_MAX_SIZE:100}
     execution-timeout-seconds: ${RULE_EXECUTION_TIMEOUT_SECONDS:30}
   refresh:
     auto-enabled: ${AUTO_REFRESH_ENABLED:false}
@@ -126,7 +125,12 @@ drools:
 # Redis Configuration
 redis:
   enabled: ${REDIS_ENABLED:false}
-  ttl-minutes: ${REDIS_TTL_MINUTES:60}
+  drl-rules:
+    ttl-minutes: ${REDIS_DRL_RULES_TTL_MINUTES:15}
+    key-prefix: ${REDIS_DRL_RULES_KEY_PREFIX:drools:rule:}
+  pubsub:
+    enabled: ${REDIS_PUBSUB_ENABLED:true}
+    channel: ${REDIS_REFRESH_CHANNEL:drools:rule:events}
 
 # AWS Configuration
 aws:
