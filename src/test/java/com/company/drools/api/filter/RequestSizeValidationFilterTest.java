@@ -227,10 +227,7 @@ class RequestSizeValidationFilterTest extends BaseUnitTest {
       java.util.Map<String, Object> parsed =
           objectMapper.readValue(responseBody, java.util.Map.class);
 
-      assertThat(parsed)
-          .containsKey("rule_id")
-          .containsKey("result")
-          .containsKey("error");
+      assertThat(parsed).containsKey("rule_id").containsKey("result").containsKey("error");
       assertThat(parsed.get("rule_id")).isNull();
       assertThat(parsed.get("result")).isNull();
 

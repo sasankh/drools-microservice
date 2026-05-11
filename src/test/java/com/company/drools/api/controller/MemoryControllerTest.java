@@ -144,16 +144,14 @@ class MemoryControllerTest {
     void setUp() throws Exception {
       controller = new MemoryController();
       getMemoryWarningsMethod =
-          MemoryController.class.getDeclaredMethod(
-              "getMemoryWarnings", double.class, long.class);
+          MemoryController.class.getDeclaredMethod("getMemoryWarnings", double.class, long.class);
       getMemoryWarningsMethod.setAccessible(true);
     }
 
     @SuppressWarnings("unchecked")
     private List<String> invokeGetMemoryWarnings(double heapUsagePercent, long heapMax)
         throws Exception {
-      return (List<String>)
-          getMemoryWarningsMethod.invoke(controller, heapUsagePercent, heapMax);
+      return (List<String>) getMemoryWarningsMethod.invoke(controller, heapUsagePercent, heapMax);
     }
 
     static Stream<Arguments> heapUsageWarningCases() {

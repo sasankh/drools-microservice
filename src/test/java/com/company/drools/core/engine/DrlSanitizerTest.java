@@ -293,7 +293,6 @@ class DrlSanitizerTest {
 
       assertThat(result.isAccepted()).isFalse();
     }
-
   }
 
   @Nested

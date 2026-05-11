@@ -35,10 +35,10 @@ public class MemoryController {
 
   private static final Logger logger = LoggerFactory.getLogger(MemoryController.class);
 
-  private static final String KEY_USED_MB       = "usedMB";
-  private static final String KEY_MAX_MB        = "maxMB";
+  private static final String KEY_USED_MB = "usedMB";
+  private static final String KEY_MAX_MB = "maxMB";
   private static final String KEY_USAGE_PERCENT = "usagePercent";
-  private static final String KEY_COMMITTED_MB  = "committedMB";
+  private static final String KEY_COMMITTED_MB = "committedMB";
 
   /**
    * Get comprehensive memory information including heap, non-heap, and memory pool statistics.
@@ -70,17 +70,17 @@ public class MemoryController {
 
     // Heap statistics (in MB)
     Map<String, Object> heap = new HashMap<>();
-    heap.put(KEY_USED_MB,heapUsed / 1024 / 1024);
-    heap.put(KEY_COMMITTED_MB,heapCommitted / 1024 / 1024);
-    heap.put(KEY_MAX_MB,heapMax / 1024 / 1024);
-    heap.put(KEY_USAGE_PERCENT,String.format("%.2f", (heapUsed * 100.0) / heapMax));
+    heap.put(KEY_USED_MB, heapUsed / 1024 / 1024);
+    heap.put(KEY_COMMITTED_MB, heapCommitted / 1024 / 1024);
+    heap.put(KEY_MAX_MB, heapMax / 1024 / 1024);
+    heap.put(KEY_USAGE_PERCENT, String.format("%.2f", (heapUsed * 100.0) / heapMax));
     memoryInfo.put("heap", heap);
 
     // Non-heap statistics
     Map<String, Object> nonHeap = new HashMap<>();
-    nonHeap.put(KEY_USED_MB,nonHeapUsage.getUsed() / 1024 / 1024);
-    nonHeap.put(KEY_COMMITTED_MB,nonHeapUsage.getCommitted() / 1024 / 1024);
-    nonHeap.put(KEY_MAX_MB,nonHeapUsage.getMax() / 1024 / 1024);
+    nonHeap.put(KEY_USED_MB, nonHeapUsage.getUsed() / 1024 / 1024);
+    nonHeap.put(KEY_COMMITTED_MB, nonHeapUsage.getCommitted() / 1024 / 1024);
+    nonHeap.put(KEY_MAX_MB, nonHeapUsage.getMax() / 1024 / 1024);
     memoryInfo.put("nonHeap", nonHeap);
 
     // Runtime statistics
@@ -89,7 +89,7 @@ public class MemoryController {
     runtimeStats.put("totalMemoryMB", totalMemory / 1024 / 1024);
     runtimeStats.put("usedMemoryMB", usedMemory / 1024 / 1024);
     runtimeStats.put("freeMemoryMB", freeMemory / 1024 / 1024);
-    runtimeStats.put(KEY_USAGE_PERCENT,String.format("%.2f", (usedMemory * 100.0) / maxMemory));
+    runtimeStats.put(KEY_USAGE_PERCENT, String.format("%.2f", (usedMemory * 100.0) / maxMemory));
     memoryInfo.put("runtime", runtimeStats);
 
     // Memory pools (Eden, Survivor, Old Gen, Metaspace, etc.)
@@ -102,8 +102,8 @@ public class MemoryController {
                   Map<String, Object> poolInfo = new HashMap<>();
                   poolInfo.put("name", pool.getName());
                   poolInfo.put("type", pool.getType().toString());
-                  poolInfo.put(KEY_USED_MB,usage.getUsed() / 1024 / 1024);
-                  poolInfo.put(KEY_MAX_MB,usage.getMax() > 0 ? usage.getMax() / 1024 / 1024 : -1);
+                  poolInfo.put(KEY_USED_MB, usage.getUsed() / 1024 / 1024);
+                  poolInfo.put(KEY_MAX_MB, usage.getMax() > 0 ? usage.getMax() / 1024 / 1024 : -1);
                   poolInfo.put(
                       KEY_USAGE_PERCENT,
                       usage.getMax() > 0

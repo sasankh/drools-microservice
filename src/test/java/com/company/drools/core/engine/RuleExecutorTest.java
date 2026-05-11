@@ -243,8 +243,7 @@ class RuleExecutorTest {
       // Track which thread runs the rule
       List<String> threadNames = new CopyOnWriteArrayList<>();
       ExecutorService customExecutor =
-          Executors.newSingleThreadExecutor(
-              r -> new Thread(r, "custom-rule-thread"));
+          Executors.newSingleThreadExecutor(r -> new Thread(r, "custom-rule-thread"));
 
       // Wrap to capture thread name during execution
       Executor trackingExecutor =

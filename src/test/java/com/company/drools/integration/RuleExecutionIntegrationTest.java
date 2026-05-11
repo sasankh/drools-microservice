@@ -74,10 +74,14 @@ class RuleExecutionIntegrationTest {
           }
 
           @Override
-          public void saveRule(Rule rule) { /* test stub — no persistence needed */ }
+          public void saveRule(Rule rule) {
+            /* test stub — no persistence needed */
+          }
 
           @Override
-          public void deleteRule(String ruleId) { /* test stub — no persistence needed */ }
+          public void deleteRule(String ruleId) {
+            /* test stub — no persistence needed */
+          }
 
           @Override
           public boolean ruleExists(String ruleId) {
@@ -572,7 +576,9 @@ class RuleExecutionIntegrationTest {
                     data.put("shippingType", "standard");
                     data.put("weight", 1.0 + index);
                   }
-                  default -> { /* no data setup needed for other rule IDs */ }
+                  default -> {
+                    /* no data setup needed for other rule IDs */
+                  }
                 }
 
                 RuleExecutor.ExecutionResult result = droolsEngineService.executeRule(ruleId, data);

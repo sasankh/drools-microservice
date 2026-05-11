@@ -26,7 +26,7 @@ public class LocalLRUCache implements RuleCache {
 
   private static final Logger log = LoggerFactory.getLogger(LocalLRUCache.class);
 
-  private static final String TAG_CACHE_TYPE  = "cache_type";
+  private static final String TAG_CACHE_TYPE = "cache_type";
   private static final String CACHE_TYPE_LOCAL = "local";
 
   private final int maxSize;
@@ -57,7 +57,9 @@ public class LocalLRUCache implements RuleCache {
               log.debug("Evicting rule from cache: {}", eldest.getKey());
               evictions.incrementAndGet();
               // Record cache eviction metric
-              meterRegistry.counter("drools.cache.evictions", TAG_CACHE_TYPE, CACHE_TYPE_LOCAL).increment();
+              meterRegistry
+                  .counter("drools.cache.evictions", TAG_CACHE_TYPE, CACHE_TYPE_LOCAL)
+                  .increment();
             }
             return shouldRemove;
           }

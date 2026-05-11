@@ -747,10 +747,7 @@ class DroolsEngineServiceTest {
 
       Map<String, RuleMetadata> allMetadata = service.getAllRuleMetadata();
 
-      assertThat(allMetadata)
-          .hasSize(2)
-          .containsKey("meta.rule.one")
-          .containsKey("meta.rule.two");
+      assertThat(allMetadata).hasSize(2).containsKey("meta.rule.one").containsKey("meta.rule.two");
       assertThat(allMetadata.get("meta.rule.one").getStatus())
           .isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
     }

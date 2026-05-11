@@ -86,15 +86,15 @@ public class CircuitBreakerConfig {
     circuitBreaker
         .getEventPublisher()
         .onStateTransition(
-            event -> log.info(
-                "S3 Circuit breaker state transition: {} -> {}",
-                event.getStateTransition().getFromState(),
-                event.getStateTransition().getToState()));
+            event ->
+                log.info(
+                    "S3 Circuit breaker state transition: {} -> {}",
+                    event.getStateTransition().getFromState(),
+                    event.getStateTransition().getToState()));
 
     circuitBreaker
         .getEventPublisher()
-        .onCallNotPermitted(
-            event -> log.warn("S3 Circuit breaker call not permitted"));
+        .onCallNotPermitted(event -> log.warn("S3 Circuit breaker call not permitted"));
 
     log.info(
         "S3 Circuit Breaker configured: failure-rate={}%, wait-duration={}ms, window-size={}",
@@ -131,15 +131,15 @@ public class CircuitBreakerConfig {
     circuitBreaker
         .getEventPublisher()
         .onStateTransition(
-            event -> log.info(
-                "Redis Circuit breaker state transition: {} -> {}",
-                event.getStateTransition().getFromState(),
-                event.getStateTransition().getToState()));
+            event ->
+                log.info(
+                    "Redis Circuit breaker state transition: {} -> {}",
+                    event.getStateTransition().getFromState(),
+                    event.getStateTransition().getToState()));
 
     circuitBreaker
         .getEventPublisher()
-        .onCallNotPermitted(
-            event -> log.warn("Redis Circuit breaker call not permitted"));
+        .onCallNotPermitted(event -> log.warn("Redis Circuit breaker call not permitted"));
 
     log.info(
         "Redis Circuit Breaker configured: failure-rate={}%, wait-duration={}ms, window-size={}",

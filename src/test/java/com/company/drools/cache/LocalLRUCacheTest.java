@@ -459,7 +459,9 @@ class LocalLRUCacheTest extends BaseUnitTest {
 
       List<String> ruleIds = cache.getCachedRuleIds();
 
-      assertThat(ruleIds).hasSize(3).containsExactlyInAnyOrder("rule.alpha", "rule.beta", "rule.gamma");
+      assertThat(ruleIds)
+          .hasSize(3)
+          .containsExactlyInAnyOrder("rule.alpha", "rule.beta", "rule.gamma");
     }
 
     @Test
