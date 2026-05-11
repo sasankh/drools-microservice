@@ -17,6 +17,14 @@ The legacy consolidated context file at `.ai-workspace/ai-initial-context/ai-ini
 
 ## ⚠️ Important: Recent change log (most recent first)
 
+### Tooling: SonarQube MCP wired into Claude Code (2026-05-10)
+The repo ships [`.mcp.json`](.mcp.json) with a SonarQube MCP server (project scope). To use it:
+1. Set `SONARQUBE_TOKEN` and `SONARQUBE_URL` in your shell env (see [`.env.example`](.env.example) — the "SONARQUBE MCP" section).
+2. Start Claude Code from the repo root.
+3. The `sonarqube` MCP tools become available automatically.
+
+Docker must be running; the MCP launches `mcp/sonarqube` per session. The committed `.mcp.json` contains `${VAR}` placeholders only — real tokens stay in each developer's shell env.
+
 ### Load test + sample-rules expansion + rule-loading rework (2026-05-10)
 - **Drools 10 rule-loading rework**: `DroolsEngineService` now holds a **single long-lived `KieContainer`** updated in place via `KieContainer.updateToVersion(ReleaseId)`, with an explicit `KieRepository.removeKieModule(oldReleaseId)` after each swap (Drools 10 does **not** auto-clean). Replaces the earlier two-container atomic-swap-with-`dispose()` pattern. See [ADR-003 2026-05-10 update](project-documentation/36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal).
 - **LOADING-marker bug fix**: latent at 10-rule scale (sub-ms compile); surfaced at 1000 rules (~46s compile) as a 1.5% error rate during refresh windows. Fixed in [`DroolsEngineService.loadOrReplaceRule`](src/main/java/com/company/drools/core/engine/DroolsEngineService.java).
