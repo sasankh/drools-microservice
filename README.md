@@ -821,17 +821,160 @@ mvn test -Dtest=*IntegrationTest
 mvn test -Dtest=S3StorageIntegrationTest
 ```
 
-### Performance Testing
-```bash
-# Load testing with JMeter
-mvn jmeter:jmeter
+### Quick E2E & Load Test
 
-# Manual performance test
-for i in {1..100}; do
-  curl -X POST http://localhost:8080/execute-rule \
-    -H "Content-Type: application/json" \
-    -d '{"rule_id": "simple.discount", "data": {"amount": 100}}'
+Run this whenever you want to verify the full stack is healthy — rules loading from S3, execution working, hot reload uninterrupted, memory stable.
+
+#### Step 1 — Start the stack
+
+```bash
+docker compose up -d
+```
+
+Wait for the app to be ready (usually instant if images are cached):
+
+```bash
+curl http://localhost:8081/actuator/health   # should return {"status":"UP"}
+```
+
+#### Step 2 — Upload sample rules to LocalStack S3
+
+```bash
+./init-localstack.sh
+```
+
+This creates the `local-rules` bucket and uploads all 17 sample DRL files.
+
+#### Step 3 — Load rules into the engine
+
+```bash
+curl -s -X POST http://localhost:8080/admin/refresh-rules \
+  -H "X-Admin-API-Key: admin-secret" | jq '{status, rules_loaded, rules_failed}'
+# Expected: { "status": "completed", "rules_loaded": 17, "rules_failed": 0 }
+```
+
+#### Step 4 — Smoke test a few rules
+
+```bash
+# Simple discount
+curl -s -X POST http://localhost:8080/execute-rule \
+  -H "Content-Type: application/json" \
+  -d '{"rule_id":"pricing.discount.simple","data":{"amount":150,"customer_tier":"gold"}}' | jq .
+
+# Bulk discount
+curl -s -X POST http://localhost:8080/execute-rule \
+  -H "Content-Type: application/json" \
+  -d '{"rule_id":"pricing.discount.bulk","data":{"amount":500,"quantity":20}}' | jq .
+
+# Age validation
+curl -s -X POST http://localhost:8080/execute-rule \
+  -H "Content-Type: application/json" \
+  -d '{"rule_id":"validation.customer.age","data":{"age":25,"customer_id":"cust-001"}}' | jq .
+```
+
+#### Step 5 — Hot reload test
+
+```bash
+# Reload all rules and verify 0 failures
+curl -s -X POST http://localhost:8080/admin/refresh-rules \
+  -H "X-Admin-API-Key: admin-secret" | jq '{status, rules_loaded, rules_failed, duration_ms}'
+
+# Confirm rules still execute after reload
+curl -s -X POST http://localhost:8080/execute-rule \
+  -H "Content-Type: application/json" \
+  -d '{"rule_id":"pricing.discount.simple","data":{"amount":100,"customer_tier":"gold"}}' | jq .
+```
+
+#### Step 6 — Memory stability check (5 rapid reloads)
+
+```bash
+for i in 1 2 3 4 5; do
+  curl -s -X POST http://localhost:8080/admin/refresh-rules \
+    -H "X-Admin-API-Key: admin-secret" > /dev/null
+  sleep 2
+  curl -s http://localhost:8080/admin/memory/info | \
+    python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Reload $i: heap={d[\"heap\"][\"usedMB\"]}MB ({d[\"heap\"][\"usagePercent\"]}%)')"
 done
+```
+
+Heap should oscillate (G1GC collecting between reloads) — not grow monotonically. After 5 reloads, trigger a GC and verify:
+
+```bash
+curl -s -X POST http://localhost:8080/admin/memory/gc -H "X-Admin-API-Key: admin-secret" > /dev/null
+sleep 3
+curl -s http://localhost:8080/admin/memory/info | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Post-GC: {d[\"heap\"][\"usedMB\"]}MB / {d[\"heap\"][\"maxMB\"]}MB ({d[\"heap\"][\"usagePercent\"]}%)')"
+# Expected: < 100MB after GC (no leak)
+```
+
+#### Step 7 — 5-minute load test with hot reload mid-run
+
+> **Note:** The default rate limit is 1000 req/min per client. For load testing from a single machine (all requests share one IP), temporarily disable it:
+>
+> In `docker-compose.yml`, add `- DROOLS_RATE_LIMITING_ENABLED=false` under the app's `environment:` block, then `docker compose stop app && docker compose up -d app`. Remove it again when done.
+
+```bash
+# Save this as /tmp/loadtest.sh and run: bash /tmp/loadtest.sh
+DURATION=300; WORKERS=20; BASE_URL="http://localhost:8080/execute-rule"
+PAYLOADS=(
+  '{"rule_id":"pricing.discount.simple","data":{"amount":150,"customer_tier":"gold"}}'
+  '{"rule_id":"pricing.discount.bulk","data":{"amount":500,"quantity":20}}'
+  '{"rule_id":"seasonal.holiday.blackfriday","data":{"amount":200,"customer_tier":"silver"}}'
+  '{"rule_id":"validation.customer.age","data":{"age":30,"customer_id":"cust-100"}}'
+  '{"rule_id":"pricing.shipping.standard","data":{"amount":80,"weight":2.5}}'
+  '{"rule_id":"pricing.discount.vip","data":{"amount":300,"customer_tier":"vip"}}'
+)
+TMPDIR_LT=$(mktemp -d); START=$(date +%s); END=$((START + DURATION)); RELOAD_DONE=0
+
+worker() {
+  local pidx=$(( $1 % 6 )); local payload="${PAYLOADS[$pidx]}"
+  while [ $(date +%s) -lt $END ]; do
+    HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL" \
+      -H "Content-Type: application/json" -d "$payload" --max-time 5)
+    if [ "$HTTP" = "200" ]; then echo 1 >> $TMPDIR_LT/s; else echo "$HTTP" >> $TMPDIR_LT/e; fi
+  done
+}
+
+echo "=== Load test: $WORKERS workers × ${DURATION}s ==="
+for w in $(seq 1 $WORKERS); do worker $w & done
+
+LAST=0
+while [ $(date +%s) -lt $END ]; do
+  NOW=$(date +%s); ELAPSED=$((NOW - START))
+  if [ $RELOAD_DONE -eq 0 ] && [ $ELAPSED -ge 120 ]; then
+    echo ""; echo "  >>> HOT RELOAD at ${ELAPSED}s <<<"
+    curl -s -X POST http://localhost:8080/admin/refresh-rules \
+      -H "X-Admin-API-Key: admin-secret" | \
+      python3 -c "import sys,json; d=json.load(sys.stdin); print(f'rules={d[\"rules_loaded\"]} failed={d[\"rules_failed\"]} ms={d[\"duration_ms\"]}')"
+    RELOAD_DONE=1
+  fi
+  if [ $((NOW - LAST)) -ge 30 ] && [ $ELAPSED -gt 0 ]; then
+    SUC=$(wc -l < $TMPDIR_LT/s 2>/dev/null | tr -d ' '); SUC=${SUC:-0}
+    ERR=$(wc -l < $TMPDIR_LT/e 2>/dev/null | tr -d ' '); ERR=${ERR:-0}
+    TOT=$((SUC + ERR)); RPS=$((TOT / ELAPSED))
+    MEM=$(curl -s http://localhost:8080/admin/memory/info 2>/dev/null | \
+      python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{d['heap']['usedMB']}MB ({d['heap']['usagePercent']}%)\")" 2>/dev/null || echo "?")
+    echo "  [${ELAPSED}s] success=$SUC errors=$ERR rps~$RPS heap=$MEM"; LAST=$NOW
+  fi
+  sleep 5
+done
+
+wait; ELAPSED=$(($(date +%s) - START))
+SUC=$(wc -l < $TMPDIR_LT/s 2>/dev/null | tr -d ' '); SUC=${SUC:-0}
+ERR=$(wc -l < $TMPDIR_LT/e 2>/dev/null | tr -d ' '); ERR=${ERR:-0}
+TOT=$((SUC + ERR))
+ERR_PCT=$(echo "scale=2; $ERR * 100 / $TOT" | bc 2>/dev/null || echo "0")
+echo ""; echo "=== RESULTS: ${ELAPSED}s | total=$TOT success=$SUC errors=$ERR ($ERR_PCT%) rps~$((TOT/ELAPSED)) ==="
+echo "Final heap: $(curl -s http://localhost:8080/admin/memory/info | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{d['heap']['usedMB']}MB ({d['heap']['usagePercent']}%)\")")"
+rm -rf $TMPDIR_LT
+```
+
+**Baseline from 2026-05-11**: 157,754 requests, **0 errors (0%)**, ~518 RPS, heap stable 180–340 MB, hot reload at 2 min with 0 dropped requests.
+
+#### Step 8 — Tear down
+
+```bash
+docker compose down
 ```
 
 ### Testing Different Storage Backends
