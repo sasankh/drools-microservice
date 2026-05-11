@@ -2,7 +2,9 @@
 
 **Companion to**: [`load-test-plan.md`](load-test-plan.md)
 **Started**: 2026-05-10
-**Estimated effort**: ~7-8 hours total
+**Completed**: 2026-05-10 ✅ — All 8 phases PASS. Findings in [`project-documentation/39-load-test-findings.md`](../../project-documentation/39-load-test-findings.md).
+**Actual effort**: ~4 hours (Phases 0–8 including LOADING-marker bug fix)
+**Note**: One item unchecked (gnuplot optional tooling) — intentionally skipped.
 
 Tick each box (`[ ]` → `[x]`) as completed. Each phase has exit criteria the next depends on.
 

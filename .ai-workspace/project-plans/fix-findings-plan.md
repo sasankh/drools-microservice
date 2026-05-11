@@ -3,7 +3,8 @@
 **Companion checklist**: [`fix-findings-checklist.md`](fix-findings-checklist.md)
 **Source of findings**: [`e2e-validation-findings.md`](e2e-validation-findings.md) (which itself came out of [`e2e-validation-checklist.md`](e2e-validation-checklist.md) Phase 8)
 **Started**: 2026-05-10
-**Estimated effort**: 3–4 focused hours (above the half-day "Option A" estimate; Option B requires a compiler/engine refactor)
+**Status**: ✅ COMPLETED 2026-05-10 (~02:55 UTC) — Both findings fixed. See [`fix-findings-checklist.md`](fix-findings-checklist.md) for full log.
+**Actual effort**: ~25 minutes (Option B: Drools 10 updateToVersion pattern)
 **Approach**: bundle both fixes into one PR with unit + integration tests
 
 ---

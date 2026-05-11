@@ -2,7 +2,7 @@
 
 **Date drafted**: 2026-05-09
 **Author**: Drafted with AI assistance; reviewed by user
-**Status**: Approved — implementation pending
+**Status**: ✅ COMPLETED 2026-05-09 — Actual target: Spring Boot 3.5.3 (3.7.x did not exist on Maven Central). See [`stack-modernization-checklist.md`](stack-modernization-checklist.md) for full execution log.
 **Scope owner**: Sasankh BC
 
 ---

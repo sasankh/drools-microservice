@@ -1,5 +1,8 @@
 # Sonar Wave 4 — Execution Checklist
-**Branch**: `upgrade-java-sonar` | **Starting issues**: 178 | **Target**: ≤15
+
+> **STATUS: ✅ COMPLETED 2026-05-11** — All 4 waves (4A, 4B, 4C, 4D) executed. Final result: **0 open maintainability issues** (178 → 0). Quality Gate OK. Commits: `86a9d63`, `e405102`, `d371a36`, `b58bd19`. Items below preserved as reference; all were completed.
+
+**Branch**: `upgrade-java-sonar` | **Starting issues**: 178 | **Final result**: 0
 
 ---
 

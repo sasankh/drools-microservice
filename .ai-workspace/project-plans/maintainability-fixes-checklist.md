@@ -1,7 +1,9 @@
 # Maintainability Fixes — Execution Checklist
+
+> **STATUS: ✅ SUPERSEDED 2026-05-11** — Waves 1–3 in this checklist brought issues from 253 → 178. The remaining work was completed via [`sonar-wave4-checklist.md`](sonar-wave4-checklist.md) (Waves 4A–4D, 178 → 0). Final result: **0 open maintainability issues**. Items below are historical reference; all were completed.
+
 **Branch**: `upgrade-java-sonar` | **SonarQube project**: `drools-microservice`
-**Full plan**: [maintainability-fixes-plan.md](maintainability-fixes-plan.md)
-**Starting issues**: 253 open | **Target**: ≤120 | **BLOCKERs to clear**: 4 → 0
+**Starting issues**: 253 | **Final result**: 0 (via Wave 4 continuation)
 
 ---
 

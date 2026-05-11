@@ -1,8 +1,10 @@
 # Checklist: Sonar Security Hotspots — S5852 ReDoS Fixes
 
+> **STATUS: ✅ COMPLETED 2026-05-11** — Both hotspots resolved. Commit: `2b7b5bd`. Quality Gate OK, 0 security hotspots TO_REVIEW. Items below preserved as reference.
+
 **Branch:** `upgrade-java-sonar`
-**Hotspots:** 2 (both TO_REVIEW, Medium priority)
-**Target:** 0
+**Hotspots:** 2 → 0
+**Result:** Quality Gate OK
 
 ---
 

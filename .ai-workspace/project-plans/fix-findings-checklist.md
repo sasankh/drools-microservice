@@ -2,7 +2,8 @@
 
 **Companion to**: [`fix-findings-plan.md`](fix-findings-plan.md)
 **Started**: 2026-05-10
-**Estimated effort**: 3–4 hours
+**Completed**: 2026-05-10 (~02:55 UTC) ✅ — Both findings fixed and verified on docker-compose stack.
+**Actual effort**: ~25 minutes
 
 Tick each box (`[ ]` → `[x]`) as you complete it. Each phase has exit criteria the next depends on.
 
