@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Architects, senior developers, future contributors trying to understand "why was this done this way?" |
 | **Purpose** | Capture the load-bearing design decisions and their rationale, so future changes don't re-litigate the same choices unaware |
-| **Last updated** | 2026-05-10 (ADR-003 sign-off note appended after 1000-rule load test; ADR-013/014 cover the 2026-05-09 stack modernization) |
+| **Last updated** | 2026-05-20 (ADR-016 added — Redis decorator + pub/sub; ADR-004 and ADR-005 marked Superseded) |
 | **Related docs** | All — ADRs reference specific implementation files |
 
 ---
@@ -24,8 +24,8 @@ Format used here: each ADR has Status, Context, Decision, Alternatives Considere
 | [001](#adr-001-traditional-drl-syntax-only-not-rule-units--oopath) | Traditional DRL syntax only (not rule units / OOPath) | Accepted |
 | [002](#adr-002-map-based-facts-not-typed-pojos) | Map-based facts (not typed POJOs) | Accepted |
 | [003](#adr-003-kiecontainer-atomic-swap-with-disposal) | KieContainer atomic-swap with explicit disposal | Accepted (2026-02-19 fix) |
-| [004](#adr-004-locallrucache-uses-write-lock-on-get) | LocalLRUCache uses WRITE lock on `get()` | Accepted |
-| [005](#adr-005-redis-bean-exists-but-is-dormant-by-default) | Redis bean exists but is dormant by default | Accepted (under review) |
+| [004](#adr-004-locallrucache-uses-write-lock-on-get) | LocalLRUCache uses WRITE lock on `get()` | Superseded by ADR-016 (2026-05-20) |
+| [005](#adr-005-redis-bean-exists-but-is-dormant-by-default) | Redis bean exists but is dormant by default | Superseded by ADR-016 (2026-05-20) |
 | [006](#adr-006-adminauthfilter-instead-of-spring-security) | AdminAuthFilter (lightweight) instead of Spring Security | Accepted |
 | [007](#adr-007-no-terraform-aws-deployment-documented-as-reference-only) | No Terraform — AWS deployment documented as reference only | Accepted |
 | [008](#adr-008-snake_case-json-via-jsonproperty) | snake_case JSON via `@JsonProperty` | Accepted |
@@ -33,6 +33,9 @@ Format used here: each ADR has Status, Context, Decision, Alternatives Considere
 | [010](#adr-010-rate-limiting-in-memory-not-redis-backed) | Rate limiting in-memory (not Redis-backed) | Accepted (consider revisiting at scale) |
 | [011](#adr-011-custom-validation-annotations-vs-jakarta-only) | Custom validation annotations alongside Jakarta | Accepted |
 | [012](#adr-012-drools-8440-not-latest-8x-or-9x) | Drools 8.44.0.Final (not latest 8.x or 9.x) | Superseded by ADR-014 |
+| [013](#adr-013-java-17--25--spring-boot-modernization-2026-05-09) | Java 17 → 25 + Spring Boot modernization | Accepted (2026-05-09) |
+| [014](#adr-014-drools-8--10-migration-2026-05-09) | Drools 8 → 10 migration | Accepted (2026-05-09) |
+| [016](#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20) | Redis decorator + pub/sub for multi-instance DRL cache | Accepted (2026-05-20) |
 
 ---
 
@@ -216,8 +219,10 @@ Headline numbers (full report: [`scripts/load-test-results/2026-05-10T073852Z/su
 
 ## ADR-004: LocalLRUCache uses WRITE lock on `get()`
 
-**Status**: Accepted
+**Status**: ~~Accepted~~ **Superseded by [ADR-016](#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20)** (2026-05-20)
 **Date**: project inception
+
+> **Superseded note**: `LocalLRUCache` was deleted in the 2026-05-20 cache layering work — it was dead code (`.get()` was never called from production code paths). Decoration is now done by `RedisCachedRuleStorage` on the `RuleStorage` interface; no in-process LRU layer exists anymore. The original ADR is preserved below for historical context.
 
 ### Context
 
@@ -255,8 +260,10 @@ Use `ReentrantReadWriteLock` but acquire the **write lock** on every `get()`, no
 
 ## ADR-005: Redis bean exists but is dormant by default
 
-**Status**: Accepted (under review for production)
+**Status**: ~~Accepted (under review for production)~~ **Superseded by [ADR-016](#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20)** (2026-05-20)
 **Date**: project inception
+
+> **Superseded note**: The "dormant Redis bean" pattern was deleted on 2026-05-20. Redis is now a real read-through decorator (`RedisCachedRuleStorage`) that actually wraps the storage chain when `REDIS_ENABLED=true`, and `RuleRefreshPublisher`/`Subscriber` provide cross-task pub/sub fan-out. The old `RedisRuleCache` class was removed (it was written to during refresh but never read). Original ADR preserved below.
 
 ### Context
 
@@ -689,6 +696,75 @@ No application Java code changes required.
 - [Drools 10 migration guide](https://kie.apache.org/docs/10.0.x/drools/drools/migration-guide/index.html)
 - [Drools 10 traditional DRL reference](https://kie.apache.org/docs/10.0.x/drools/drools/language-reference-traditional/index.html)
 - [`.ai-workspace/project-plans/stack-modernization-plan.md`](../.ai-workspace/project-plans/stack-modernization-plan.md)
+
+---
+
+## ADR-016: Redis decorator + pub/sub for multi-instance DRL cache (2026-05-20)
+
+**Status**: Accepted
+**Date**: 2026-05-20
+**Supersedes**: [ADR-004](#adr-004-locallrucache-uses-write-lock-on-get), [ADR-005](#adr-005-redis-bean-exists-but-is-dormant-by-default)
+
+### Context
+
+Forensic trace of the `cache/` package revealed two problems:
+
+1. **The existing cache layer was dead code.** Both `LocalLRUCache` (`@Primary` `RuleCache` bean) and `RedisRuleCache` (`@ConditionalOnProperty("redis.enabled")`) were written to during refresh — `warmUp()`, `put()`, `clear()` — but `.get()` was never called from any production code path. The "cache hit rate ~95%" metric reported in earlier docs was statistically true but operationally meaningless because the cache was never on the read path. Execution reads from `DroolsEngineService.loadedRules` (a `ConcurrentHashMap` populated by `loadRules()`) and `kieContainer` directly.
+
+2. **Multi-instance compiled-state divergence.** At the target deployment scale (3–5 ECS tasks × 10,000+ rules), when one task receives `POST /admin/refresh-rules/{id}`, only that task recompiles its `kieContainer`. Sibling tasks keep serving the stale compiled rule until they themselves refresh. The dead Redis cache didn't help here because execution doesn't read from Redis (it reads from `kieContainer`).
+
+### Decision
+
+**Two coordinated changes:**
+
+1. **Read-through Redis cache decorator.** Replace the parallel `RuleCache` abstraction with `RedisCachedRuleStorage` — a decorator on `RuleStorage` that transparently wraps the base storage (`S3RuleStorage` / `LocalFileStorage` / `InMemoryRuleStorageAdapter`) when `REDIS_ENABLED=true`. Cache key prefix `drools:rule:{ruleId}`, TTL configurable via `REDIS_DRL_RULES_TTL_MINUTES` (default 15 min). All Redis ops wrapped in resilience4j circuit breaker; failures silently degrade to delegate-only.
+
+2. **Redis Pub/Sub for cross-task fan-out.** `RuleRefreshPublisher` publishes a `RefreshEvent` (JSON via Jackson) on `drools:rule:events` after a successful local refresh. `RuleRefreshSubscriber` on every task receives events and:
+   - Skips events emitted by itself (per-instance UUID dedup via `droolsInstanceId` bean)
+   - For `RULE_REFRESHED`: fetches the rule (cache is already warm from publisher), calls `DroolsEngineService.loadOrReplaceRule()`
+   - For `RULE_REFRESHED_BULK`: fetches all rules, calls `DroolsEngineService.loadRules()`
+   - For `RULE_DELETED`: logs INFO only (v1 limitation; admin has no delete endpoint today)
+
+`AdminController` is wired to call the publisher after local refresh succeeds.
+
+Active feature flags:
+- `REDIS_ENABLED` (default `false`) — wraps storage in `RedisCachedRuleStorage`
+- `REDIS_PUBSUB_ENABLED` (default `true` when Redis on) — wires publisher + subscriber + listener container
+
+### Alternatives considered
+
+| Option | Why rejected |
+|---|---|
+| **Keep dead cache, leave LRU in code "in case someone needs it later"** | Misleading. Three years of "cache hit rate" metrics that meant nothing. Removed to clarify the actual data flow. |
+| **Auto-refresh polling instead of pub/sub** | Cross-task convergence latency ≥ polling interval. At any usable interval (60s) that's slower than pub/sub (~1 sec). Also wastes S3 fetches on every poll. |
+| **AWS SNS/SQS for cross-task events** | Adds infra dependency. We already have Redis. Pub/sub on Redis is "free". |
+| **Operator fan-out** (CI calls each task IP after refresh) | Operationally awkward; needs task IP discovery; doesn't work over ALB. |
+| **In-process L1 cache above Redis** | After analysis, in-process LRU above Redis adds no value in this access pattern: `loadedRules` already holds all rules in memory, and execution doesn't read from storage at all. Removed entirely. |
+
+### Consequences
+
+**Positive:**
+- Cross-task compiled-state converges within ~1 sec for single-rule refresh (~7 min for bulk, gated by per-task compile time — same as the kjar-deferred limitation).
+- Redis is now a *real* cache: multi-task ECS deployments share S3 fetches.
+- Cross-service consumers can subscribe to `drools:rule:events` for rule-invalidation notifications.
+- Service degrades gracefully when Redis is down (circuit breaker → fallback to base storage).
+- ~600 LOC of misleading dead code removed.
+
+**Negative:**
+- Env var migration: `REDIS_TTL_MINUTES` → `REDIS_DRL_RULES_TTL_MINUTES`; `LRU_CACHE_MAX_SIZE` removed. Operators with custom values silently fall back to defaults.
+- `/admin/rules` response no longer has the `cached` boolean field (it was always meaningless).
+- Pub/sub events are fire-and-forget — a disconnected subscriber can miss events between disconnect and reconnect. Mitigation: 15-min TTL acts as eventual-consistency ceiling.
+
+### References
+
+- [`RedisCachedRuleStorage.java`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java)
+- [`RuleRefreshPublisher.java`](../src/main/java/com/company/drools/cache/RuleRefreshPublisher.java)
+- [`RuleRefreshSubscriber.java`](../src/main/java/com/company/drools/cache/RuleRefreshSubscriber.java)
+- [`RefreshEvent.java`](../src/main/java/com/company/drools/cache/RefreshEvent.java)
+- [`InstanceIdConfig.java`](../src/main/java/com/company/drools/config/InstanceIdConfig.java)
+- [`StorageFactory.java`](../src/main/java/com/company/drools/storage/StorageFactory.java) — wiring
+- [`.ai-workspace/project-plans/redis-cache-layering-plan.md`](../.ai-workspace/project-plans/redis-cache-layering-plan.md)
+- [`full-docker-test-plan.md`](../full-docker-test-plan.md) — Steps 8 and 9
 
 ---
 

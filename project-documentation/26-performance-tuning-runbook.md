@@ -56,15 +56,13 @@ curl -fsS http://localhost:8080/admin/health | jq '.components."circuit-breakers
 
 ### Decision tree
 
-#### A1: Cache hit rate < 80% → cache is too small or rules churning
+#### A1: Cache hit rate < 80% → refresh churn or TTL too short
 
-If cache misses force every call to hit S3, latency is dominated by S3 RTT. Two paths:
+Note: `/execute-rule` never reads from Redis — it reads from the compiled `kieContainer`. Cache hit/miss metrics (`drools.cache.hit` / `drools.cache.miss`) reflect refresh and warm-start paths only. If they're poor:
 
-- **Bigger cache**:
-  ```bash
-  LRU_CACHE_MAX_SIZE=500   # or higher
-  ```
-- **Stop rule churn**: If `POST /admin/refresh-rules` is being called frequently in production, every refresh dumps the cache. Reduce refresh frequency, or use `AUTO_REFRESH_ENABLED=false` and refresh only on rule changes.
+- **TTL too short**: increase `REDIS_DRL_RULES_TTL_MINUTES` (default 15) so refresh hits stay warm between admin-driven refreshes.
+- **Stop rule churn**: If `POST /admin/refresh-rules` is being called frequently in production, every refresh deletes and re-warms the Redis keys. Reduce refresh frequency, or use `AUTO_REFRESH_ENABLED=false` and refresh only on rule changes.
+- **Redis breaker tripping**: check `resilience4j_circuitbreaker_state{name=redis}`. Open → decorator is falling through to S3 on every call. Investigate Redis latency or connectivity.
 
 #### A2: Thread pool saturated (`active_count` ≈ `max_size`) → not enough workers
 
@@ -362,7 +360,7 @@ ls -la heap-dumps/
 
 Open the `.hprof` file in a heap analyzer. Look for:
 - Many `KieContainer` instances → disposal bug regressed
-- Huge `LocalLRUCache` map → cache size too big
+- Many `ProjectClassLoader` instances → `KieRepository.removeKieModule` not called after `updateToVersion` (Drools 10 does NOT auto-clean)
 - Lots of pending requests → thread pool runaway
 
 #### G2: No heap dump (OOM happened too fast)
@@ -560,8 +558,10 @@ AWS_S3_SOCKET_TIMEOUT=30
 DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE=10000
 DROOLS_RATE_LIMITING_REQUESTS_PER_HOUR=500000
 
-# Cache
-LRU_CACHE_MAX_SIZE=1000
+# Cache (shared Redis + pub/sub)
+REDIS_ENABLED=true
+REDIS_DRL_RULES_TTL_MINUTES=15
+REDIS_PUBSUB_ENABLED=true
 ```
 
 Then load-test, observe, and adjust based on real metrics — not these defaults.

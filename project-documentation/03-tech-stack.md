@@ -141,9 +141,9 @@ We chose Apache HTTP over Netty (the v2 default) because:
 
 ## Cache layer
 
-### Spring Data Redis + Lettuce
+### Spring Data Redis + Lettuce — decorator + pub/sub (since 2026-05-20)
 
-**Why Redis exists in this codebase**: The architecture has slots for distributed caching. The Redis bean is wired (`RedisRuleCache`), but `LocalLRUCache` is `@Primary`. **Redis is currently dormant** — see [ADR-005](36-architecture-decision-records.md). It's there so we can flip it on without restructuring code.
+**Why Redis exists in this codebase**: Multi-instance deployments need a shared rule cache and cross-instance refresh coherence. `RedisCachedRuleStorage` is a read-through + write-through decorator on `RuleStorage`. `RuleRefreshPublisher`/`Subscriber` provide refresh fan-out on `drools:rule:events`. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20).
 
 **Why Lettuce over Jedis**:
 - Spring Boot 3 default
@@ -151,15 +151,12 @@ We chose Apache HTTP over Netty (the v2 default) because:
 - Healthier maintenance posture than Jedis
 
 When Redis is enabled (`REDIS_ENABLED=true`):
-- `RedisRuleCache` registers; reads/writes wrapped in Resilience4j circuit breaker
-- Lookups use SCAN (cursor-based) rather than KEYS (blocking) — see [ADR-???](36-architecture-decision-records.md) (forthcoming)
+- `RedisCachedRuleStorage` wraps the base storage in `StorageFactory`; all `getRule` / `getAllRules` / `saveRule` / `deleteRule` calls go through it
+- All Redis ops are wrapped in `redisCircuitBreaker` — failures fall through to base storage with no user-visible error
+- Bulk path uses `SCAN(prefix*)` + `MGET` (cursor-based, non-blocking) — never `KEYS`
+- DRL JSON is serialized via Jackson `GenericJackson2JsonRedisSerializer` with `BasicPolymorphicTypeValidator` (strict allow-list)
 
-### LocalLRUCache (in-memory)
-
-**Why custom (not Caffeine, not Guava):**
-- Simple LinkedHashMap with `accessOrder=true` and `removeEldestEntry` override is enough for this scale (100–1000 entries).
-- We need only get/put/clear/stats — Caffeine's full feature set is overkill.
-- Custom code lets us see exactly the lock semantics ([ADR-004](36-architecture-decision-records.md): write-lock on get).
+The legacy `LocalLRUCache` + `RedisRuleCache` layer was deleted on 2026-05-20 — it was dead code (`RuleCache.get()` was never called from production paths).
 
 ---
 
@@ -275,7 +272,7 @@ Fluent async assertions (`await().atMost(...).until(...)`). Used sparingly — m
 | Reactive (WebFlux, Reactor) | Synchronous request/response is sufficient. Async only inside the rule executor (`CompletableFuture` for timeout cancellation). |
 | Spring Cloud | Single-service, not microservices-ecosystem deployment. No service registry / config server. |
 | Terraform / Pulumi / CDK | No IaC in repo. AWS deployment is documented as a reference architecture in [06-deployment.md](06-deployment.md) but provisioning is owned by the deploying team. |
-| Caffeine cache | Custom LocalLRUCache is sufficient — see ADR-004. |
+| Caffeine cache | No per-instance cache layer in scope — shared cache lives in Redis via `RedisCachedRuleStorage`. Execution reads from the compiled `kieContainer`, not a key-value cache. |
 | Hystrix | Resilience4j replaces it. |
 | Lombok in production code | Pulled as `provided` scope only; runtime annotations like `@Slf4j` use Lombok at compile time. The runtime jar excludes Lombok. |
 | Apache HttpClient v5 (raw) | Used transitively via AWS SDK v2 `apache-client`. Not used directly. |

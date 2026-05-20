@@ -208,12 +208,15 @@ app:
     - AWS_ACCESS_KEY_ID=test
     - AWS_SECRET_ACCESS_KEY=test
 
-    # Redis configuration
+    # Redis configuration (decorator + pub/sub)
     - REDIS_ENABLED=true
     - REDIS_URL=redis://redis:6379          # ← compose-network DNS
+    - REDIS_DRL_RULES_TTL_MINUTES=15
+    - REDIS_DRL_RULES_KEY_PREFIX=drools:rule:
+    - REDIS_PUBSUB_ENABLED=true
+    - REDIS_PUBSUB_CHANNEL=drools:rule:events
 
-    # Cache configuration
-    - LRU_CACHE_MAX_SIZE=100
+    # Execution
     - RULE_EXECUTION_TIMEOUT_SECONDS=30
 
     # Thread pool configuration for containerized environment
@@ -413,16 +416,24 @@ SPRING_PROFILES_ACTIVE=dev docker compose up -d
 
 But note: the `dev` profile expects LocalStack at `http://localhost:4566` from the *app's* perspective. From inside the `app` container, `localhost` is the container itself, not the host. You'd also have to override `AWS_ENDPOINT` to point at the right place. Easier: use `docker` profile + the default compose stack.
 
-### Enable Redis cache as primary
+### Enable / disable the Redis cache + pub/sub layer
 
-Currently `LocalLRUCache` is `@Primary`. If you want to test the Redis path:
+As of the 2026-05-20 refactor ([ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20)), Redis is wired via `RedisCachedRuleStorage` (read-through decorator on `RuleStorage`) plus `RuleRefreshPublisher`/`Subscriber` for cross-instance refresh fan-out. Toggle:
 
 ```bash
-# In .env or via -e on docker compose:
-REDIS_ENABLED=true   # already true in compose default
+# Cache + fan-out ON (compose default):
+REDIS_ENABLED=true
+REDIS_PUBSUB_ENABLED=true
+
+# Cache ON, fan-out OFF (single-instance dev):
+REDIS_ENABLED=true
+REDIS_PUBSUB_ENABLED=false
+
+# Cache OFF (StorageFactory returns base storage directly; no Redis bean):
+REDIS_ENABLED=false
 ```
 
-But this only initializes the Redis bean. To make Redis the primary cache, you need code changes (move `@Primary` from `LocalLRUCache` to `RedisRuleCache`) — see [36-architecture-decision-records.md](36-architecture-decision-records.md) ADR-005.
+The legacy `@Primary` toggle on `LocalLRUCache` / `RedisRuleCache` no longer exists — those classes were deleted.
 
 ### Adjust resource limits
 

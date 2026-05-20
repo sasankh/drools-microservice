@@ -347,7 +347,7 @@ Two code paths emit this:
 
 The breaker name (`s3` or `redis`) is in the message. The state is in lowercase (`open`, `half-open`).
 
-**Code path**: [`GlobalExceptionHandler.java:77-96`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L77-L96). Triggered by [`CircuitBreakerException`](../src/main/java/com/company/drools/api/exception/CircuitBreakerException.java) when `S3RuleStorage` or `RedisRuleCache` calls are rejected by the breaker.
+**Code path**: [`GlobalExceptionHandler.java:77-96`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L77-L96). Triggered by [`CircuitBreakerException`](../src/main/java/com/company/drools/api/exception/CircuitBreakerException.java) when `S3RuleStorage` is rejected by the S3 breaker. Note: `RedisCachedRuleStorage` Redis-op failures do NOT surface to clients — the decorator falls through to base storage silently when the Redis breaker is open.
 
 **Common causes**:
 - S3 rate-limited or throttling the client.

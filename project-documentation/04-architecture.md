@@ -212,7 +212,6 @@ class RuleExecutionRequest {
   "last_modified": "2026-05-08T08:57:10Z",
   "execution_count": 42,
   "avg_execution_time_ms": 15.3,
-  "cached": true,
   "version": "1.0"
 }
 ```
@@ -453,70 +452,79 @@ Response
 ```
 S3 (source of truth)
     ↓
-┌──────────────────────────────────────────────┐
-│  L2: Redis Cache (DRL text, optional)        │
-│  - Stores raw .drl source text only          │
-│  - TTL: 1 hour (default)                     │
-│  - Scope: All instances (shared)             │
-│  - Circuit breaker: Fallback to S3 on error  │
-└──────────────────────────────────────────────┘
-    ↓ (also populates)
-┌──────────────────────────────────────────────┐
-│  L1: LocalLRUCache (DRL text, per-instance)  │
-│  - Stores raw .drl source text only          │
-│  - Size: LRU_CACHE_MAX_SIZE entries (def 100)│
-│  - Eviction: Least Recently Used             │
-│  - Latency: < 1ms (in-memory lookup)         │
-└──────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  RedisCachedRuleStorage (decorator, when REDIS_ENABLED)  │
+│  - Read-through: GET → SETEX on miss                     │
+│  - Bulk path: SCAN(prefix) + MGET, fall-through for misses│
+│  - Write-through: saveRule/deleteRule update Redis + base│
+│  - Stores Rule JSON (DRL text + metadata, Jackson)       │
+│  - TTL: REDIS_DRL_RULES_TTL_MINUTES (default 15)         │
+│  - Scope: All instances (shared)                         │
+│  - Circuit breaker: Redis op fails → fall through to base│
+└──────────────────────────────────────────────────────────┘
     ↓ (compiled into)
 DroolsEngineService.kieContainer
-    All rules compiled simultaneously, no eviction
+    Single long-lived container, updated in place via
+    KieContainer.updateToVersion(ReleaseId) on refresh.
+    All loaded rules live here; no eviction.
 ```
 
-#### LocalLRUCache (L1, DRL text cache)
+When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` returns the base storage (S3 / file / memory) directly. There is no longer a per-instance LRU layer — base storage is consulted on every cache miss (it has its own connection pooling and circuit breaker).
 
-**Implementation**:
-- `LinkedHashMap<String, Rule>` with access-order and size limit
-- Stores raw DRL source text + metadata — **not compiled KieBases**
-- Thread-safe with explicit write lock (required on `get()` — see ADR-004)
-- LRU eviction policy (removes least recently accessed DRL text entry)
+#### RedisCachedRuleStorage (read-through decorator)
 
-**Configuration**:
-- `LRU_CACHE_MAX_SIZE`: Maximum DRL text entries cached (default: 100)
-
-**Performance**:
-- Memory: ~10 KB per entry (DRL text) — 100 entries ≈ 1 MB total
-- Latency: < 1ms (in-memory lookup)
-- **Not in the execution hot path** — only consulted during refresh/warm-up
-
-**Cache Invalidation**:
-- Manual: `/admin/refresh-rules` clears cache
-- Automatic: LRU eviction when size exceeded
-
-#### RedisCacheService (L2 Cache)
-
-**Implementation**:
-- Spring Data Redis with Lettuce client
-- Connection pooling for high concurrency
-- Circuit breaker protection
+**Implementation** ([`RedisCachedRuleStorage.java`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java)):
+- Implements `RuleStorage`; wraps the base `S3RuleStorage` / `LocalFileStorage` / `InMemoryStorage` via `setDelegate(...)` called by `StorageFactory` after construction
+- Read-through: `getRule(id)` does Redis `GET key` → on miss, delegate `.getRule(id)` then Redis `SETEX key ttl value`
+- Bulk path: `getAllRules()` does `SCAN(prefix*)` then a single `MGET`; rule IDs not present in the bulk hit are fetched from base storage and re-cached
+- Write-through: `saveRule` / `deleteRule` propagate to both Redis and base
+- All Redis operations are wrapped in the `redisCircuitBreaker` — any failure falls through to base storage with a WARN log; the cache miss is counted but does not surface as a user error
+- Stores `Rule` as JSON (Jackson `GenericJackson2JsonRedisSerializer` with `BasicPolymorphicTypeValidator`) — same shape as the in-memory record
 
 **Configuration**:
-- `REDIS_ENABLED`: Enable/disable Redis (default: false)
+- `REDIS_ENABLED`: Enable/disable Redis layer (default: false)
 - `REDIS_URL`: Redis connection string
-- `REDIS_TTL_SECONDS`: Cache expiration (default: 3600)
-
-**Serialization**:
-- Rule content stored as plain text (no serialization overhead)
-- UTF-8 encoding
+- `REDIS_DRL_RULES_TTL_MINUTES`: Cache TTL (default: 15)
+- `REDIS_DRL_RULES_KEY_PREFIX`: Key prefix (default: `drools:rule:`)
 
 **Error Handling**:
-- Connection errors → Circuit breaker opens
-- Circuit breaker open → Skip Redis, fetch from S3
-- Graceful degradation (system works without Redis)
+- Connection errors / timeouts → circuit breaker opens (default `60% / 50` window)
+- Circuit breaker open → skip Redis call, fall through to base storage
+- Graceful degradation: system works fully without Redis; metrics record the fall-through
 
 **Cache Invalidation**:
-- TTL-based expiration (automatic)
-- Manual via `/admin/refresh-rules` (clears all keys)
+- TTL-based expiration (Redis SETEX)
+- Manual via `/admin/refresh-rules` — `refreshCache()` deletes all keys matching `key-prefix*` and re-populates from base storage
+- Cross-instance: `RuleRefreshPublisher` emits a `RULE_REFRESHED` / `RULE_REFRESHED_BULK` event on channel `drools:rule:events`; other instances' `RuleRefreshSubscriber` reloads from the base storage (which sees the freshly-warm Redis after the originator's write-through)
+
+#### RuleRefreshPublisher / RuleRefreshSubscriber (multi-instance fan-out)
+
+**Why** ([ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20)): Rule **execution** reads from `DroolsEngineService.kieContainer`, not Redis. So a `POST /admin/refresh-rules` against instance A only updates A's `kieContainer`; instances B and C still execute the old compiled rules until their next refresh. Pub/sub fans the refresh out so every instance recompiles.
+
+**Wire format** ([`RefreshEvent.java`](../src/main/java/com/company/drools/cache/RefreshEvent.java)):
+```json
+{
+  "event_type": "RULE_REFRESHED" | "RULE_REFRESHED_BULK" | "RULE_DELETED",
+  "rule_id": "pricing.discount.vip",        // null for BULK
+  "source_instance_id": "5f4d9a31-...",     // self-dedup
+  "timestamp": "2026-05-20T08:57:10Z"
+}
+```
+
+**Publisher** ([`RuleRefreshPublisher.java`](../src/main/java/com/company/drools/cache/RuleRefreshPublisher.java)):
+- `@ConditionalOnExpression("${redis.enabled:false} and ${redis.pubsub.enabled:true}")`
+- Called by `AdminController` after each successful refresh: `publishRefresh(id)`, `publishBulkRefresh()`, `publishDelete(id)`
+- Fire-and-forget via `StringRedisTemplate.convertAndSend(channel, json)` wrapped in `redisCircuitBreaker`; failures log WARN and increment `drools.refresh.failed{layer=publisher}`
+
+**Subscriber** ([`RuleRefreshSubscriber.java`](../src/main/java/com/company/drools/cache/RuleRefreshSubscriber.java)):
+- Registered on `RedisMessageListenerContainer` for channel `drools:rule:events`
+- Self-dedup: skips events where `source_instance_id == this.instanceId` (`drools.refresh.skipped_self` counter); `instanceId` is a `UUID.randomUUID()` bean from [`InstanceIdConfig.java`](../src/main/java/com/company/drools/config/InstanceIdConfig.java)
+- Dispatch:
+  - `RULE_REFRESHED` → `storage.getRule(id)` (warm Redis miss) → `engine.loadOrReplaceRule(rule)`
+  - `RULE_REFRESHED_BULK` → `storage.getAllRules()` → `engine.loadRules(rules)`
+  - `RULE_DELETED` → log INFO (no compiled-state delete yet; deferred to v2)
+
+#### Compiled KieBase (execution hot path)
 
 #### Compiled KieBase Cache
 
@@ -602,19 +610,18 @@ DroolsEngineService.kieContainer
         ↓
 2. ADMIN CONTROLLER
    - AdminController.refreshRules()
-   - No rate limiting (admin endpoint)
+   - Admin auth via X-Admin-API-Key (skipped if ADMIN_API_KEY unset; warning logged at startup)
         ↓
-3. CLEAR CACHES
-   - Clear L1 LRU cache
-   - Clear L2 Redis cache (if enabled)
-   - Clear compiled KieBase cache
+3. STORAGE REFRESH (REDIS_ENABLED=true only)
+   - RedisCachedRuleStorage.refreshCache():
+       SCAN(key-prefix*) → DEL keys
+       fetch all from base storage → SETEX each (write-through warms cache)
+   - If REDIS_ENABLED=false, this step is a no-op (StorageFactory returned base directly)
         ↓
-4. STORAGE LAYER
-   - S3RuleStorage.getAllRuleIds()
-   - Fetch all rule IDs from S3 bucket
+4. STORAGE LAYER (base)
+   - S3RuleStorage.getAllRules() (or LocalFileStorage / InMemoryStorage)
         ↓
 5. RELOAD RULES
-   - Fetch all rule contents from S3
    - RuleCompiler.compileRules(rules) builds a fresh versioned KieModule via
      KieFileSystem + generateAndWritePomXML(releaseId) + KieBuilder.buildAll().
      Auto-registered in the singleton KieRepository under the bumped ReleaseId.
@@ -628,7 +635,12 @@ DroolsEngineService.kieContainer
    kieRepository.removeKieModule(oldReleaseId);  // free prior compiled bytecode
    // (Drools 10 does NOT auto-clean; without this, refreshes leak ProjectClassLoaders)
         ↓
-8. RESPONSE
+8. PUB/SUB FAN-OUT (when REDIS_ENABLED + REDIS_PUBSUB_ENABLED)
+   - RuleRefreshPublisher.publishBulkRefresh()
+   - PUBLISH drools:rule:events {event_type: RULE_REFRESHED_BULK, source_instance_id: <self>}
+   - Other instances' subscribers fetch from storage and call engine.loadRules(); self-dedup skips this instance
+        ↓
+9. RESPONSE
    {
      "message": "Refreshed 47 rules",
      "totalRules": 47,
@@ -796,63 +808,54 @@ rule-bucket-name/
 
 ## Caching Architecture
 
-### Multi-Tier Caching Strategy
+### Single-Tier Shared Cache + Pub/Sub Fan-Out
 
-#### Cache Coherence
+The 2026-05-20 refactor (ADR-016) collapsed the legacy L1+L2 model into a single shared Redis tier wrapped by `RedisCachedRuleStorage`, plus a pub/sub channel for cross-instance refresh coherence.
+
+#### Topology
 
 ```
-Application Instance 1          Application Instance 2
-┌─────────────────┐            ┌─────────────────┐
-│  LRU Cache (L1) │            │  LRU Cache (L1) │
-│  [rule-1, ...]  │            │  [rule-3, ...]  │
-└─────────────────┘            └─────────────────┘
-        │                              │
-        └──────────────┬───────────────┘
-                       ↓
-              ┌─────────────────┐
-              │  Redis (L2)     │
-              │  Shared Cache   │
-              │  [rule-1, ...]  │
-              └─────────────────┘
-                       ↓
-              ┌─────────────────┐
-              │  S3 (Source)    │
-              │  All Rules      │
-              └─────────────────┘
+   Instance A          Instance B          Instance C
+   ┌─────────┐         ┌─────────┐         ┌─────────┐
+   │ kieCont │         │ kieCont │         │ kieCont │  ← execution hot path
+   │ (compiled)        │ (compiled)        │ (compiled)   (per-instance, no cache)
+   └────┬────┘         └────┬────┘         └────┬────┘
+        │ refresh           │ refresh           │ refresh
+        ▼                   ▼                   ▼
+   ┌──────────────────────────────────────────────────┐
+   │  RedisCachedRuleStorage  (decorator)             │
+   │  ─ GET / MGET on read, SETEX on miss             │
+   │  ─ write-through saveRule / deleteRule           │
+   │  ─ Redis op failures → fall through to base      │
+   └────────────────────┬─────────────────────────────┘
+                        ▼
+   ┌──────────────────────────────────────────────────┐
+   │       Redis  (shared DRL JSON store)             │
+   │       channel: drools:rule:events                │ ←── pub/sub fan-out
+   └────────────────────┬─────────────────────────────┘
+                        ▼
+   ┌──────────────────────────────────────────────────┐
+   │       Base RuleStorage (S3 / file / memory)      │
+   └──────────────────────────────────────────────────┘
 ```
+
+A refresh on instance A (`POST /admin/refresh-rules`) (1) deletes A's Redis keys, (2) reloads them from S3 via write-through, (3) atomically swaps A's `kieContainer`, (4) publishes `RULE_REFRESHED_BULK` to `drools:rule:events`. Instances B and C's subscribers receive the event, fetch from `RedisCachedRuleStorage` (which is now a hot cache hit since A warmed it), and atomically swap their own `kieContainer`. Without step (4), B and C would keep executing stale compiled rules.
 
 #### Cache Invalidation Strategies
 
-1. **Manual Invalidation** (Admin API):
-   ```
-   POST /admin/refresh-rules
-       ↓
-   Clear L1 (all instances)
-       ↓
-   Clear L2 (Redis)
-       ↓
-   Reload from S3
-   ```
-
-2. **TTL-Based Expiration** (Redis L2):
-   - Default: 1 hour
-   - Automatic refresh on expiration
-   - Prevents stale data
-
-3. **LRU Eviction** (L1):
-   - Size-based eviction (100 entries)
-   - Least recently used removed first
-   - No staleness issue (always fresh from L2/S3)
+1. **Manual Invalidation** (`POST /admin/refresh-rules`): clears Redis keys, reloads from base, swaps local `kieContainer`, publishes `RULE_REFRESHED_BULK`.
+2. **Single-rule Invalidation** (`POST /admin/refresh-rules/{id}`): deletes one Redis key, reloads from base, swaps in via `loadOrReplaceRule()`, publishes `RULE_REFRESHED`.
+3. **TTL Expiration**: `REDIS_DRL_RULES_TTL_MINUTES` (default 15) bounds staleness even if no admin action happens.
+4. **Self-dedup**: subscribers compare `source_instance_id == this.instanceId` and skip their own events to prevent loop-back recompilation. Counter: `drools.refresh.skipped_self`.
 
 #### Cache Performance Characteristics
 
-| Cache Layer | Latency | Hit Rate | Scope | Durability |
-|-------------|---------|----------|-------|------------|
-| L1 (LRU) | < 1ms | ~80% | Single JVM | Volatile |
-| L2 (Redis) | 1-5ms | ~15% | All instances | Persistent |
-| S3 (Storage) | 50-200ms | ~5% (miss) | Global | Durable |
+| Layer | Latency | Hit Rate | Scope | Durability |
+|---|---|---|---|---|
+| Redis (decorator) | 1–5 ms | ~95% on refresh / startup paths | All instances | Volatile + TTL |
+| Base storage (S3) | 50–200 ms | ~5% (miss + refresh) | Global | Durable |
 
-**Total Cache Hit Rate**: ~95% (L1 + L2)
+**Note**: Caches are NOT in the execution hot path. Once compiled, `kieContainer` serves `POST /execute-rule` directly in ~1–10 ms — no Redis or S3 touch per request. The cache exists only to make refresh and warm-start cheap on the hot S3 path.
 
 ---
 
@@ -1000,32 +1003,40 @@ Internal dependencies. **What breaks if X fails?**
    │   Service       │  │ (4 filters)     │
    └────────┬────────┘  └─────────────────┘
             │
-   ┌────────┴────────┐
-   ▼                 ▼
- ┌──────────┐  ┌──────────────┐
- │RuleCache │  │RuleStorage   │
- │@Primary  │  │ (interface)  │
- │= LocalLRU│  └──────┬───────┘
- └──────────┘         │
-                ┌─────┴────────┬─────────────┐
-                ▼              ▼             ▼
-         ┌───────────┐  ┌────────────┐  ┌──────────┐
-         │S3RuleStorg│  │LocalFile   │  │InMemory  │
-         │ (+ CB)    │  │  Storage   │  │  Storage │
-         └─────┬─────┘  └────────────┘  └──────────┘
-               │
-               ▼
-         ┌──────────────┐
-         │ AWS S3 / LS  │
-         └──────────────┘
+            │
+            ▼
+  ┌─────────────────────────────────────────────────┐
+  │ RuleStorage (interface)                          │
+  │   ↑ when REDIS_ENABLED=true, StorageFactory     │
+  │   ↑ wraps the base in RedisCachedRuleStorage    │
+  │   ↑ (read-through + write-through + CB)         │
+  └─────────────────────────┬───────────────────────┘
+                            │
+              ┌─────────────┼─────────────┐
+              ▼             ▼             ▼
+       ┌───────────┐  ┌────────────┐  ┌──────────┐
+       │S3RuleStorg│  │LocalFile   │  │InMemory  │
+       │ (+ CB)    │  │  Storage   │  │  Storage │
+       └─────┬─────┘  └────────────┘  └──────────┘
+             │
+             ▼
+       ┌──────────────┐
+       │ AWS S3 / LS  │
+       └──────────────┘
+
+  Side channel (when REDIS_ENABLED + REDIS_PUBSUB_ENABLED):
+  AdminController ── publishes ──▶ RuleRefreshPublisher ──▶ Redis channel
+                                                              │
+  Other instances' RuleRefreshSubscriber ◀─── subscribes ─────┘
+    → storage.getRule / getAllRules → engine.loadOrReplaceRule / loadRules
 ```
 
 | Component down | What breaks | What still works |
 |---|---|---|
-| Redis (when enabled) | Distributed cache | Everything — circuit breaker opens, falls through to S3 |
-| AWS S3 | Cold rule loads, refresh | Already-cached rule executions (LocalLRUCache hit) |
-| LocalLRUCache | (Cannot fail — in-memory) | n/a |
-| KieContainer disposal failure | Memory leak risk | Logged; old container retained in memory until next swap |
+| Redis (when enabled) | Cross-instance fan-out + shared cache | Everything — circuit breaker opens, decorator falls through to base storage; instances refresh independently |
+| Redis pub/sub | Cross-instance refresh coherence | Local refresh still works; other instances stay on old compiled rules until their own refresh or TTL expiry |
+| AWS S3 | Cold rule loads, refresh | Already-loaded rules (served from `kieContainer`, no cache hit needed) |
+| KieContainer module cleanup | Memory leak risk | Logged; `KieRepository.removeKieModule` is best-effort after swap |
 | `ADMIN_API_KEY` not set | Admin auth (disabled — warning logged) | Everything else; admin endpoints become open |
 | Single thread pool exhausted | New requests queued or rejected (CallerRunsPolicy) | Existing requests; ops endpoints |
 

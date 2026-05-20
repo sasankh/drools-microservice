@@ -17,6 +17,14 @@ The legacy consolidated context file at `.ai-workspace/ai-initial-context/ai-ini
 
 ## ⚠️ Important: Recent change log (most recent first)
 
+### Redis cache + pub/sub layer (2026-05-20)
+- **Replaced dead `RuleCache` layer.** Forensic trace revealed both `LocalLRUCache` and `RedisRuleCache` were never read from at runtime — written to during refresh but `.get()` was never called. Deleted ~600 LOC of dead code.
+- **New `RedisCachedRuleStorage` decorator** wraps the base `RuleStorage` when `REDIS_ENABLED=true`. Read-through Redis cache of DRL text with 15-min TTL default. Circuit-breaker fallback to base storage if Redis is down.
+- **New pub/sub layer** (`RuleRefreshPublisher`, `RuleRefreshSubscriber`, `RefreshEvent`) — when one ECS task refreshes a rule, sibling tasks receive a JSON event on `drools:rule:events` and refresh their own `kieContainer` within ~1 sec. Solves the multi-instance compiled-state divergence problem.
+- **Env var migration**: `REDIS_TTL_MINUTES` → `REDIS_DRL_RULES_TTL_MINUTES`; `LRU_CACHE_MAX_SIZE` dropped; added `REDIS_DRL_RULES_KEY_PREFIX`, `REDIS_PUBSUB_ENABLED`, `REDIS_REFRESH_CHANNEL`.
+- **Test results**: 545 unit tests pass (down from 597 due to deleted dead-cache tests); +13 Testcontainers integration tests (excluded from default `mvn test` via pom.xml surefire config). `full-docker-test-plan.md` extended with Step 8 (Redis cache verification) and Step 9 (Redis-off regression); all 11 steps executed live and pass.
+- **ADR-016** added; ADR-004 and ADR-005 marked Superseded.
+
 ### Sonar quality gates cleared (2026-05-11)
 - **Maintainability**: 178 → 0 open issues (Waves 4A–4D: AssertJ modernization, parameterized tests, constructor injection, unused fields, cognitive complexity, ReDoS hotspots)
 - **Reliability**: 5 → 0 (BLOCKER fixed: KieSession try-with-resources; S2142 InterruptedException handling; S2583 dead branch; S6813 constructor injection for validators)
@@ -189,10 +197,12 @@ com.company.drools/
 
 1. **Rule Storage**: Rules are stored as .drl files in S3 with hierarchical organization (e.g., `pricing/discount/black-friday.drl`)
 
-2. **Caching Strategy**: 
-   - Refresh/startup path: S3 → Redis (optional, L2) → LocalLRUCache (L1, DRL text only)
-   - Execution path: DroolsEngineService.kieContainer (all compiled rules, no eviction)
-   - LocalLRUCache and Redis store raw DRL source text only — compiled KieBases live exclusively in the single long-lived KieContainer
+2. **Caching Strategy** (refactored 2026-05-20):
+   - When `REDIS_ENABLED=true`: `RedisCachedRuleStorage` decorates the base `RuleStorage` — read-through Redis cache of DRL text with configurable TTL (default 15 min via `REDIS_DRL_RULES_TTL_MINUTES`)
+   - When `REDIS_ENABLED=false`: direct base storage, no caching layer
+   - **Cross-task convergence**: when `REDIS_PUBSUB_ENABLED=true` (default when Redis is on), `RuleRefreshPublisher` emits events on `drools:rule:events` channel after refresh; sibling ECS tasks' `RuleRefreshSubscriber` receives and refreshes their own `kieContainer` within ~1 sec (single-rule) or ~7 min (bulk). Self-emitted events filtered via per-instance UUID
+   - Execution path: `DroolsEngineService.kieContainer` (all compiled rules, no eviction) — Redis stores raw DRL text only, compiled KieBases live exclusively in the long-lived `KieContainer`
+   - **Replaces dead `RuleCache` layer** (LocalLRUCache + old RedisRuleCache) — those were written to but never read from; deleted in Phase 4+5
 
 3. **API Design**:
    - Main API on port 8080 (`/execute-rule`)
@@ -236,12 +246,15 @@ RULE_SOURCE=s3                    # or 'local' for development
 RULE_BUCKET_NAME=local-rules      # S3 bucket name
 AWS_ENDPOINT=http://localhost:4566 # LocalStack endpoint
 
-# Redis (optional)
+# Redis (optional decorator over base storage + pub/sub fan-out)
 REDIS_ENABLED=false
 REDIS_URL=redis://localhost:6379
+REDIS_DRL_RULES_TTL_MINUTES=15
+REDIS_DRL_RULES_KEY_PREFIX=drools:rule:
+REDIS_PUBSUB_ENABLED=true                # only active when REDIS_ENABLED=true
+REDIS_REFRESH_CHANNEL=drools:rule:events
 
 # Performance
-LRU_CACHE_MAX_SIZE=100
 RULE_EXECUTION_TIMEOUT_SECONDS=30
 DROOLS_THREAD_POOL_MAX_SIZE=50
 AWS_S3_MAX_CONNECTIONS=50

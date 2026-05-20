@@ -293,7 +293,6 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/rules | jq
       "last_modified": null,
       "execution_count": 0,
       "avg_execution_time_ms": 0.0,
-      "cached": true,
       "version": "1.0"
     },
     ...
@@ -308,8 +307,9 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/rules | jq
 | `last_modified` | ISO-8601 timestamp from the storage layer (S3 LastModified). **`null` if the rule has never been refetched** — it's set by storage operations, not on initial load. |
 | `execution_count` | Increments per `/execute-rule` call. Starts at 0 for unused rules. |
 | `avg_execution_time_ms` | Tracked in [`RuleMetadata`](../src/main/java/com/company/drools/core/model/RuleMetadata.java) using **incremental averaging** (Welford's method) to avoid numeric overflow. `0.0` for unused rules. |
-| `cached` | True if the rule is in `LocalLRUCache`. |
 | `version` | Source-defined version. Currently always `"1.0"` — versioning is roadmap. |
+
+> The `cached` boolean was removed on 2026-05-20 when the dead `LocalLRUCache` layer was deleted. Cache state now lives in Redis (when `REDIS_ENABLED=true`) and is observable via `drools.cache.hit` / `drools.cache.miss` counters in `/admin/health` and `/actuator/metrics`. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20).
 
 **Source**: [`AdminController.java:479-520`](../src/main/java/com/company/drools/api/controller/AdminController.java#L479-L520).
 
@@ -317,7 +317,7 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/rules | jq
 
 ### `POST /admin/refresh-rules` — Reload all rules
 
-Re-fetches all rules from storage, sandbox-scans them, recompiles, and updates the long-lived `KieContainer` in place via Drools 10's `KieContainer.updateToVersion(ReleaseId)`. Existing `/execute-rule` traffic continues during compilation — the compile happens outside the write lock, and the lock is held only briefly for the version swap. See [04-architecture.md](04-architecture.md), [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal), and [39-load-test-findings.md](39-load-test-findings.md) for measured behavior at 1000 rules.
+Pipeline: (1) `RedisCachedRuleStorage.refreshCache()` clears Redis keys matching the prefix and re-populates them from base storage (S3/file/memory) via write-through — no-op when `REDIS_ENABLED=false`; (2) the resulting `Rule` set is recompiled into a fresh versioned `KieModule` via `KieFileSystem` + `KieBuilder`; (3) `KieContainer.updateToVersion(ReleaseId)` atomically swaps under a brief write lock; (4) `KieRepository.removeKieModule(oldReleaseId)` releases the prior `ProjectClassLoader` (Drools 10 does NOT auto-clean); (5) when `REDIS_PUBSUB_ENABLED=true`, `RuleRefreshPublisher.publishBulkRefresh()` emits `{event_type: RULE_REFRESHED_BULK, source_instance_id}` to channel `drools:rule:events` so other instances reload + swap. In-flight `/execute-rule` requests keep their existing `KieBase` until session disposal. See [04-architecture.md](04-architecture.md), [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal), [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20), and [39-load-test-findings.md](39-load-test-findings.md) for measured behavior at 1000 rules.
 
 ```bash
 curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/refresh-rules | jq

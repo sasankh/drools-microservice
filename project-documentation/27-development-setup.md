@@ -193,7 +193,7 @@ Don't add classes outside the existing top-level packages (`api/`, `core/`, `sto
 | Where | Lock | Why |
 |---|---|---|
 | [`DroolsEngineService`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java) | `ReentrantReadWriteLock` | Many concurrent reads (rule execution); rare writes (refresh) |
-| [`LocalLRUCache.get()`](../src/main/java/com/company/drools/cache/LocalLRUCache.java#L73) | **Write** lock (not read!) | `LinkedHashMap` with `accessOrder=true` mutates internals on `get()` |
+| [`RedisCachedRuleStorage`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java) | Lock-free | All mutation goes through Redis + delegate; circuit breaker handles failure |
 | [`RateLimitingConfig.InMemoryRateLimitingService`](../src/main/java/com/company/drools/config/RateLimitingConfig.java) | `ConcurrentHashMap` + `AtomicLong` | Lock-free hot path |
 
 If you add a new shared mutable structure, document its lock discipline in javadoc.
@@ -310,7 +310,7 @@ fix(storage): handle S3 NoSuchKeyException in getAllRules
 docs(architecture): correct security header values
 chore(deps): bump testcontainers to 1.19.7
 test(filter): add rate limiter X-Forwarded-For test
-refactor(cache): extract RuleCache interface
+refactor(cache): extract RedisCachedRuleStorage decorator
 ```
 
 PR checklist before merging:

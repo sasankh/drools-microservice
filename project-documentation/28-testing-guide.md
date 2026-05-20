@@ -62,13 +62,21 @@ Counts are `@Test` + `@ParameterizedTest` annotations per file (verified 2026-05
 | [`RuleIdValidatorTest.java`](../src/test/java/com/company/drools/api/validation/RuleIdValidatorTest.java) | 17 | Pattern check, length check, path traversal rejection |
 | [`RuleDataValidatorTest.java`](../src/test/java/com/company/drools/api/validation/RuleDataValidatorTest.java) | 33 | Field count, string length, number magnitude, dangerous patterns |
 
-### `cache/` — 83 tests
+### `cache/` — pub/sub fan-out tests
 
 | File | Tests |
 |---|---:|
-| [`CacheStatisticsTest.java`](../src/test/java/com/company/drools/cache/CacheStatisticsTest.java) | 14 |
-| [`LocalLRUCacheTest.java`](../src/test/java/com/company/drools/cache/LocalLRUCacheTest.java) | 37 — LRU eviction, write-lock-on-get behavior |
-| [`RedisRuleCacheTest.java`](../src/test/java/com/company/drools/cache/RedisRuleCacheTest.java) | 32 — circuit breaker integration, SCAN-based key listing |
+| [`RefreshEventTest.java`](../src/test/java/com/company/drools/cache/RefreshEventTest.java) | Wire-format serde for `RefreshEvent` (event_type / rule_id / source_instance_id / timestamp) |
+| [`RuleRefreshPublisherTest.java`](../src/test/java/com/company/drools/cache/RuleRefreshPublisherTest.java) | Channel + payload assertions; circuit-breaker fall-through; failure → `drools.refresh.failed{layer=publisher}` |
+| [`RuleRefreshSubscriberTest.java`](../src/test/java/com/company/drools/cache/RuleRefreshSubscriberTest.java) | Self-dedup via `source_instance_id`; dispatch to `engine.loadOrReplaceRule` / `loadRules`; malformed JSON tolerance |
+
+The dead `LocalLRUCacheTest` / `RedisRuleCacheTest` / `CacheStatisticsTest` files were deleted on 2026-05-20 along with the legacy cache layer. The Redis decorator itself is covered under `storage/`:
+
+| File | Tests |
+|---|---:|
+| [`RedisCachedRuleStorageTest.java`](../src/test/java/com/company/drools/storage/RedisCachedRuleStorageTest.java) | Read-through, write-through, bulk SCAN+MGET, circuit-breaker fall-through (Mockito) |
+| [`RedisCachedStorageIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisCachedStorageIntegrationTest.java) | Testcontainers — cold→warm cache, TTL, bulk SCAN+MGET (hot/cold), refreshCache, refreshRule, write-through, Redis-kill CB fallback. **Excluded from default `mvn test`** (see `pom.xml` surefire `<excludes>`); requires host-side Docker daemon. |
+| [`RedisPubSubIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisPubSubIntegrationTest.java) | Testcontainers — two-instance fan-out (single + bulk + delete), wire-format end-to-end. **Excluded from default `mvn test`**. |
 
 ### `common/` — 24 tests
 

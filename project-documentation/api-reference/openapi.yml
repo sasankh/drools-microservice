@@ -327,12 +327,10 @@ paths:
                         status: "UP"
                         details:
                           rules_loaded: 148
-                          cache_size: 95
-                          cache_hit_rate: 0.94
                       storage:
                         status: "UP"
                         details:
-                          type: "S3RuleStorage"
+                          type: "RedisCachedRuleStorage(delegate=S3RuleStorage)"
                           bucket: "prod-drools-rules"
                           accessible: true
                           total_rules: 148
@@ -340,17 +338,18 @@ paths:
                         status: "UP"
                         details:
                           enabled: true
-                          size: 95
-                          max_size: 100
-                          statistics:
-                            hits: 1250
-                            misses: 45
-                            hit_rate: "96.50%"
+                          implementation: "RedisCachedRuleStorage"
+                          ttl_minutes: 15
+                          key_prefix: "drools:rule:"
+                          hit_rate: "96.50%"
+                          hits: 1250
+                          misses: 45
                       redis:
                         status: "UP"
                         details:
                           connected: true
-                          cache_type: "RedisRuleCache"
+                          pubsub_enabled: true
+                          channel: "drools:rule:events"
                       circuit-breakers:
                         status: "UP"
                         details:
@@ -367,18 +366,16 @@ paths:
                         status: "UP"
                         details:
                           rules_loaded: 148
-                          cache_size: 95
-                          cache_hit_rate: 0.85
                       storage:
                         status: "UP"
                         details:
-                          type: "S3RuleStorage"
+                          type: "RedisCachedRuleStorage(delegate=S3RuleStorage)"
                           accessible: true
                       cache:
-                        status: "UP"
+                        status: "DEGRADED"
                         details:
                           enabled: true
-                          size: 95
+                          note: "Redis circuit breaker open — all reads fall through to base storage"
                       redis:
                         status: "DOWN"
                         details:
@@ -492,7 +489,6 @@ paths:
                         last_modified: "2025-07-22T09:30:00Z"
                         execution_count: 1847
                         avg_execution_time_ms: 12.5
-                        cached: true
                         version: "1.2"
                       - rule_id: "compliance.sanctions.ofac"
                         status: "ACTIVE"
@@ -500,7 +496,6 @@ paths:
                         last_modified: "2025-07-21T15:20:00Z"
                         execution_count: 892
                         avg_execution_time_ms: 8.3
-                        cached: true
                         version: "1.0"
 
   /admin/refresh-rules:
@@ -990,9 +985,6 @@ components:
           type: number
           format: double
           description: Average execution time in milliseconds
-        cached:
-          type: boolean
-          description: Whether rule is currently cached
         version:
           type: string
           description: Rule version

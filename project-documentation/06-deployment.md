@@ -78,13 +78,16 @@ AWS_ACCESS_KEY_ID=your-access-key         # AWS credentials
 AWS_SECRET_ACCESS_KEY=your-secret-key     # AWS credentials
 # AWS_ENDPOINT=http://localhost:4566      # LocalStack for dev
 
-# === Redis Configuration (Optional) ===
-REDIS_ENABLED=true                        # Enable Redis caching
+# === Redis Configuration (cache decorator + pub/sub fan-out) ===
+REDIS_ENABLED=true                        # Wraps base storage in RedisCachedRuleStorage
 REDIS_URL=redis://localhost:6379          # Redis connection URL
 # REDIS_PASSWORD=your-redis-password      # If authentication required
+REDIS_DRL_RULES_TTL_MINUTES=15            # Cache TTL for DRL JSON
+REDIS_DRL_RULES_KEY_PREFIX=drools:rule:   # Key prefix for SCAN+MGET
+REDIS_PUBSUB_ENABLED=true                 # Cross-instance refresh fan-out
+REDIS_PUBSUB_CHANNEL=drools:rule:events   # Pub/sub channel
 
 # === Performance Tuning ===
-LRU_CACHE_MAX_SIZE=100                    # Local cache size
 RULE_EXECUTION_TIMEOUT_SECONDS=30         # Rule timeout
 THREAD_POOL_RULE_EXECUTION_CORE_SIZE=10   # Thread pool core size
 THREAD_POOL_RULE_EXECUTION_MAX_SIZE=50    # Thread pool max size
@@ -138,14 +141,16 @@ drools:
   rule-source: s3
   bucket-name: ${RULE_BUCKET_NAME}
   
-# Caching
-cache:
-  lru:
-    max-size: ${LRU_CACHE_MAX_SIZE:100}
-  redis:
-    enabled: ${REDIS_ENABLED:true}
-    url: ${REDIS_URL:redis://localhost:6379}
-    ttl: 3600
+# Caching (RedisCachedRuleStorage decorator + pub/sub fan-out)
+redis:
+  enabled: ${REDIS_ENABLED:true}
+  url: ${REDIS_URL:redis://localhost:6379}
+  drl-rules:
+    ttl-minutes: ${REDIS_DRL_RULES_TTL_MINUTES:15}
+    key-prefix: ${REDIS_DRL_RULES_KEY_PREFIX:drools:rule:}
+  pubsub:
+    enabled: ${REDIS_PUBSUB_ENABLED:true}
+    channel: ${REDIS_PUBSUB_CHANNEL:drools:rule:events}
 
 # Performance
 thread-pools:
@@ -308,12 +313,13 @@ RULE_SOURCE=s3
 RULE_BUCKET_NAME=prod-drools-rules
 AWS_REGION=us-east-1
 
-# Redis Configuration
+# Redis Configuration (shared cache + cross-instance fan-out)
 REDIS_ENABLED=true
 REDIS_URL=redis://prod-redis.company.com:6379
+REDIS_DRL_RULES_TTL_MINUTES=15
+REDIS_PUBSUB_ENABLED=true
 
 # Performance Tuning
-LRU_CACHE_MAX_SIZE=500
 THREAD_POOL_RULE_EXECUTION_CORE_SIZE=20
 THREAD_POOL_RULE_EXECUTION_MAX_SIZE=100
 

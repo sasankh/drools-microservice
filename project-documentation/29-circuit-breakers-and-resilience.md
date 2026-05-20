@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Operators, on-call engineers, developers debugging external-dependency failures |
 | **Purpose** | Complete behavior of the two Resilience4j circuit breakers (S3 and Redis) — how they trip, what they protect, what state transitions look like, how to recover |
-| **Last verified against** | [`CircuitBreakerConfig.java`](../src/main/java/com/company/drools/config/CircuitBreakerConfig.java), [`S3RuleStorage.java`](../src/main/java/com/company/drools/storage/S3RuleStorage.java), [`RedisRuleCache.java`](../src/main/java/com/company/drools/cache/RedisRuleCache.java) on 2026-05-10 |
+| **Last verified against** | [`CircuitBreakerConfig.java`](../src/main/java/com/company/drools/config/CircuitBreakerConfig.java), [`S3RuleStorage.java`](../src/main/java/com/company/drools/storage/S3RuleStorage.java), [`RedisCachedRuleStorage.java`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java), [`RuleRefreshPublisher.java`](../src/main/java/com/company/drools/cache/RuleRefreshPublisher.java) on 2026-05-20 |
 | **Related docs** | [09-environment-variables-reference.md](09-environment-variables-reference.md), [12-error-code-catalog.md](12-error-code-catalog.md), [26-performance-tuning-runbook.md](26-performance-tuning-runbook.md), [30-runbooks-and-monitoring.md](30-runbooks-and-monitoring.md) |
 
 ---
@@ -14,7 +14,7 @@
 Two circuit breakers wrap calls to external dependencies:
 
 - **`s3CircuitBreaker`** wraps every call into `S3RuleStorage` (`getRule`, `getAllRules`, etc.)
-- **`redisCircuitBreaker`** wraps `RedisRuleCache.get()` and `.put()`
+- **`redisCircuitBreaker`** wraps every Redis op in `RedisCachedRuleStorage` (get / set / DEL / SCAN / MGET / EXISTS) and in `RuleRefreshPublisher.publish()` (`convertAndSend`)
 
 They use the standard 3-state machine (CLOSED → OPEN → HALF_OPEN → CLOSED). When OPEN, calls return `CallNotPermittedException` immediately, which the service maps to **HTTP 503 `SERVICE_UNAVAILABLE`**.
 
@@ -107,7 +107,7 @@ When the breaker is OPEN:
 
 ### Redis circuit breaker — `redisCircuitBreaker`
 
-[`RedisRuleCache.java:72-85, 126-134`](../src/main/java/com/company/drools/cache/RedisRuleCache.java) wraps `get()` and `put()`. On open breaker, the cache silently treats the call as a miss/no-op — it doesn't propagate as an error to the user. **The service degrades gracefully** to LocalLRUCache + S3 lookups when Redis is unavailable.
+[`RedisCachedRuleStorage.java`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java) and [`RuleRefreshPublisher.java`](../src/main/java/com/company/drools/cache/RuleRefreshPublisher.java) wrap every Redis op in the breaker. On open breaker, reads silently fall through to the delegate (S3 / local file / in-memory); writes are silently dropped (best-effort). Publisher emits a WARN log and increments `drools.refresh.failed{layer=publisher,reason=circuit_breaker_open}` but does NOT propagate — the local refresh has already succeeded. **The service degrades gracefully** to direct base-storage reads when Redis is unavailable.
 
 This is a deliberate difference: S3 outage = user-visible 503 (because S3 is the source of truth). Redis outage = silent degradation (because Redis is just acceleration).
 
@@ -210,7 +210,7 @@ For S3: the most recent 100 calls (or 200 in `prod`). At least 10 must have been
 1. Redis responses are slow (> 2 seconds each) due to network or pressure.
 2. After 5+ calls in the window AND 80%+ are "slow" → breaker → **OPEN**.
 3. For 30 seconds, Redis cache calls return immediately as if it were a miss.
-4. Service continues serving requests via LocalLRUCache + S3. **No user-visible errors.**
+4. Service continues serving requests via direct base storage (S3/file/memory). **No user-visible errors.**
 5. After 30s, HALF_OPEN with 3 test calls. If Redis recovered → CLOSED.
 
 ### Scenario: S3 NoSuchKeyException (missing rule)
@@ -359,7 +359,7 @@ Trade-off: stricter = quicker to fast-fail (good for protection), but more sensi
 | Signal | Severity | Threshold | Action |
 |---|---|---|---|
 | S3 breaker state = OPEN | P1 | > 30s open | Page on-call. Likely real S3 outage or misconfig. |
-| Redis breaker state = OPEN | P3 | > 5 min open | Investigate Redis. Service still functioning via LocalLRUCache + S3. |
+| Redis breaker state = OPEN | P3 | > 5 min open | Investigate Redis. Service still functioning via direct base storage (S3/file/memory) — `RedisCachedRuleStorage` falls through on every call. |
 | `not_permitted_calls` rate > 0 | P2 | sustained > 1 min | Breaker is still rejecting traffic — alert immediate; this is "503s being sent to clients". |
 | Slow call rate > 50% on S3 | P2 | sustained 5 min | S3 is degraded — pre-trip warning. |
 | Frequent CLOSED→OPEN→CLOSED flapping | P2 | > 3 transitions / 10 min | Either S3 is unstable or your thresholds are too sensitive. |
@@ -416,6 +416,6 @@ docker compose logs -f app | grep 'Circuit breaker'
 
 - Configuration class: [`CircuitBreakerConfig.java`](../src/main/java/com/company/drools/config/CircuitBreakerConfig.java)
 - S3 breaker wiring: [`S3RuleStorage.java:62-90`](../src/main/java/com/company/drools/storage/S3RuleStorage.java#L62-L90), [`:135-142`](../src/main/java/com/company/drools/storage/S3RuleStorage.java#L135-L142)
-- Redis breaker wiring: [`RedisRuleCache.java:72-85`](../src/main/java/com/company/drools/cache/RedisRuleCache.java#L72-L85), [`:126-134`](../src/main/java/com/company/drools/cache/RedisRuleCache.java#L126-L134)
+- Redis breaker wiring: [`RedisCachedRuleStorage.java:121`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L121) (get), [`:255`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L255) (save), [`:276`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L276) (delete), [`:314`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L314) (bulk MGET); publisher wrap: [`RuleRefreshPublisher.java`](../src/main/java/com/company/drools/cache/RuleRefreshPublisher.java)
 - Profile-specific overrides: [`application.yml:165-350`](../src/main/resources/application.yml#L165-L350)
 - Tests: [`CircuitBreakerConfigTest.java`](../src/test/java/com/company/drools/config/CircuitBreakerConfigTest.java)

@@ -53,23 +53,19 @@ This guide provides comprehensive documentation for configuring the Drools Rule 
 | `S3_CONNECTION_POOL_MAX_SIZE` | S3 connection pool size | `50` | `20`, `100` |
 | `S3_CONNECTION_TIMEOUT_SECONDS` | S3 connection timeout | `30` | `10`, `60` |
 
-### Redis Configuration
+### Redis Configuration (cache + pub/sub)
+
+When `REDIS_ENABLED=true`, `RedisCachedRuleStorage` wraps the base `RuleStorage` (S3 / file / memory) as a read-through + write-through decorator. When `REDIS_PUBSUB_ENABLED=true` (default when Redis is enabled), `RuleRefreshPublisher`/`Subscriber` fan refresh events across instances on `drools:rule:events`. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20).
 
 | Variable | Description | Default | Examples |
 |----------|-------------|---------|----------|
-| `REDIS_ENABLED` | Enable Redis caching | `false` | `true`, `false` |
+| `REDIS_ENABLED` | Enable `RedisCachedRuleStorage` decorator | `false` | `true`, `false` |
 | `REDIS_URL` | Redis connection URL | `redis://localhost:6379` | `redis://prod-redis:6379` |
 | `REDIS_PASSWORD` | Redis password | *(none)* | `your-secure-password` |
-| `REDIS_TTL_SECONDS` | Cache TTL in seconds | `3600` | `1800`, `7200` |
-| `REDIS_CONNECTION_POOL_MAX_SIZE` | Redis connection pool | `10` | `5`, `20` |
-
-### Cache Configuration
-
-| Variable | Description | Default | Examples |
-|----------|-------------|---------|----------|
-| `LRU_CACHE_MAX_SIZE` | Local LRU cache size | `100` | `50`, `500`, `1000` |
-| `CACHE_WARMING_ENABLED` | Enable cache warming | `true` | `true`, `false` |
-| `CACHE_STATISTICS_ENABLED` | Track cache statistics | `true` | `true`, `false` |
+| `REDIS_DRL_RULES_TTL_MINUTES` | Cache TTL for DRL JSON (minutes) | `15` | `5`, `30`, `60` |
+| `REDIS_DRL_RULES_KEY_PREFIX` | Key prefix for SCAN+MGET bulk path | `drools:rule:` | `myapp:rules:` |
+| `REDIS_PUBSUB_ENABLED` | Enable cross-instance refresh fan-out | `true` (when Redis enabled) | `true`, `false` |
+| `REDIS_PUBSUB_CHANNEL` | Pub/sub channel for refresh events | `drools:rule:events` | `myapp:rule:events` |
 
 ### Performance Configuration
 
@@ -162,19 +158,17 @@ aws:
     connection-pool-max-size: ${S3_CONNECTION_POOL_MAX_SIZE:50}
     connection-timeout-seconds: ${S3_CONNECTION_TIMEOUT_SECONDS:30}
 
-# Cache Configuration
-cache:
-  lru:
-    max-size: ${LRU_CACHE_MAX_SIZE:100}
-    statistics-enabled: ${CACHE_STATISTICS_ENABLED:true}
-  redis:
-    enabled: ${REDIS_ENABLED:false}
-    url: ${REDIS_URL:redis://localhost:6379}
-    password: ${REDIS_PASSWORD:}
-    ttl-seconds: ${REDIS_TTL_SECONDS:3600}
-    connection-pool-max-size: ${REDIS_CONNECTION_POOL_MAX_SIZE:10}
-  warming:
-    enabled: ${CACHE_WARMING_ENABLED:true}
+# Redis Configuration (cache decorator + pub/sub fan-out)
+redis:
+  enabled: ${REDIS_ENABLED:false}
+  url: ${REDIS_URL:redis://localhost:6379}
+  password: ${REDIS_PASSWORD:}
+  drl-rules:
+    ttl-minutes: ${REDIS_DRL_RULES_TTL_MINUTES:15}
+    key-prefix: ${REDIS_DRL_RULES_KEY_PREFIX:drools:rule:}
+  pubsub:
+    enabled: ${REDIS_PUBSUB_ENABLED:true}
+    channel: ${REDIS_PUBSUB_CHANNEL:drools:rule:events}
 
 # Thread Pool Configuration
 thread-pools:
@@ -666,8 +660,8 @@ if [[ ! "$RULE_SOURCE" =~ ^(s3|local|memory)$ ]]; then
 fi
 
 # Validate numeric values
-if ! [[ "$LRU_CACHE_MAX_SIZE" =~ ^[0-9]+$ ]] || [ "$LRU_CACHE_MAX_SIZE" -lt 1 ]; then
-  echo "ERROR: LRU_CACHE_MAX_SIZE must be a positive integer"
+if [ -n "$REDIS_DRL_RULES_TTL_MINUTES" ] && (! [[ "$REDIS_DRL_RULES_TTL_MINUTES" =~ ^[0-9]+$ ]] || [ "$REDIS_DRL_RULES_TTL_MINUTES" -lt 1 ]); then
+  echo "ERROR: REDIS_DRL_RULES_TTL_MINUTES must be a positive integer"
   exit 1
 fi
 
@@ -679,27 +673,27 @@ echo "Configuration validation passed"
 ```java
 @Component
 public class ConfigurationValidator implements ApplicationRunner {
-    
+
     @Value("${drools.rule-source}")
     private String ruleSource;
-    
-    @Value("${cache.lru.max-size}")
-    private int cacheMaxSize;
-    
+
+    @Value("${redis.drl-rules.ttl-minutes:15}")
+    private int redisTtlMinutes;
+
     @Override
     public void run(ApplicationArguments args) throws Exception {
         validateRuleSource();
-        validateCacheConfiguration();
+        validateRedisConfiguration();
         validateThreadPoolConfiguration();
         log.info("Configuration validation completed successfully");
     }
-    
+
     private void validateRuleSource() {
         if (!"s3".equals(ruleSource) && !"local".equals(ruleSource) && !"memory".equals(ruleSource)) {
             throw new IllegalStateException("Invalid rule source: " + ruleSource);
         }
     }
-    
+
     // Additional validation methods...
 }
 ```
@@ -725,7 +719,8 @@ export RULE_SOURCE=s3
 export RULE_BUCKET_NAME=prod-drools-rules
 export REDIS_ENABLED=true
 export REDIS_URL=redis://prod-redis.company.com:6379
-export LRU_CACHE_MAX_SIZE=500
+export REDIS_DRL_RULES_TTL_MINUTES=15
+export REDIS_PUBSUB_ENABLED=true
 export THREAD_POOL_RULE_EXECUTION_CORE_SIZE=20
 export THREAD_POOL_RULE_EXECUTION_MAX_SIZE=100
 export DROOLS_RATE_LIMITING_PER_MINUTE_LIMIT=10000

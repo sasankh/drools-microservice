@@ -278,9 +278,12 @@ The application supports multiple configuration methods (in priority order):
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `REDIS_ENABLED` | Enable Redis distributed caching | `false` |
+| `REDIS_ENABLED` | Wrap base storage in `RedisCachedRuleStorage` (read-through + write-through) | `false` |
 | `REDIS_URL` | Redis connection URL | `redis://localhost:6379` |
-| `LRU_CACHE_MAX_SIZE` | Local LRU cache size | `100` |
+| `REDIS_DRL_RULES_TTL_MINUTES` | Cache TTL for DRL JSON (minutes) | `15` |
+| `REDIS_DRL_RULES_KEY_PREFIX` | Key prefix for SCAN+MGET bulk path | `drools:rule:` |
+| `REDIS_PUBSUB_ENABLED` | Enable cross-instance refresh fan-out via `RuleRefreshPublisher`/`Subscriber` | `true` (when Redis enabled) |
+| `REDIS_PUBSUB_CHANNEL` | Pub/sub channel for refresh events | `drools:rule:events` |
 | `RULE_EXECUTION_TIMEOUT_SECONDS` | Rule execution timeout | `30` |
 | `LOG_LEVEL` | Application log level | `INFO` |
 
@@ -430,7 +433,6 @@ GET /admin/rules
       "loaded_at": "2025-07-21T17:00:00Z",
       "execution_count": 150,
       "avg_execution_time_ms": 12.5,
-      "cached": true,
       "version": "1.0"
     }
   ]
@@ -689,14 +691,17 @@ src/
 │   ├── core/                  # Business logic
 │   │   ├── engine/           # Drools engine integration
 │   │   └── model/            # Domain models
-│   ├── storage/              # Storage implementations
+│   ├── storage/              # Storage implementations + Redis cache decorator
 │   │   ├── RuleStorage.java  # Storage interface
-│   │   ├── S3RuleStorage.java # S3 implementation
-│   │   └── LocalFileStorage.java # File system implementation
-│   ├── cache/                # Caching implementations
-│   │   ├── RuleCache.java    # Cache interface
-│   │   ├── LocalLRUCache.java # LRU cache
-│   │   └── RedisRuleCache.java # Redis cache
+│   │   ├── S3RuleStorage.java # S3 backend
+│   │   ├── LocalFileStorage.java # File system backend
+│   │   ├── InMemoryRuleStorage.java # Test/dev backend
+│   │   ├── RedisCachedRuleStorage.java # Read-through + write-through Redis decorator (ADR-016)
+│   │   └── StorageFactory.java # Backend selector; wraps in Redis decorator when enabled
+│   ├── cache/                # Cross-instance refresh pub/sub
+│   │   ├── RefreshEvent.java # Wire format
+│   │   ├── RuleRefreshPublisher.java # Emits to drools:rule:events
+│   │   └── RuleRefreshSubscriber.java # Self-dedup + engine dispatch
 │   ├── common/               # Shared utilities
 │   │   └── LogSanitizer.java # Log sanitization
 │   └── config/               # Spring configuration
@@ -1072,10 +1077,11 @@ export RULE_SOURCE=s3
 export RULE_BUCKET_NAME=production-rules
 export AWS_REGION=us-east-1
 
-# Caching
+# Caching (Redis decorator + pub/sub fan-out)
 export REDIS_ENABLED=true
 export REDIS_URL=redis://prod-redis:6379
-export LRU_CACHE_MAX_SIZE=500
+export REDIS_DRL_RULES_TTL_MINUTES=15
+export REDIS_PUBSUB_ENABLED=true
 
 # Performance
 export RULE_EXECUTION_TIMEOUT_SECONDS=10
@@ -1136,16 +1142,14 @@ curl http://localhost:8080/admin/rules | jq '.rules[].avg_execution_time_ms'
 
 ### Rule Capacity & Memory Sizing
 
-Understanding the two distinct caching layers helps answer this correctly.
+Two distinct rule state stores; only one occupies JVM heap.
 
-**Two separate caching layers:**
-
-| Layer | What it stores | Used when | Memory impact |
+| Store | What it holds | Used when | Memory impact |
 |---|---|---|---|
-| `LocalLRUCache` / Redis | Raw DRL source text (`Rule` objects, ~10 KB each) | Refresh and startup warm-up only | Negligible — 100 entries ≈ 1 MB |
-| `DroolsEngineService.kieContainer` | All compiled `KieBase` objects simultaneously | Every rule execution | Significant — grows with rule count |
+| Redis (via `RedisCachedRuleStorage`) | DRL JSON for every loaded rule (~10 KB each) | Refresh, warm-start, cross-instance fan-out | None on JVM — lives in Redis |
+| `DroolsEngineService.kieContainer` | All compiled `KieBase` objects simultaneously | Every `/execute-rule` call | Significant — grows with rule count |
 
-**Key point:** `LRU_CACHE_MAX_SIZE` controls how many DRL text strings are cached before eviction to Redis/S3. It has no effect on compiled rules — all loaded rules are always compiled in the `KieContainer` simultaneously. There is no eviction of compiled rules.
+**Key point:** Redis is not in the execution hot path. Cache TTL (`REDIS_DRL_RULES_TTL_MINUTES`) only affects refresh/warm-start cost. Heap pressure comes from the compiled `kieContainer`, which holds all loaded rules with no eviction. Scale horizontally to shard compiled-state memory across instances.
 
 **Real capacity limit = heap / compiled-rule size.** Only `-Xmx` matters.
 

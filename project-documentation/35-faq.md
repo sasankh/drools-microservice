@@ -272,11 +272,11 @@ Recommended dashboards + alerts: [30-runbooks-and-monitoring.md](30-runbooks-and
 
 ### What if Redis goes down?
 
-**No user-visible impact.** The Redis circuit breaker opens, the cache silently degrades to "always miss", LocalLRUCache + S3 continue serving. See [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md).
+**No user-visible impact.** The Redis circuit breaker opens, `RedisCachedRuleStorage` falls through to base storage (S3 / file / memory) on every call, and `RuleRefreshPublisher` no-ops. Cross-instance refresh fan-out also stops — each instance refreshes independently until Redis recovers. See [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md).
 
 ### What if S3 goes down?
 
-503 `SERVICE_UNAVAILABLE` after the breaker trips. Already-cached rules continue executing (LocalLRUCache hit), but new rule lookups fail. The breaker auto-recovers after `wait-duration` (60s default, 120s in prod) when S3 comes back.
+503 `SERVICE_UNAVAILABLE` from new rule lookups after the S3 breaker trips. Already-loaded rules continue executing (compiled in `kieContainer`, no S3 touch per request). The breaker auto-recovers after `wait-duration` (60s default, 120s in prod) when S3 comes back.
 
 ### How often should I refresh rules in production?
 
@@ -311,13 +311,13 @@ See [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md).
 
 ## Architecture & design
 
-### Why is `LocalLRUCache.get()` using a write lock?
+### How does multi-instance refresh stay consistent?
 
-Because `LinkedHashMap` with `accessOrder=true` mutates internal state on `get()`. See [ADR-004](36-architecture-decision-records.md#adr-004-locallrucache-uses-write-lock-on-get).
+`RuleRefreshPublisher` emits to `drools:rule:events` whenever `/admin/refresh-rules` succeeds; other instances' `RuleRefreshSubscriber` reload from storage and swap `kieContainer`. Self-dedup via `source_instance_id == this.instanceId` prevents loop-back. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20). Without `REDIS_PUBSUB_ENABLED=true`, each instance must be refreshed manually or wait for TTL expiry + next refresh.
 
-### Why is Redis bean wired but unused?
+### Why was the old `LocalLRUCache` / `RedisRuleCache` layer removed?
 
-It's `@Conditional` on `REDIS_ENABLED=true` but `LocalLRUCache` is `@Primary`. Redis stays dormant by default. See [ADR-005](36-architecture-decision-records.md#adr-005-redis-bean-exists-but-is-dormant-by-default).
+It was dead code — `RuleCache.get()` was never called from execution or refresh paths. Execution reads from `DroolsEngineService.kieContainer`; refresh fetches directly from storage. Replaced 2026-05-20 by `RedisCachedRuleStorage` (a real read-through decorator on `RuleStorage`) plus pub/sub. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20); [ADR-004](36-architecture-decision-records.md#adr-004-locallrucache-uses-write-lock-on-get) and [ADR-005](36-architecture-decision-records.md#adr-005-redis-bean-exists-but-is-dormant-by-default) are marked Superseded.
 
 ### Why no Spring Security?
 
@@ -400,9 +400,9 @@ P99 < 100ms for cached rules. P99 < 500ms for cache miss (cold S3 read). Sample 
 
 [26-performance-tuning-runbook.md](26-performance-tuning-runbook.md) has a 10-branch decision tree. Common levers:
 - Increase `DROOLS_THREAD_POOL_MAX_SIZE`
-- Increase `LRU_CACHE_MAX_SIZE` if cache hit rate is < 80%
+- Enable `REDIS_ENABLED=true` and bump `REDIS_DRL_RULES_TTL_MINUTES` so refresh/warm-start hits the shared cache instead of S3 (no effect on execution latency — that path doesn't touch Redis)
 - Increase `AWS_S3_MAX_CONNECTIONS`
-- Add more replicas
+- Add more replicas (with `REDIS_PUBSUB_ENABLED=true` so refresh fan-out stays coherent)
 
 ### What's the memory footprint?
 

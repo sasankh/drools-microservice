@@ -512,8 +512,9 @@ curl -s http://localhost:8080/admin/memory/info | jq '.memoryPools'
 # Increase heap size in docker-compose.yml
 JAVA_OPTS=-Xms512m -Xmx4096m  # Increase from 2048 to 4096
 
-# Or reduce cache size in .env
-LRU_CACHE_MAX_SIZE=50  # Reduce from 100
+# Memory pressure typically comes from compiled rules (kieContainer) — not from
+# the Redis decorator (DRL JSON lives in Redis, not the JVM heap). Reduce
+# pressure by sharding rules across more instances or trimming rule complexity.
 ```
 
 ---

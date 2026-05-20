@@ -81,10 +81,11 @@ When this doc says "Default", it means the value used if nothing higher-priority
 
 | Variable | Default | Type | What it controls |
 |---|---|---|---|
-| `LRU_CACHE_MAX_SIZE` | `100` | int | Maximum entries in [`LocalLRUCache`](../src/main/java/com/company/drools/cache/LocalLRUCache.java). LRU eviction beyond this. |
 | `RULE_EXECUTION_TIMEOUT_SECONDS` | `30` | int (seconds) | Per-execution cap. `RuleExecutor` uses this to time out rule firing via `CompletableFuture.get(...)`; on timeout it calls `future.cancel(true)`. |
 | `AUTO_REFRESH_ENABLED` | `false` | bool | If true, scheduled background reload from S3 at the interval below. Default `true` only in `prod` profile. |
 | `AUTO_REFRESH_INTERVAL_MINUTES` | `5` | int (minutes) | Refresh cadence when auto-refresh is enabled. |
+
+> `LRU_CACHE_MAX_SIZE` was removed on 2026-05-20 with the deletion of `LocalLRUCache`. Cache configuration now lives under the Redis section below. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20).
 
 ---
 
@@ -218,11 +219,18 @@ See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) for
 
 ## Redis
 
+Refactored 2026-05-20 — see [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20). When `REDIS_ENABLED=true`, `StorageFactory` wraps the base `RuleStorage` with `RedisCachedRuleStorage` (read-through cache of DRL text). When `REDIS_PUBSUB_ENABLED=true` (default when Redis is on), `RuleRefreshPublisher` emits events on `drools:rule:events` after every refresh; `RuleRefreshSubscriber` receives and refreshes this task's `kieContainer`.
+
 | Variable | Default | What it does |
 |---|---|---|
-| `REDIS_ENABLED` | `false` | If true, the `RedisRuleCache` bean is wired (it's `@ConditionalOnProperty(name = "redis.enabled", havingValue = "true")`). However, `LocalLRUCache` is `@Primary`, so Redis is dormant by default even when the bean exists. See [ADR-005](36-architecture-decision-records.md). |
+| `REDIS_ENABLED` | `false` | If true, the storage chain is wrapped with `RedisCachedRuleStorage`. When false, the service goes directly to the base storage with no caching. |
 | `REDIS_URL` | `redis://localhost:6379` | Lettuce-format URL. Examples: `redis://user:pass@host:6379`, `rediss://host:6379` (TLS). |
-| `REDIS_TTL_MINUTES` | `60` | TTL for cache entries when Redis is in use. |
+| `REDIS_DRL_RULES_TTL_MINUTES` | `15` | TTL for cached DRL rule entries. Acts as eventual-consistency ceiling for cross-service consumers (if the writer's pub/sub event is missed, stale entries expire within this window). |
+| `REDIS_DRL_RULES_KEY_PREFIX` | `drools:rule:` | Key prefix for cached rule entries. Namespaced to support future Redis uses by this service. |
+| `REDIS_PUBSUB_ENABLED` | `true` (when Redis on) | Enables `RuleRefreshPublisher` and `RuleRefreshSubscriber`. Set `false` to use Redis as cache only (no cross-task fan-out). |
+| `REDIS_REFRESH_CHANNEL` | `drools:rule:events` | Channel name for refresh events. Cross-service consumers can subscribe here. |
+
+**Deprecated (removed 2026-05-20)**: `REDIS_TTL_MINUTES` (renamed to `REDIS_DRL_RULES_TTL_MINUTES`), `LRU_CACHE_MAX_SIZE` (`LocalLRUCache` deleted).
 
 ---
 
