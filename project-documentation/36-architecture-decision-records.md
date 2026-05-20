@@ -833,11 +833,14 @@ public class MyFilter extends OncePerRequestFilter {
 
 Coordinate with existing `@Order` values (-1, 0, 1, none) to avoid conflicts.
 
-### Swap `LocalLRUCache` for a different cache
+### Swap the Redis cache decorator for a different cache backend
 
-1. Add `@Primary` to a different `RuleCache` implementation.
-2. Remove `@Primary` from `LocalLRUCache`.
-3. Both beans still exist in the context; only the primary one is autowired by default.
+The current cache layer is `RedisCachedRuleStorage`, a decorator on `RuleStorage` activated by `@ConditionalOnProperty(name = "redis.enabled", havingValue = "true")`. To use a different backend (e.g., Memcached, Caffeine on-instance):
+
+1. Implement a new decorator class on `RuleStorage` with the same constructor signature pattern (a delegate set via `setDelegate(...)` from `StorageFactory`).
+2. Add the matching `@ConditionalOnProperty` and update [`StorageFactory.createRuleStorage`](../src/main/java/com/company/drools/storage/StorageFactory.java) to wire the new decorator when its flag is set.
+3. Disable Redis (`REDIS_ENABLED=false`) or keep both decorators with mutually-exclusive conditions.
+4. If pub/sub fan-out is still needed, keep `RuleRefreshPublisher`/`Subscriber` wired against Redis — they're independent of the cache decorator.
 
 ### Swap rate limiter to Redis-backed
 
