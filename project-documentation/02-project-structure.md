@@ -160,7 +160,7 @@ The `application.yml` is the most-referenced config file in the codebase. See [0
 
 ### `src/test/java/com/company/drools/`
 
-45 test files, 597 tests passing (1 pre-existing testcontainers env error, unrelated). Coverage roughly preserved from the 96.2% / 89.7% pre-modernization baseline.
+45 test files, **548 unit tests + 14 Testcontainers integration tests** passing. The Testcontainers integration tests are excluded from default `mvn test` via `pom.xml` surefire `excludes` (macOS DinD blocker; run on Linux CI). Coverage roughly preserved from the 96.2% / 89.7% pre-modernization baseline.
 
 ```
 src/test/java/com/company/drools/

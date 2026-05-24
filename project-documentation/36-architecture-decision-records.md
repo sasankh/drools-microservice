@@ -766,6 +766,18 @@ Active feature flags:
 - [`.ai-workspace/project-plans/redis-cache-layering-plan.md`](../.ai-workspace/project-plans/redis-cache-layering-plan.md)
 - [`full-docker-test-plan.md`](../full-docker-test-plan.md) — Steps 8 and 9
 
+### 2026-05-24 update — Phase 9.4 follow-up hardening
+
+Phase 9.4 of the load-test harness (Redis kill mid-load) surfaced three gaps in this ADR's "All Redis ops wrapped in circuit breaker" / "Service degrades gracefully" claims. All three landed as production-side changes on `feature/redis-cache-pubsub` (commits `952f0a1` harness + `4b8997e` hardening):
+
+1. **`scanKeys()` was bypassing the CB.** Every other Redis op was correctly wrapped, but the SCAN call inside `invalidateAll` / `collectFromRedis` executed `redisTemplate.execute(RedisCallback)` directly. Bulk-path failures during outages didn't count toward the sliding window. Fixed by wrapping SCAN in `CircuitBreaker.decorateSupplier(redisCircuitBreaker, ...)` at [`RedisCachedRuleStorage.java:344`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L344); on `CallNotPermittedException` or generic `Exception` returns `Set.of()` (both callers already short-circuit on empty key set and degrade to delegate).
+
+2. **Lettuce timeout was tied to the CB's slow-call threshold.** `spring.data.redis.timeout=2000ms` was an exact match for the CB's `slowCallDurationThreshold=2s`, putting Lettuce timeouts in an ambiguous classification window. Lowered to `${REDIS_TIMEOUT:500ms}` so command timeouts unambiguously count as CB failures (not slow calls). Operators raise `REDIS_TIMEOUT=1000ms` for distant Redis.
+
+3. **`RedisMessageListenerContainer` had no explicit recovery backoff.** Spring's implicit default doesn't guarantee re-subscription after a transport-level disconnect. Added `setRecoveryBackoff(new FixedBackOff(2_000L, Long.MAX_VALUE))` to bound the worst-case re-subscribe latency to ≤2s after Redis is reachable.
+
+Phase 9.4 results (`--quick`): graceful-degradation acceptance PASS (0% JMeter errors across kill+restart). CB-engagement timing and recovery-convergence race remain as **deferred follow-ups** documented in [`39-load-test-findings.md`](39-load-test-findings.md) Phase 9.4 addendum + [`.ai-workspace/project-plans/redis-cb-hardening-plan.md`](../.ai-workspace/project-plans/redis-cb-hardening-plan.md).
+
 ---
 
 ## Extension points

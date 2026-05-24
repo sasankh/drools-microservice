@@ -152,9 +152,11 @@ We chose Apache HTTP over Netty (the v2 default) because:
 
 When Redis is enabled (`REDIS_ENABLED=true`):
 - `RedisCachedRuleStorage` wraps the base storage in `StorageFactory`; all `getRule` / `getAllRules` / `saveRule` / `deleteRule` calls go through it
-- All Redis ops are wrapped in `redisCircuitBreaker` — failures fall through to base storage with no user-visible error
+- All Redis ops — including `SCAN` (wrapped 2026-05-24 after a Phase 9.4 audit caught it bypassing the breaker) — are wrapped in `redisCircuitBreaker`; failures fall through to base storage with no user-visible error
 - Bulk path uses `SCAN(prefix*)` + `MGET` (cursor-based, non-blocking) — never `KEYS`
 - DRL JSON is serialized via Jackson `GenericJackson2JsonRedisSerializer` with `BasicPolymorphicTypeValidator` (strict allow-list)
+- Lettuce command timeout is `REDIS_TIMEOUT` (default `500ms`); sits cleanly below the Redis CB's `slowCallDurationThreshold=2s` so command timeouts unambiguously count as CB failures (not slow calls)
+- `RedisMessageListenerContainer` (pub/sub) uses an explicit `FixedBackOff(2s, ∞)` recovery policy so a dropped subscription deterministically re-subscribes within ≤2s of Redis becoming reachable
 
 The legacy `LocalLRUCache` + `RedisRuleCache` layer was deleted on 2026-05-20 — it was dead code (`RuleCache.get()` was never called from production paths).
 

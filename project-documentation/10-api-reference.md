@@ -209,13 +209,11 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/health
     "cache": {
       "status": "UP",
       "details": {
+        "mode": "redis",
         "enabled": true,
-        "size": 10,
-        "max_size": 100,
         "statistics": {
           "hits": 0,
           "misses": 0,
-          "evictions": 0,
           "hit_rate": "0.00%"
         }
       }

@@ -194,6 +194,15 @@ The Redis CB's `slowCallDurationThreshold` (2s, hardcoded) interacts with the **
 
 **Operator note**: if production sees `RedisCommandTimeoutException` storms after rollout (e.g., distant or high-latency Redis), raise `REDIS_TIMEOUT` to 1000–1500ms via env var. Keep it below the 2s slow-call threshold to preserve the failures-vs-slow-calls separation.
 
+### Pub/sub listener recovery backoff (related Redis resilience config)
+
+Adjacent to the CB, [`RedisConfig.redisMessageListenerContainer`](../src/main/java/com/company/drools/config/RedisConfig.java) configures an explicit `FixedBackOff(2_000L, Long.MAX_VALUE)` on the dedicated Lettuce pub/sub connection. When Redis dies and is later restored, the listener container re-subscribes within ≤2s of Redis becoming reachable. This is **separate from the CB** — the CB controls which Redis ops execute; the recovery backoff controls when the pub/sub subscription itself reconnects after a transport-level disconnect. Both matter:
+
+- **CB-only fix**: would let normal Redis ops fail-fast while Redis is down, but a subscription dropped at TCP level might never come back without explicit reconnect logic.
+- **Recovery-backoff-only fix**: would re-subscribe quickly but admin/refresh ops would still hang on the unbroken CB until enough failures accumulate.
+
+Added 2026-05-24 as a Phase 9.4 follow-up (see [39-load-test-findings.md](39-load-test-findings.md) Phase 9.4 addendum).
+
 ---
 
 ## Triggering and recovery — concrete examples
@@ -426,6 +435,6 @@ docker compose logs -f app | grep 'Circuit breaker'
 
 - Configuration class: [`CircuitBreakerConfig.java`](../src/main/java/com/company/drools/config/CircuitBreakerConfig.java)
 - S3 breaker wiring: [`S3RuleStorage.java:62-90`](../src/main/java/com/company/drools/storage/S3RuleStorage.java#L62-L90), [`:135-142`](../src/main/java/com/company/drools/storage/S3RuleStorage.java#L135-L142)
-- Redis breaker wiring: [`RedisCachedRuleStorage.java:121`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L121) (get), [`:255`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L255) (save), [`:276`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L276) (delete), [`:314`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L314) (bulk MGET); publisher wrap: [`RuleRefreshPublisher.java`](../src/main/java/com/company/drools/cache/RuleRefreshPublisher.java)
+- Redis breaker wiring: [`RedisCachedRuleStorage.java:120`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L120) (get), [`:184`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L184) (hasKey), [`:254`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L254) (save), [`:275`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L275) (delete), [`:293`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L293) (batch delete), [`:313`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L313) (bulk MGET), [`:344`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L344) (SCAN — wrapped 2026-05-24); publisher wrap: [`RuleRefreshPublisher.java`](../src/main/java/com/company/drools/cache/RuleRefreshPublisher.java)
 - Profile-specific overrides: [`application.yml:165-350`](../src/main/resources/application.yml#L165-L350)
 - Tests: [`CircuitBreakerConfigTest.java`](../src/test/java/com/company/drools/config/CircuitBreakerConfigTest.java)

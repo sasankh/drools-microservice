@@ -67,7 +67,7 @@ The `set-java-env.sh` is macOS-specific (uses `/usr/libexec/java_home`). Linux u
 ```bash
 mvn clean compile         # compile only
 # OR
-mvn clean package         # compile + run all 597 tests + package jar
+mvn clean package         # compile + run all 548 unit tests + package jar (14 Testcontainers integration tests surefire-excluded; run on Linux CI)
 # OR
 mvn clean package -DskipTests   # if you want to skip tests
 ```

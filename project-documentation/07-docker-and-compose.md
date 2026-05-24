@@ -211,10 +211,11 @@ app:
     # Redis configuration (decorator + pub/sub)
     - REDIS_ENABLED=true
     - REDIS_URL=redis://redis:6379          # ← compose-network DNS
+    - REDIS_TIMEOUT=500ms                   # Lettuce command timeout (added 2026-05-24; sits below CB slowCallDurationThreshold=2s)
     - REDIS_DRL_RULES_TTL_MINUTES=15
     - REDIS_DRL_RULES_KEY_PREFIX=drools:rule:
     - REDIS_PUBSUB_ENABLED=true
-    - REDIS_PUBSUB_CHANNEL=drools:rule:events
+    - REDIS_REFRESH_CHANNEL=drools:rule:events
 
     # Execution
     - RULE_EXECUTION_TIMEOUT_SECONDS=30

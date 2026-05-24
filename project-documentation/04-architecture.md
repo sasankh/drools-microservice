@@ -44,7 +44,7 @@ The Drools Rule Engine Microservice is a high-performance, cloud-native business
 
 - **Stateless Design**: Each request is independent, enabling horizontal scaling
 - **Polyglot Rule Storage**: Rules stored as .drl files in S3 with hierarchical organization
-- **Multi-Tier Caching**: Refresh path: S3 → Redis (L2, DRL text) → LocalLRU (L1, DRL text); Execution path: compiled KieBases in a single long-lived KieContainer
+- **Single-Tier Shared Cache + Pub/Sub Fan-Out (ADR-016, 2026-05-20)**: Refresh path: S3 ↔ `RedisCachedRuleStorage` decorator (read-through Redis cache of DRL text, opt-in via `REDIS_ENABLED`); cross-instance refresh coherence via Redis pub/sub on `drools:rule:events`. Execution path: compiled KieBases in a single long-lived `KieContainer` (never touches Redis).
 - **API Architecture**: All API endpoints on port 8080, Actuator on port 8081
 - **Memory Stable**: Proper resource disposal prevents memory leaks and OOM errors
 - **Cloud-Native**: Containerized, 12-factor app compliant, AWS-ready
@@ -96,13 +96,15 @@ The Drools Rule Engine Microservice is a high-performance, cloud-native business
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │              REFRESH / STARTUP PATH (DRL text only)              │
-│  ┌────────────┐    ┌────────────┐    ┌────────────────────────┐ │
-│  │ LocalLRU   │ ←→ │   Redis    │ ←→ │ DroolsEngineService    │ │
-│  │ (L1, DRL)  │    │ (L2, DRL)  │    │ loadedRules +          │ │
-│  │  In-Memory │    │  Optional  │    │ kieContainer (compiled) │ │
-│  └────────────┘    └────────────┘    └────────────────────────┘ │
-│  Note: LocalLRU and Redis store raw DRL text. Compiled KieBases  │
-│  live in kieContainer only. Execution bypasses LRU/Redis.        │
+│  ┌──────────────────────────┐    ┌────────────────────────────┐ │
+│  │ RedisCachedRuleStorage   │ ←→ │ DroolsEngineService        │ │
+│  │ (decorator, opt-in via   │    │ kieContainer (compiled) +  │ │
+│  │  REDIS_ENABLED=true)     │    │ pub/sub fan-out via        │ │
+│  │  └ read-through Redis    │    │ drools:rule:events on      │ │
+│  │    cache of DRL text     │    │ refresh                    │ │
+│  └──────────────────────────┘    └────────────────────────────┘ │
+│  Note: Redis stores raw DRL text. Compiled KieBases live in      │
+│  kieContainer only. Execution bypasses Redis entirely.           │
 └─────────────────────────────────────────────────────────────────┘
                               ▲
                               │
@@ -705,8 +707,8 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
 ┌─────────────────────────────────────────────────────────────┐
 │                    RULE LOADING                              │
 │  1. S3RuleStorage.getAllRuleIds()                            │
-│  2. Fetch each rule content                                  │
-│  3. Store in L1 and L2 caches                                │
+│  2. Fetch each rule content (via RedisCachedRuleStorage if   │
+│     REDIS_ENABLED=true — read-through cache + populate)      │
 └─────────────────────────────────────────────────────────────┘
                           ↓ Compilation
 ┌─────────────────────────────────────────────────────────────┐
@@ -1321,7 +1323,7 @@ Benefits:
 | P99 Latency (cached) | < 100ms | ~5-20ms (expected) |
 | P99 Latency (miss) | < 500ms | ~100-300ms (expected) |
 | Concurrent Rules | 1000+ | Architecture supports |
-| Cache Hit Rate | > 90% | ~95% (L1 + L2) |
+| Cache Hit Rate | > 90% | depends on REDIS_ENABLED; tracked via `drools.cache.hit{layer=redis}` / `drools.cache.miss{layer=redis}` Micrometer counters (no L1+L2 stack — single Redis tier as of 2026-05-20 ADR-016) |
 | Memory Stability | Indefinite | ✅ Stable (KieContainer disposal) |
 
 ---
@@ -1697,7 +1699,7 @@ This Drools Rule Engine Microservice is architected for:
 
 **Key Architectural Achievements**:
 - **Zero Memory Leaks**: Fixed via KieContainer disposal (2026-02-19)
-- **95% Cache Hit Rate**: Multi-tier caching (L1 LRU + L2 Redis)
+- **Redis-decorator caching** when `REDIS_ENABLED=true` (single shared tier per ADR-016; hit rate tracked via Micrometer)
 - **Sub-100ms Latency**: Compiled rule caching, optimized execution
 - **Cloud-Native**: 12-factor compliant, containerized, AWS-ready
 - **Production-Grade**: Circuit breakers, health checks, structured logging

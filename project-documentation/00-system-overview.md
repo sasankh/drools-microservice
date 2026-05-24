@@ -20,10 +20,11 @@ POST /execute-rule  ───→  ┌──────────────�
                           │       ↓            │              cache miss
                           │ Validation         │                  │
                           │   @ValidRuleId     │     ┌────────────┴───┐
-                          │   @ValidRuleData   │     │  Cache layer    │
-                          │       ↓            │  ←  │  ├ LRU (primary)│
-                          │ DroolsEngine       │     │  └ Redis (idle) │
-                          │  └ KieSession      │     └─────────────────┘
+                          │   @ValidRuleData   │     │ Redis decorator │
+                          │       ↓            │  ←  │ (read-through   │
+                          │ DroolsEngine       │     │  cache + pub/   │
+                          │  └ KieSession      │     │  sub fan-out)   │
+                          │                    │     └─────────────────┘
                           │     fireAllRules   │              ▲
                           │       ↓            │              │
                           │ Response           │ ─→ resilience│
@@ -47,7 +48,7 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 2. [27-development-setup.md](27-development-setup.md) — local Java + Maven setup, conventions
 3. [02-project-structure.md](02-project-structure.md) — annotated directory tree (clickable)
 4. [04-architecture.md](04-architecture.md) — system design
-5. [28-testing-guide.md](28-testing-guide.md) — test suite map (45 files, 598 tests)
+5. [28-testing-guide.md](28-testing-guide.md) — test suite map (45 files, 548 tests)
 
 ### 🏛️ Architect / design reviewer
 
@@ -102,7 +103,7 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 | Framework | Spring Boot | 3.5.3 |
 | Rule engine | Drools | 10.2.0 |
 | Storage | AWS S3 (via SDK v2) | 2.34.0 |
-| Cache | LocalLRU primary; Redis dormant | — |
+| Cache | `RedisCachedRuleStorage` decorator (opt-in via `REDIS_ENABLED`) + Redis pub/sub fan-out | — |
 | Resilience | Resilience4j | 2.3.0 |
 | Metrics | Micrometer (CloudWatch registry) | 1.14.7 |
 | Logging | Logback + logstash-logback-encoder | 7.4 |
@@ -120,7 +121,7 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 | Total documentation files | **40** (including this one) |
 | Total Java source files | 57 |
 | Total test files | 45 |
-| Total tests (`@Test` + `@ParameterizedTest`) | **597** |
+| Total tests (`@Test` + `@ParameterizedTest`) | **548** unit + 14 Testcontainers integration (surefire-excluded; CI-only) |
 | Test coverage (instruction / branch) | 96.2% / 89.7% |
 | Sample rules in `sample-rules/` | 17 |
 | Environment variables actually read | 66 |
@@ -196,7 +197,7 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 - [36-architecture-decision-records.md](36-architecture-decision-records.md) — 12 ADRs + extension points
 - [37-glossary.md](37-glossary.md) — every term defined
 - [38-for-ai-agents.md](38-for-ai-agents.md) — verification rules and pitfalls for AI sessions working on this repo
-- [39-load-test-findings.md](39-load-test-findings.md) — measured numbers, architectural trade-offs, production-planning guidance from the 2026-05-10 load test (1,000 rules, mixed-workload soak)
+- [39-load-test-findings.md](39-load-test-findings.md) — measured numbers, architectural trade-offs, production-planning guidance from the 2026-05-10 single-container load test (1,000 rules, mixed-workload soak) + 2026-05-24 Phase 9.4 addendum (3-replica + pub/sub convergence + Redis-kill failure mode)
 
 ### Reference assets
 - [api-reference/openapi.yml](api-reference/openapi.yml) — OpenAPI 3.0 spec

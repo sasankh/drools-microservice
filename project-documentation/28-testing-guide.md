@@ -11,7 +11,7 @@
 
 ## TL;DR
 
-- **45 test files**, **597 tests**, ~96.2% instruction / ~89.7% branch coverage (JaCoCo, pre-modernization baseline; coverage roughly preserved post-modernization but JaCoCo not yet re-run).
+- **45 test files**, **548 unit tests + 14 Testcontainers integration tests**, ~96.2% instruction / ~89.7% branch coverage (JaCoCo, pre-modernization baseline; coverage roughly preserved post-modernization but JaCoCo not yet re-run). Unit count went 597 → 545 with the deletion of the dead `RuleCache` layer on 2026-05-20, then 545 → 548 with the SCAN-CB-wrap tests on 2026-05-24.
 - Run all: `mvn test`
 - Run one: `mvn test -Dtest=DroolsEngineServiceTest`
 - Coverage report: `mvn test jacoco:report` → `target/site/jacoco/index.html`
