@@ -38,13 +38,13 @@ When this doc says "Default", it means the value used if nothing higher-priority
 - [CORS](#cors) (5 vars)
 - [Rate limiting](#rate-limiting) (6 vars)
 - [Admin authentication](#admin-authentication) (1 var)
-- [Redis](#redis) (3 vars)
+- [Redis](#redis) (7 vars)
 - [AWS](#aws) (6 vars)
 - [Logging](#logging) (1 var)
 - [Metrics](#metrics) (2 vars)
 - [Drools system properties](#drools-system-properties) (3, JVM-args only)
 
-**Total: 66 distinct env vars catalogued below.**
+**Total: 67 distinct env vars catalogued below.**
 
 ---
 
@@ -229,6 +229,7 @@ Refactored 2026-05-20 — see [ADR-016](36-architecture-decision-records.md#adr-
 | `REDIS_DRL_RULES_KEY_PREFIX` | `drools:rule:` | Key prefix for cached rule entries. Namespaced to support future Redis uses by this service. |
 | `REDIS_PUBSUB_ENABLED` | `true` (when Redis on) | Enables `RuleRefreshPublisher` and `RuleRefreshSubscriber`. Set `false` to use Redis as cache only (no cross-task fan-out). |
 | `REDIS_REFRESH_CHANNEL` | `drools:rule:events` | Channel name for refresh events. Cross-service consumers can subscribe here. |
+| `REDIS_TIMEOUT` | `500ms` | Lettuce command timeout (`spring.data.redis.timeout`). Sits below the Redis CB `slowCallDurationThreshold=2s` so command timeouts unambiguously count as failures (not slow calls) and the CB engages cleanly during Redis outages. Lowered from `2000ms` on 2026-05-24 (Phase 9.4 follow-up); see [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md#lettuce-timeout-vs-cb-slow-call-threshold). Raise to 1000–1500ms for distant or high-latency Redis. |
 
 **Deprecated (removed 2026-05-20)**: `REDIS_TTL_MINUTES` (renamed to `REDIS_DRL_RULES_TTL_MINUTES`), `LRU_CACHE_MAX_SIZE` (`LocalLRUCache` deleted).
 

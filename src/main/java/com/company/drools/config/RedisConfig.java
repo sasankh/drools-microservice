@@ -19,6 +19,7 @@ import org.springframework.data.redis.listener.PatternTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
+import org.springframework.util.backoff.FixedBackOff;
 
 /** Redis configuration for distributed rule caching. Only activated when redis.enabled=true. */
 @Configuration
@@ -80,7 +81,13 @@ public class RedisConfig {
   /**
    * Subscribes {@link RuleRefreshSubscriber} to the pub/sub channel so this task receives refresh
    * events from sibling ECS tasks. Active only when {@code redis.pubsub.enabled=true} (default on
-   * when Redis is on). Container auto-reconnects on Redis connection drops.
+   * when Redis is on).
+   *
+   * <p>An explicit {@link FixedBackOff} recovery policy is configured so the dedicated pub/sub
+   * Lettuce connection deterministically re-subscribes within ≤5s after Redis becomes reachable
+   * following a restart. Fixed interval (over ExponentialBackOff) is intentional: it bounds the
+   * worst-case re-subscribe latency, which matters for the cross-task convergence guarantee — an
+   * exponential window could happen to be mid-wait when Redis comes back.
    */
   @Bean
   @ConditionalOnProperty(name = "redis.pubsub.enabled", havingValue = "true", matchIfMissing = true)
@@ -92,6 +99,11 @@ public class RedisConfig {
     RedisMessageListenerContainer container = new RedisMessageListenerContainer();
     container.setConnectionFactory(connectionFactory);
     container.addMessageListener(subscriber, new PatternTopic(channel));
+    // 2s interval bounds worst-case re-subscribe latency to ≤2s after Redis is reachable
+    // (matching the Phase 9.4 convergence-recovery deadline). 60 attempts/min per listener
+    // is well within what a healthy or recovering Redis can absorb (one TCP connect each).
+    container.setRecoveryBackoff(new FixedBackOff(2_000L, Long.MAX_VALUE));
+    log.info("Redis pub/sub recovery backoff: fixed 2s interval, infinite attempts");
     return container;
   }
 }

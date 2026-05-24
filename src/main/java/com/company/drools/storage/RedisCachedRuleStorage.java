@@ -329,22 +329,48 @@ public class RedisCachedRuleStorage implements RuleStorage {
     return existing;
   }
 
+  /**
+   * SCAN all keys under {@code keyPrefix*}. CB-wrapped so SCAN failures contribute to the Redis
+   * circuit-breaker's sliding window (previously SCAN bypassed the CB entirely).
+   *
+   * <p>Returns an empty {@link Set} on circuit-open, connection failure, or any other Redis error.
+   * Callers must treat an empty result as a cache miss — both call sites ({@link #invalidateAll},
+   * {@link #collectFromRedis}) already short-circuit on empty key sets and degrade gracefully to
+   * the delegate.
+   */
   private Set<String> scanKeys() {
-    Set<String> result =
-        redisTemplate.execute(
-            (RedisCallback<Set<String>>)
-                connection -> {
-                  Set<String> keys = new HashSet<>();
-                  ScanOptions options =
-                      ScanOptions.scanOptions().match(keyPrefix + "*").count(SCAN_BATCH).build();
-                  try (Cursor<byte[]> cursor = connection.keyCommands().scan(options)) {
-                    while (cursor.hasNext()) {
-                      keys.add(new String(cursor.next(), StandardCharsets.UTF_8));
-                    }
-                  }
-                  return keys;
-                });
-    return result != null ? result : Set.of();
+    try {
+      Supplier<Set<String>> op =
+          CircuitBreaker.decorateSupplier(
+              redisCircuitBreaker,
+              () -> {
+                Set<String> result =
+                    redisTemplate.execute(
+                        (RedisCallback<Set<String>>)
+                            connection -> {
+                              Set<String> keys = new HashSet<>();
+                              ScanOptions options =
+                                  ScanOptions.scanOptions()
+                                      .match(keyPrefix + "*")
+                                      .count(SCAN_BATCH)
+                                      .build();
+                              try (Cursor<byte[]> cursor = connection.keyCommands().scan(options)) {
+                                while (cursor.hasNext()) {
+                                  keys.add(new String(cursor.next(), StandardCharsets.UTF_8));
+                                }
+                              }
+                              return keys;
+                            });
+                return result != null ? result : Set.of();
+              });
+      return op.get();
+    } catch (CallNotPermittedException _) {
+      log.debug("Redis circuit breaker open, SCAN skipped → empty result");
+      return Set.of();
+    } catch (Exception e) {
+      log.warn("Redis SCAN failed, returning empty result", e);
+      return Set.of();
+    }
   }
 
   private String redisKey(String ruleId) {

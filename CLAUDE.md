@@ -17,6 +17,13 @@ The legacy consolidated context file at `.ai-workspace/ai-initial-context/ai-ini
 
 ## ⚠️ Important: Recent change log (most recent first)
 
+### Redis CB + pub/sub hardening — Phase 9.4 follow-ups (2026-05-24)
+- **SCAN now wrapped in `redisCircuitBreaker`** — closes coverage gap in [`RedisCachedRuleStorage.scanKeys()`](src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java) so bulk-path failures (used by `invalidateAll`, `collectFromRedis`) contribute to the CB sliding window during a Redis outage. Previously SCAN bypassed the CB entirely — Phase 9.4 surfaced this by observing CB never opened during a 60s Redis kill.
+- **Lettuce timeout 2000ms → 500ms** via new env var `REDIS_TIMEOUT` (default `500ms`). The prior 2s value was an exact match for the CB's `slowCallDurationThreshold=2s`, putting Lettuce timeouts in an ambiguous classification window. 500ms sits cleanly below the slow-call threshold so timeouts unambiguously count as failures. Externalized for per-environment tuning.
+- **`RedisMessageListenerContainer.setRecoveryBackoff(FixedBackOff(2s, ∞))`** in [`RedisConfig.java`](src/main/java/com/company/drools/config/RedisConfig.java) — explicit pub/sub re-subscribe policy bounds worst-case latency to ≤2s after Redis becomes reachable post-restart. FixedBackOff over ExponentialBackOff for predictability (Phase 9.4 convergence deadline is fixed).
+- **Test count**: 545 → 548 unit tests; 13 → 14 Testcontainers integration tests (the new `scanKeysCircuitBreakerFallback` inherits the existing macOS-DinD surefire exclusion).
+- **Plan + checklist**: [`.ai-workspace/project-plans/redis-cb-hardening-plan.md`](.ai-workspace/project-plans/redis-cb-hardening-plan.md) and [`-checklist.md`](.ai-workspace/project-plans/redis-cb-hardening-checklist.md).
+
 ### Redis cache + pub/sub layer (2026-05-20)
 - **Replaced dead `RuleCache` layer.** Forensic trace revealed both `LocalLRUCache` and `RedisRuleCache` were never read from at runtime — written to during refresh but `.get()` was never called. Deleted ~600 LOC of dead code.
 - **New `RedisCachedRuleStorage` decorator** wraps the base `RuleStorage` when `REDIS_ENABLED=true`. Read-through Redis cache of DRL text with 15-min TTL default. Circuit-breaker fallback to base storage if Redis is down.

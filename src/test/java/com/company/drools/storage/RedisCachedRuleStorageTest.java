@@ -29,6 +29,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
@@ -275,5 +277,69 @@ class RedisCachedRuleStorageTest {
     fresh.saveRule(r);
 
     verify(valueOps).set(KEY_PREFIX + "ttl.check", r, Duration.ofMinutes(30));
+  }
+
+  // ─── scanKeys CB coverage (Phase 9.4 follow-up) ─────────────────────────────
+
+  @Test
+  @DisplayName(
+      "scanKeys with circuit breaker open returns empty; never calls redisTemplate.execute")
+  @SuppressWarnings("unchecked") // any(RedisCallback.class) — generic erasure in Mockito
+  void scanKeysCircuitBreakerOpenReturnsEmpty() {
+    CircuitBreaker openCb =
+        CircuitBreaker.of(
+            "scan-open",
+            CircuitBreakerConfig.custom().slidingWindowSize(1).failureRateThreshold(1.0f).build());
+    openCb.transitionToOpenState();
+    storage =
+        new RedisCachedRuleStorage(redisTemplate, openCb, TTL_MINUTES, KEY_PREFIX, meterRegistry);
+    storage.setDelegate(delegate);
+
+    when(delegate.getRuleIds()).thenReturn(List.of("a", "b"));
+    when(delegate.getAllRules()).thenReturn(List.of(rule("a"), rule("b")));
+
+    List<Rule> result = storage.getAllRules();
+
+    // SCAN is rejected by the open CB → empty key set → fall through to delegate
+    assertThat(result).hasSize(2);
+    verify(delegate).getAllRules();
+    verify(redisTemplate, never()).execute(any(RedisCallback.class));
+  }
+
+  @Test
+  @DisplayName("refreshCache when scan CB is open still calls delegate.refreshCache()")
+  @SuppressWarnings("unchecked") // any(RedisCallback.class) — generic erasure in Mockito
+  void refreshCacheWhenScanCircuitBreakerOpenStillDelegates() {
+    CircuitBreaker openCb =
+        CircuitBreaker.of(
+            "scan-refresh-open",
+            CircuitBreakerConfig.custom().slidingWindowSize(1).failureRateThreshold(1.0f).build());
+    openCb.transitionToOpenState();
+    storage =
+        new RedisCachedRuleStorage(redisTemplate, openCb, TTL_MINUTES, KEY_PREFIX, meterRegistry);
+    storage.setDelegate(delegate);
+
+    storage.refreshCache();
+
+    verify(delegate).refreshCache();
+    verify(redisTemplate, never()).execute(any(RedisCallback.class));
+  }
+
+  @Test
+  @DisplayName(
+      "scanKeys when redisTemplate.execute throws RedisConnectionFailureException returns empty,"
+          + " getAllRules falls through to delegate")
+  @SuppressWarnings("unchecked") // any(RedisCallback.class) — generic erasure in Mockito
+  void scanKeysRedisExceptionReturnsEmpty() {
+    when(redisTemplate.execute(any(RedisCallback.class)))
+        .thenThrow(new RedisConnectionFailureException("redis down"));
+    when(delegate.getRuleIds()).thenReturn(List.of("a", "b"));
+    when(delegate.getAllRules()).thenReturn(List.of(rule("a"), rule("b")));
+
+    List<Rule> result = storage.getAllRules();
+
+    assertThat(result).hasSize(2);
+    verify(delegate).getAllRules();
+    verify(redisTemplate, times(1)).execute(any(RedisCallback.class));
   }
 }

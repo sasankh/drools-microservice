@@ -107,7 +107,7 @@ When the breaker is OPEN:
 
 ### Redis circuit breaker — `redisCircuitBreaker`
 
-[`RedisCachedRuleStorage.java`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java) and [`RuleRefreshPublisher.java`](../src/main/java/com/company/drools/cache/RuleRefreshPublisher.java) wrap every Redis op in the breaker. On open breaker, reads silently fall through to the delegate (S3 / local file / in-memory); writes are silently dropped (best-effort). Publisher emits a WARN log and increments `drools.refresh.failed{layer=publisher,reason=circuit_breaker_open}` but does NOT propagate — the local refresh has already succeeded. **The service degrades gracefully** to direct base-storage reads when Redis is unavailable.
+[`RedisCachedRuleStorage.java`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java) and [`RuleRefreshPublisher.java`](../src/main/java/com/company/drools/cache/RuleRefreshPublisher.java) wrap every Redis op in the breaker — GET, SET, DEL, HASKEY, MGET, batch-DEL, **and SCAN** (the last added 2026-05-24 after a Phase 9.4 audit found SCAN was bypassing the CB, leaving bulk-path failures uncounted in the sliding window). On open breaker, reads silently fall through to the delegate (S3 / local file / in-memory); writes are silently dropped (best-effort). Publisher emits a WARN log and increments `drools.refresh.failed{layer=publisher,reason=circuit_breaker_open}` but does NOT propagate — the local refresh has already succeeded. **The service degrades gracefully** to direct base-storage reads when Redis is unavailable.
 
 This is a deliberate difference: S3 outage = user-visible 503 (because S3 is the source of truth). Redis outage = silent degradation (because Redis is just acceleration).
 
@@ -183,6 +183,16 @@ This catches "the dependency is technically responding, just unbearably slow" �
 Both breakers use a `COUNT_BASED` window (not time-based). The most recent N calls are considered, regardless of how long ago they happened.
 
 For S3: the most recent 100 calls (or 200 in `prod`). At least 10 must have been made before failure rate is computed (otherwise 1 failure out of 1 call would trip immediately).
+
+### Lettuce timeout vs CB slow-call threshold
+
+The Redis CB's `slowCallDurationThreshold` (2s, hardcoded) interacts with the **Lettuce command timeout** (`spring.data.redis.timeout`, env var `REDIS_TIMEOUT`, default `500ms`). The two are intentionally decoupled:
+
+- A Lettuce command that takes **< 500ms** → completes normally (no failure, no slow-call count).
+- A Lettuce command that hits the **500ms timeout** → throws `RedisCommandTimeoutException` (wrapped as `QueryTimeoutException`, a subtype of `RedisSystemException` — in the CB's `recordExceptions`) → counted as a **failure** by the CB.
+- A pre-existing `2000ms` Lettuce timeout (before 2026-05-24) sat at an exact match with the 2s slow-call threshold, putting timeouts in an ambiguous classification window and delaying CB engagement. The Phase 9.4 load test surfaced this — the CB never opened during a 60s Redis outage. The 500ms default cleanly separates the two so Lettuce timeouts unambiguously count as CB failures.
+
+**Operator note**: if production sees `RedisCommandTimeoutException` storms after rollout (e.g., distant or high-latency Redis), raise `REDIS_TIMEOUT` to 1000–1500ms via env var. Keep it below the 2s slow-call threshold to preserve the failures-vs-slow-calls separation.
 
 ---
 

@@ -278,6 +278,53 @@ These were intentionally not tested in this run; capture as follow-ups if releva
 
 ---
 
+---
+
+## Phase 9.4 addendum — Redis CB + pub/sub hardening (2026-05-24)
+
+Phase 9 of the Redis cache + pub/sub work shipped a new failure-mode sub-test (`--quick --phase 9.4`) that kills the Redis container mid-load and asserts (a) JMeter error rate stays 0% during the outage, (b) the Redis circuit-breaker opens within 30s, (c) CB closes within 90s of restart, and (d) a post-restart convergence round completes within 2s (proves the pub/sub listener re-subscribed).
+
+### What was tested
+
+`./scripts/run-load-test.sh --quick --phase 9.4` against branch `feature/redis-cache-pubsub` post-hardening:
+- 3 app replicas + nginx LB + LocalStack + Redis (`drools-redis` container, deterministic name)
+- 100-rule corpus
+- Background JMeter at 100 RPS for 4 min through nginx
+- CB-exerciser firing `wget POST /admin/refresh-rules/<id>` on each replica every 3s
+- `docker kill drools-redis` at T+60s, `docker start drools-redis` at T+120s
+- All three hardening changes applied (SCAN wrap, `REDIS_TIMEOUT=500ms`, `FixedBackOff(2s, ∞)` on `RedisMessageListenerContainer`)
+
+### Result: partial PASS (1/4 acceptance criteria)
+
+| Criterion | Result | Notes |
+|---|---|---|
+| (a) JMeter error rate 0% during outage | ✅ **PASS** | 23,925 samples, 0 errors, P99=8ms across the full 4-min window — graceful degradation works as designed; `/execute-rule` is in-memory and untouched by Redis outage |
+| (b) CB opens within 30s of kill | ❌ **FAIL** | CB stayed `closed` across all 29 poll cycles (1s interval × 29s); the exerciser fired but the failures didn't accumulate fast enough to trip the CB. **Root cause still under investigation** — hypothesis: Lettuce's connection pool may be returning exception types that aren't in the CB's `recordExceptions` allow-list, or the per-call latency on a hung Lettuce socket exceeds the exerciser's 3s interval so fewer than `minimumNumberOfCalls=5` accumulate in the window. SCAN coverage gap (the original Phase 9.4 audit finding) is closed, but CB engagement timing remains. |
+| (c) CB closes within 90s of restart | ⚠️ TRIVIALLY PASS | CB was never `open`, so the `open → closed` transition is vacuous. Reported as PASS by the harness; real recovery semantics aren't being exercised. |
+| (d) Post-restart convergence ≤ 2s | ❌ **FAIL** | `t_received_ms = -1` (deadline expired). Even with the new 2s recovery backoff, there's a timing race: the harness fires the convergence event ~1s after CB closes (i.e., very soon after Redis restart), but the listener container's next retry cycle can be up to 2s away from the restart instant — meaning the published event can land before the subscriber has resubscribed. The event is lost (pub/sub is fire-and-forget). |
+
+### What landed
+
+Three production-code changes in [`feature/redis-cache-pubsub`](../.ai-workspace/project-plans/redis-cb-hardening-plan.md):
+
+1. **SCAN wrapped in `redisCircuitBreaker`** — [`RedisCachedRuleStorage.scanKeys()`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java). Closes a real coverage gap (every other Redis call was wrapped; SCAN bypassed the CB entirely). Bulk-path failures during outages now contribute to the sliding window.
+2. **Lettuce timeout `2000ms → 500ms`** — externalized as `REDIS_TIMEOUT` env var. Sits cleanly below the CB's `slowCallDurationThreshold=2s` so command timeouts are unambiguously classified as failures (not slow calls). Operators raise to 1000–1500ms for distant/high-latency Redis.
+3. **`RedisMessageListenerContainer.setRecoveryBackoff(FixedBackOff(2s, ∞))`** — explicit pub/sub reconnect policy. Bounds worst-case re-subscribe latency to ≤2s after Redis is reachable. Replaces Spring's implicit default.
+
+Plus: 3 new unit tests in [`RedisCachedRuleStorageTest`](../src/test/java/com/company/drools/storage/RedisCachedRuleStorageTest.java) (545 → **548**); 1 new integration test in [`RedisCachedStorageIntegrationTest`](../src/test/java/com/company/drools/integration/RedisCachedStorageIntegrationTest.java) (13 → 14, surefire-excluded — runs on Linux CI). 4 doc files updated.
+
+### Remaining follow-ups (deferred — not blocking Phase 10 rollout)
+
+1. **CB engagement timing** — instrument a 9.4-style run with per-replica `metric-snapshot-pre.json` + `metric-snapshot-post.json` (Phase 9.3 captures these, 9.4 doesn't yet) and inspect the actual `resilience4j.circuitbreaker.calls{kind=failed}` counts during a Redis kill. Then decide between (a) tuning the CB config to be more aggressive (lower `minimumNumberOfCalls`, raise `failureRateThreshold`), (b) adding more exception classes to `recordExceptions`, or (c) revising the harness's exerciser to fire faster than the Lettuce hang interval.
+2. **Recovery convergence race** — the harness fires the convergence event immediately after CB-closed. Add a ~3s sleep between "all replicas CB=closed" and the convergence round, so the listener container's next 2s retry cycle has completed re-subscription. This is a harness change, not a production change.
+3. **`/admin/health` pub/sub component** — the third Phase 9.4 finding (subscriber-connected status not exposed) is still pending. Phase 5 spec called for this.
+
+### Operational takeaway
+
+The graceful-degradation guarantee — **service continues serving correctly when Redis dies** — is confirmed by JMeter's 0% error rate across the full kill+restart window. The CB engagement and pub/sub recovery timing improvements landed help admin/control paths but don't change user-facing behavior. Phase 9.4's other three sub-tests (9.1 baseline, 9.2 cache-only, 9.3 full mode + pub/sub convergence) continue to PASS cleanly with this branch's harness; only the failure-mode sub-test has the residual issues above.
+
+---
+
 ## References
 
 - **Verdict + raw artifacts**: `scripts/load-test-results/2026-05-10T073852Z/summary.md`

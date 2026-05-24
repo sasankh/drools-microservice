@@ -45,7 +45,11 @@ spring:
   data:
     redis:
       url: ${REDIS_URL:redis://localhost:6379}
-      timeout: 2000ms
+      # Lettuce command timeout. 500ms default sits below the Redis CB's
+      # slowCallDurationThreshold (2s) so command timeouts are unambiguously classified
+      # as failures (not slow calls), which lets the CB engage cleanly during outages.
+      # Raise to 1000–1500ms for distant or high-latency Redis. See 29-circuit-breakers.
+      timeout: ${REDIS_TIMEOUT:500ms}
       lettuce:
         pool:
           max-active: 10

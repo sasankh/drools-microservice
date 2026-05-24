@@ -22,6 +22,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -255,6 +256,49 @@ class RedisCachedStorageIntegrationTest {
       connectionFactory = newFactory;
       redisTemplate = buildRuleTemplate(connectionFactory);
     }
+  }
+
+  // ─── scanKeys CB coverage (Phase 9.4 follow-up) ─────────────────────────────
+
+  @Test
+  @DisplayName(
+      "scanKeys with CB open: refreshCache completes <3s and delegates without hitting Redis")
+  void scanKeysCircuitBreakerFallback() {
+    // Pre-trip a fresh CB so scanKeys must short-circuit. Long waitDurationInOpenState
+    // keeps the CB locked-open for the duration of the test.
+    CircuitBreaker openCb =
+        CircuitBreaker.of(
+            "scan-cb-test",
+            CircuitBreakerConfig.custom()
+                .slidingWindowSize(1)
+                .minimumNumberOfCalls(1)
+                .failureRateThreshold(1.0f)
+                .waitDurationInOpenState(Duration.ofMinutes(10))
+                .build());
+    openCb.transitionToOpenState();
+    assertThat(openCb.getState()).isEqualTo(CircuitBreaker.State.OPEN);
+
+    RedisCachedRuleStorage testCache =
+        new RedisCachedRuleStorage(redisTemplate, openCb, TTL_MINUTES, KEY_PREFIX, meterRegistry);
+    testCache.setDelegate(delegate);
+
+    // Pre-populate one key directly via the live Redis template; with CB open, scanKeys
+    // must NOT find or delete it (proves the supplier never runs against the open CB).
+    redisTemplate.opsForValue().set(KEY_PREFIX + "leftover", rule("leftover"));
+    assertThat(redisTemplate.hasKey(KEY_PREFIX + "leftover")).isTrue();
+
+    // The actual assertion — refreshCache returns fast and delegates correctly.
+    Instant start = Instant.now();
+    testCache.refreshCache();
+    Duration elapsed = Duration.between(start, Instant.now());
+
+    assertThat(elapsed)
+        .as("refreshCache must short-circuit on open CB; pre-fix this could hang on SCAN")
+        .isLessThan(Duration.ofSeconds(3));
+    verify(delegate).refreshCache();
+    // CB stayed open; the pre-existing key remains because SCAN+DEL was skipped.
+    assertThat(redisTemplate.hasKey(KEY_PREFIX + "leftover")).isTrue();
+    assertThat(openCb.getState()).isEqualTo(CircuitBreaker.State.OPEN);
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────────
