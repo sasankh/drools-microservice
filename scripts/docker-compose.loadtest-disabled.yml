@@ -1,0 +1,16 @@
+# Phase 9.1 overlay — disables Redis on the single-container load-test stack so the run
+# matches the historical 2026-05-10 baseline (pre-Phase-1 dead-cache codepath).
+#
+# Applied on top of the base + loadtest.yml overlays:
+#   docker compose -f docker-compose.yml \
+#                  -f scripts/docker-compose.loadtest.yml \
+#                  -f scripts/docker-compose.loadtest-disabled.yml up -d --build
+#
+# Compose merges `environment:` entries by replacing duplicate keys with the
+# right-most file's value, so REDIS_ENABLED=true in docker-compose.yml is
+# overridden cleanly here.
+services:
+  app:
+    environment:
+      - REDIS_ENABLED=false
+      - REDIS_PUBSUB_ENABLED=false
