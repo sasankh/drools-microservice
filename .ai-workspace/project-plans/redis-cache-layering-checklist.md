@@ -672,7 +672,7 @@ Goal: prove no regression and validate multi-instance + pub/sub benefits.
 
 Note: Phase 6.6 backward-compat shim was **not** implemented — `REDIS_TTL_MINUTES` was renamed cleanly to `REDIS_DRL_RULES_TTL_MINUTES` with no fallback (acceptable since the old layer was dead code; nobody was actually depending on the env var's effect). Phase 11 is therefore a no-op except for release-note documentation.
 
-- [ ] Document the rename in release notes (no code change required)
+- [ ] Document the rename in release notes (no code change required) — naturally tied to the rollout PR's release notes; lands when this branch merges + the next release is tagged. No standalone work item.
 
 ---
 
@@ -702,9 +702,9 @@ Note: Phase 6.6 backward-compat shim was **not** implemented — `REDIS_TTL_MINU
 | 2026-05-11 | `/admin/rules` `cached` field consumers might break | Med | Phase 0 audit; optional deprecation period | **Closed** — dropped 2026-05-19; no internal/CI/dashboard consumer found in audit |
 | 2026-05-11 | `REDIS_TTL_MINUTES` rename silently uses default | Med | Release note; optional backward-compat | **Accepted** — old layer was dead code; rename has no operational effect on existing behaviour. Note in release notes (Phase 11) |
 | 2026-05-11 | Bulk SCAN at 10k rules slow if naive | Med | MGET + pipelining in impl | **Closed** — `RedisCachedRuleStorage.getAllRules()` uses SCAN+MGET; to be re-verified at scale in Phase 9 |
-| 2026-05-11 | Pub/sub message loss on subscriber reconnect | Med | Logging; v2 Redis Streams | **Open** — accepted as known limitation; TTL-bounded staleness on missed events; documented in 35-faq.md |
-| 2026-05-11 | Bulk-refresh stampede across N tasks | Med | Documented; v2 jitter | **Open** — accepted; load-test will quantify impact in Phase 9 |
-| 2026-05-11 | Circuit breaker thrash on flaky Redis | Low | Tune `DROOLS_CB_REDIS_*` | **Open** — to be observed during Phase 10 soak |
+| 2026-05-11 | Pub/sub message loss on subscriber reconnect | Med | Logging; explicit `FixedBackOff(2s, ∞)` on `RedisMessageListenerContainer` landed in `4b8997e`; v2 Redis Streams | **Open — observed in Phase 9.4** (recovery-convergence sub-test: publisher fires within 1s of CB-closed but listener's next 2s retry cycle hasn't completed re-subscription → event lost). Deferred follow-up: harness sleep tweak between CB-closed and recovery round. Production behaviour bounded to ≤2s after Redis is reachable; TTL-bounded staleness on missed events; documented in 35-faq.md. |
+| 2026-05-11 | Bulk-refresh stampede across N tasks | Med | Documented; v2 jitter | **Open — not stressed at production scale yet**; `--quick --phase 9.3` ran 5 bulk-refresh rounds with max delta 45ms (3 replicas × 100 rules) with no stampede observed. Full non-quick run (1000 rules) recommended for production confidence before Phase 10. |
+| 2026-05-11 | Circuit breaker thrash on flaky Redis | Low | Tune `DROOLS_CB_REDIS_*`; new `REDIS_TIMEOUT` env var (default 500ms) added in `4b8997e` so operators can tune Lettuce timeout without rebuild | **Open** — to be observed during Phase 10 soak |
 | 2026-05-11 | Redis memory pressure at 10k × 10 KB | Low | Document sizing; maxmemory policy | **Closed** — sizing documented in README (~100 MB at 10k rules) and 26-performance-tuning-runbook |
 | 2026-05-11 | `CacheStatistics` used outside cache package | Low | Phase 0 audit | **Closed** — audit found no external consumers; class deleted in Phase 4 |
 | 2026-05-11 | Subscriber refresh failure silent | Med | ERROR log; alerting | **Closed in code** — `drools.refresh.failed{layer=subscriber}` counter + ERROR log; alert wiring is operator-side |
@@ -787,10 +787,10 @@ When promoting this change (Phase 10 — not yet executed):
 
 This work is DONE only when ALL of the following are true:
 
-- [ ] All 11 phase gates passed (8/11 done; 9, 10 pending; 11 documented as no-op)
-- [ ] All sign-offs signed (8/11 done)
-- [x] All risks in the log either Closed or accepted with mitigation noted
-- [ ] All quality gates green (unit + spotbugs + spotless ✅; load test ⏳; SonarQube not re-run)
+- [ ] All 11 phase gates passed (9/11 done — 9.4 partial with deferred follow-ups; 10 pending; 11 release-note-only, pending merge)
+- [ ] All sign-offs signed (9/11 done — 10 pending; 11 release-note-only)
+- [x] All risks in the log either Closed or accepted with mitigation noted (Phase 9.4 supplied new evidence on 2 open risks — see risk log)
+- [ ] All quality gates green (unit ✅ 548 tests / spotbugs ✅ / spotless ✅; load test `--quick --phase 9` PASS modulo 9.4 deferred follow-ups; SonarQube not re-run)
 - [x] All documentation files updated (24 actually changed; see Phase 8 commit `f4a2816`)
 - [x] OpenAPI spec updated
 - [x] ADR-016 added; ADR-004 and ADR-005 marked Superseded
