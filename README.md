@@ -14,7 +14,7 @@ A high-performance business rule execution microservice built with Spring Boot a
 
 - **High Performance**: Sub-100ms P99 latency for cached rules, supports 100-1000 RPS
 - **Scalable Storage**: AWS S3 backend with hierarchical rule organization
-- **Multi-tier Caching**: Local LRU + Redis distributed caching for optimal performance
+- **Redis-decorator Caching**: `RedisCachedRuleStorage` wraps the base storage when `REDIS_ENABLED=true` (read-through cache of DRL text + pub/sub fan-out for cross-instance refresh; see [ADR-016](project-documentation/36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20))
 - **Rule Management**: REST APIs for hot-reloading and monitoring rules
 - **Production Ready**: Health checks, metrics, monitoring, and comprehensive security
 - **Memory Stable**: Proper resource disposal prevents memory leaks and OOM errors
@@ -26,10 +26,15 @@ A high-performance business rule execution microservice built with Spring Boot a
 ## 🏗️ Architecture
 
 ```
-Client Request → REST API → Rule Engine → Cache Layer → Storage Layer
-                    ↓           ↓            ↓           ↓
-               Controller → Drools KIE → LRU/Redis → S3/Local/Memory
+Client Request → REST API → Rule Engine → Storage Layer
+                    ↓           ↓            ↓
+               Controller → kieContainer → RedisCachedRuleStorage decorator (opt-in)
+                            (in-memory      → S3 / LocalFile / In-Memory base storage
+                             compiled       (+ Redis pub/sub fan-out on refresh)
+                             rules)
 ```
+
+`/execute-rule` reads compiled rules from the in-memory `kieContainer` only — it never touches Redis. The Redis decorator only sits in the refresh path (DRL text fetch from S3 → cache populate). Pub/sub events on `drools:rule:events` keep cross-instance compiled state in sync.
 
 ### Tech Stack
 
@@ -282,8 +287,9 @@ The application supports multiple configuration methods (in priority order):
 | `REDIS_URL` | Redis connection URL | `redis://localhost:6379` |
 | `REDIS_DRL_RULES_TTL_MINUTES` | Cache TTL for DRL JSON (minutes) | `15` |
 | `REDIS_DRL_RULES_KEY_PREFIX` | Key prefix for SCAN+MGET bulk path | `drools:rule:` |
+| `REDIS_TIMEOUT` | Lettuce command timeout (sits below CB `slowCallDurationThreshold=2s`) | `500ms` |
 | `REDIS_PUBSUB_ENABLED` | Enable cross-instance refresh fan-out via `RuleRefreshPublisher`/`Subscriber` | `true` (when Redis enabled) |
-| `REDIS_PUBSUB_CHANNEL` | Pub/sub channel for refresh events | `drools:rule:events` |
+| `REDIS_REFRESH_CHANNEL` | Pub/sub channel for refresh events | `drools:rule:events` |
 | `RULE_EXECUTION_TIMEOUT_SECONDS` | Rule execution timeout | `30` |
 | `LOG_LEVEL` | Application log level | `INFO` |
 
@@ -404,13 +410,15 @@ GET /admin/health
     "active_rules": 25
   },
   "cache": {
-    "enabled": true,
-    "size": 15,
-    "max_size": 100,
-    "statistics": {
-      "hits": 1250,
-      "misses": 45,
-      "evictions": 2
+    "status": "UP",
+    "details": {
+      "mode": "redis",
+      "enabled": true,
+      "statistics": {
+        "hits": 1250,
+        "misses": 45,
+        "hit_rate": "96.53%"
+      }
     }
   },
   "storage": {

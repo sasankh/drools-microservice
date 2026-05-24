@@ -500,22 +500,34 @@ thread-pools:
 
 ### Cache Optimization
 
+The `RedisCachedRuleStorage` decorator wraps the base storage when `REDIS_ENABLED=true` (see [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20)). The legacy `cache.lru.*` config block was removed on 2026-05-20 with the deletion of `LocalLRUCache` — there is no in-process LRU layer anymore. Tunable keys today:
+
 ```yaml
-# High-performance caching
-cache:
-  lru:
-    max-size: 1000       # Larger local cache
-    statistics-enabled: true
-    access-order: true   # LRU eviction
-  redis:
-    enabled: true
-    ttl-seconds: 7200    # 2 hours
-    connection-pool-max-size: 20
-    serialization: json  # Fast serialization
-  warming:
-    enabled: true
-    batch-size: 50       # Warm cache in batches
+spring:
+  data:
+    redis:
+      url: ${REDIS_URL:redis://localhost:6379}
+      timeout: ${REDIS_TIMEOUT:500ms}   # Lettuce command timeout (added 2026-05-24)
+      lettuce:
+        pool:
+          max-active: 10
+          max-idle: 5
+          min-idle: 1
+
+redis:
+  enabled: ${REDIS_ENABLED:false}
+  drl-rules:
+    ttl-minutes: ${REDIS_DRL_RULES_TTL_MINUTES:15}        # was REDIS_TTL_MINUTES pre-2026-05-20
+    key-prefix: ${REDIS_DRL_RULES_KEY_PREFIX:drools:rule:}
+  pubsub:
+    enabled: ${REDIS_PUBSUB_ENABLED:true}                 # cross-instance refresh fan-out
+    channel: ${REDIS_REFRESH_CHANNEL:drools:rule:events}
 ```
+
+Per-environment guidance:
+- **Distant Redis or high p99 latency**: raise `REDIS_TIMEOUT` to 1000–1500ms (keep below the Redis CB's `slowCallDurationThreshold=2s`, see [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md))
+- **Many small refresh events**: leave TTL at default 15 min (acts as eventual-consistency ceiling for missed pub/sub events)
+- **No cross-instance setup (single replica)**: set `REDIS_PUBSUB_ENABLED=false` to skip the listener container
 
 ### Connection Pool Tuning
 

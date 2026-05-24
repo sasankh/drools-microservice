@@ -500,8 +500,8 @@ done
 # Check loaded rules
 curl -s http://localhost:8080/admin/rules | jq '.total_rules'
 
-# Check cache size
-curl -s http://localhost:8080/admin/health | jq '.cache.size'
+# Check cache statistics (Redis decorator only — LocalLRU was removed 2026-05-20)
+curl -s http://localhost:8080/admin/health | jq '.components.cache.details.statistics'
 
 # Check memory pools
 curl -s http://localhost:8080/admin/memory/info | jq '.memoryPools'
