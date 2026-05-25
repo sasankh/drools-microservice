@@ -19,7 +19,7 @@ drools-microservice/
 ├── project-documentation/            # ★ THIS DOCUMENTATION CORPUS (NotebookLM target)
 ├── ai-instructions/                  # AI workflow protocols (excluded from doc corpus)
 ├── .ai-workspace/                    # AI planning artifacts (excluded from doc corpus)
-├── .claude/                          # Claude Code session config (excluded)
+├── .claude/                          # Claude Code config (settings.json tracked; *.lock + settings.local.json gitignored)
 ├── .vscode/                          # IDE settings (excluded)
 ├── gc-logs/                          # Mounted GC log dir for container (runtime data)
 ├── heap-dumps/                       # Mounted heap dump dir (runtime data)
@@ -355,7 +355,7 @@ The following directories exist in the repo but are **intentionally excluded** f
 |---|---|---|
 | `ai-instructions/` | AI workflow protocols (`snap-memory`, `ai-context-update`, etc.) | Meta-tooling for AI agents working on the repo, not part of project functionality |
 | `.ai-workspace/` | AI planning artifacts (this overhaul's plan/checklist/findings) | Workspace, not deliverable docs |
-| `.claude/` | Claude Code session config (commands, settings) | IDE-equivalent config |
+| `.claude/` | Claude Code session config (`settings.json` is tracked as shared config; per-session `*.lock` and per-user `settings.local.json` are gitignored) | Mostly local Claude state |
 | `.vscode/` | VS Code editor settings | IDE config |
 | `gc-logs/` | Mounted runtime GC log directory | Runtime data |
 | `heap-dumps/` | Mounted heap dump directory (populated on OOM) | Runtime data |
