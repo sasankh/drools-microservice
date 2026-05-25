@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Everyone — the doc you reach for when you have one specific question |
 | **Purpose** | Quick answers to the questions most people actually ask, with links to full coverage |
-| **Last verified** | 2026-05-10 against running stack |
+| **Last verified** | 2026-05-24 against running stack |
 
 ---
 
@@ -383,7 +383,7 @@ Full error code catalog: [12-error-code-catalog.md](12-error-code-catalog.md).
 
 ### What's the expected RPS?
 
-100-1000 RPS per replica with default config. Sample workload tests show 45+ RPS sustained, much higher for CPU-bound rules. Scale horizontally for more.
+100-1000 RPS per replica with default config. Phase 9 load test (2026-05-23) measured **518 RPS sustained, P99 9ms, 0% errors** over 3000 samples on a single replica with default `JAVA_OPTS` (Xmx 2g). Scale horizontally for more. See [39-load-test-findings.md](39-load-test-findings.md) for the full test matrix.
 
 ### What's the expected latency?
 
@@ -492,7 +492,7 @@ Yes — but it'd require swapping `AdminAuthFilter` for Spring Security or a cus
 
 ### "What env vars are there?"
 
-→ [09-environment-variables-reference.md](09-environment-variables-reference.md). All 66 catalogued by category.
+→ [09-environment-variables-reference.md](09-environment-variables-reference.md). All 67 catalogued by category.
 
 ### "How do I write a sandbox-passing rule?"
 
@@ -504,7 +504,7 @@ Yes — but it'd require swapping `AdminAuthFilter` for Spring Security or a cus
 
 ### "Why does X behave this way?"
 
-→ [36-architecture-decision-records.md](36-architecture-decision-records.md). 12 ADRs for the load-bearing decisions.
+→ [36-architecture-decision-records.md](36-architecture-decision-records.md). 16 ADRs for the load-bearing decisions.
 
 ---
 

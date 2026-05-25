@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Operators, on-call engineers, developers debugging external-dependency failures |
 | **Purpose** | Complete behavior of the two Resilience4j circuit breakers (S3 and Redis) — how they trip, what they protect, what state transitions look like, how to recover |
-| **Last verified against** | [`CircuitBreakerConfig.java`](../src/main/java/com/company/drools/config/CircuitBreakerConfig.java), [`S3RuleStorage.java`](../src/main/java/com/company/drools/storage/S3RuleStorage.java), [`RedisCachedRuleStorage.java`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java), [`RuleRefreshPublisher.java`](../src/main/java/com/company/drools/cache/RuleRefreshPublisher.java) on 2026-05-20 |
+| **Last verified against** | [`CircuitBreakerConfig.java`](../src/main/java/com/company/drools/config/CircuitBreakerConfig.java), [`S3RuleStorage.java`](../src/main/java/com/company/drools/storage/S3RuleStorage.java), [`RedisCachedRuleStorage.java`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java), [`RuleRefreshPublisher.java`](../src/main/java/com/company/drools/cache/RuleRefreshPublisher.java) on 2026-05-24 |
 | **Related docs** | [09-environment-variables-reference.md](09-environment-variables-reference.md), [12-error-code-catalog.md](12-error-code-catalog.md), [26-performance-tuning-runbook.md](26-performance-tuning-runbook.md), [30-runbooks-and-monitoring.md](30-runbooks-and-monitoring.md) |
 
 ---
@@ -162,7 +162,7 @@ A "failure" means an exception was thrown. Specifically:
 **S3 ignores** ([`CircuitBreakerConfig.java:77-80`](../src/main/java/com/company/drools/config/CircuitBreakerConfig.java#L77-L80)):
 - `NoSuchKeyException` — a missing rule is a **normal** outcome, not a service failure. Critical: this means a rule that doesn't exist in S3 doesn't trip the breaker.
 
-**Redis records as failures** ([`CircuitBreakerConfig.java:125-129`](../src/main/java/com/company/drools/config/CircuitBreakerConfig.java#L125-L129)):
+**Redis records as failures** ([`CircuitBreakerConfig.java:121-125`](../src/main/java/com/company/drools/config/CircuitBreakerConfig.java#L121-L125)):
 - `RedisConnectionFailureException`
 - `RedisSystemException`
 - `TimeoutException`

@@ -629,7 +629,7 @@ source ./set-java-env.sh
 ### Files
 
 - **Setup Script**: `./set-java-env.sh`
-- **Enforcer Config**: `pom.xml` lines 256-278
+- **Enforcer Config**: `pom.xml` lines 262-286
 - **Shell Config**: `~/.zshrc` or `~/.bashrc`
 
 ---

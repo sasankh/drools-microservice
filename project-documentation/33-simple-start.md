@@ -2,6 +2,8 @@
 
 This guide shows you exactly where to put your generated Drools rules and how to test them locally.
 
+> ⚠️ **Sandbox note** — the templates and examples in this doc use `eval(...)` for clarity, but `DrlSanitizer` will reject any rule containing `eval()` at refresh time. When you actually create rules, replace `eval(...)` with Map-pattern syntax. Example: `eval($data.get("amount") != null)` → `$data : Map(this["amount"] != null)`. The 17 sample rules in [`sample-rules/`](../sample-rules/) (cataloged in [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md)) all pass the sandbox and are the right reference for working syntax. See [16-drl-sandboxing.md](16-drl-sandboxing.md) for the full constraint list.
+
 ## 📁 Where to Put Your Generated Rule
 
 ### 1. File Location

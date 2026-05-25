@@ -830,7 +830,11 @@ DRL content contains blocked class reference: ProcessBuilder
 **Solution**:
 ```bash
 # Check which imports are allowed
-# Allowed: java.util.*, java.math.*, java.time.*, com.company.*
+# Allowed (full list in 16-drl-sandboxing.md): java.util.*, java.math.*, java.time.*,
+# named java.lang numerics (Math, String, Number, Integer, Long, Double, Float,
+# Boolean, Byte, Short, Character, Comparable, Object, Enum), and java.text
+# formatters (DecimalFormat, NumberFormat, SimpleDateFormat).
+# Notably NOT allowed: com.company.*, sun.*, java.io.*, java.net.*, java.lang.reflect.*
 
 # Fix your rule to use allowed imports only
 # Instead of java.io.File, pass file data through the API input
@@ -929,5 +933,5 @@ Configuration: [relevant env vars/config]
 
 ---
 
-**Last Updated**: 2026-02-26
-**Version**: 1.1.0
+**Last Updated**: 2026-05-24
+**Version**: 1.3.0

@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Operators, on-call engineers, SREs |
 | **Purpose** | Operational procedures (start/stop/refresh/scale/incident response) plus monitoring setup (metrics, dashboards, alerts) |
-| **Last verified against** | Running stack on 2026-05-10 |
+| **Last verified against** | Running stack on 2026-05-24 |
 | **Related docs** | [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md), [26-performance-tuning-runbook.md](26-performance-tuning-runbook.md), [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md), [31-troubleshooting.md](31-troubleshooting.md) |
 
 ---
@@ -384,7 +384,7 @@ fields @timestamp, message
 | Memory warning | Heap usage > 80% for 10 min | P2 | Investigate |
 | GC pause anomaly | P99 GC pause > 500ms | P2 | Tune |
 | Circuit breaker open | Any breaker state == OPEN > 30s | P1 (S3) / P3 (Redis) | Investigate dependency |
-| Cache hit rate low | LRU hit rate < 70% for 30 min | P3 | Tune cache size |
+| Cache hit rate low | `drools.cache.hit{layer=redis}` hit rate < 70% for 30 min (when `REDIS_ENABLED=true`) | P3 | Check if refresh storms are evicting Redis keys; tune `REDIS_DRL_RULES_TTL_MINUTES` |
 | Rule execution errors | Per-rule error rate > 5% for 10 min | P2 | Validate rule logic |
 | Rate limit "client map at capacity" | Log line `Rate limiter client map at capacity` | P2 | Possible spoofing |
 | Admin auth disabled in production | Log line `Admin API key is not configured` AND env != local | P1 | Set `ADMIN_API_KEY` |
@@ -492,7 +492,7 @@ If either fails, page on-call.
 | Admin API audit log | ⚠️ logs exist, but not a dedicated audit channel |
 | Backup & restore for rule storage | ⚠️ relies on S3 versioning; explicit backup procedure not documented in repo |
 | Disaster recovery plan | ⚠️ not in repo |
-| Performance baseline tests | ❌ JMeter deferred |
+| Performance baseline tests | ✅ [`scripts/run-load-test.sh`](../scripts/run-load-test.sh) — Phases 0–8 (1000-rule baseline, JMeter mixed-workload, refresh storm) + Phase 9 (3-replica multi-instance convergence). See [39-load-test-findings.md](39-load-test-findings.md). |
 
 ### Recommendations for production deployment
 

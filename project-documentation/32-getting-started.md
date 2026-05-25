@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | New developers and evaluators (see something work in under 30 minutes) |
 | **Purpose** | Fastest path from `git clone` to "I just executed a rule and got a result" |
-| **Last verified against** | Running stack on 2026-05-10 |
+| **Last verified against** | Running stack on 2026-05-24 |
 | **Related docs** | [27-development-setup.md](27-development-setup.md) (full dev setup), [33-simple-start.md](33-simple-start.md) (rule author quickstart), [10-api-reference.md](10-api-reference.md) |
 
 ---
@@ -89,18 +89,25 @@ If you get `Connection refused`, the app hasn't finished booting. Wait 30s and r
 curl -fsS http://localhost:8080/admin/rules | jq '.total_rules, .rules[].rule_id'
 ```
 
-You should see `10` followed by these rule IDs:
+You should see `17` followed by these rule IDs (order may vary):
 ```
-"validation.customer.age"
-"pricing.shipping.standard"
-"pricing.shipping.express"
-"pricing.discount.first-time"
+"inventory.warning.exists"
+"pricing.bundle.accumulate"
 "pricing.discount.bulk"
+"pricing.discount.first-time"
+"pricing.discount.simple"
 "pricing.discount.vip"
-"validation.customer.credit"
+"pricing.loyalty.salience"
+"pricing.shipping.express"
+"pricing.shipping.standard"
+"seasonal.expiry.temporal"
 "seasonal.holiday.blackfriday"
 "seasonal.holiday.discount"
-"pricing.discount.simple"
+"validation.cart.forall"
+"validation.cart.notempty"
+"validation.customer.age"
+"validation.customer.credit"
+"validation.email.compound"
 ```
 
 These are the [sample-rules](../sample-rules/) loaded from LocalStack S3.
@@ -154,7 +161,7 @@ You've now seen the service work. Where to go next depends on your role:
 
 → [27-development-setup.md](27-development-setup.md) — local Java setup, IDE, conventions, build/test workflow.
 → [04-architecture.md](04-architecture.md) — full architecture: filter chain, threading, Drools 10 `updateToVersion` rule-loading pattern, security layers.
-→ [28-testing-guide.md](28-testing-guide.md) — test suite map (45 files, 548 unit + 14 integration tests), how to add tests.
+→ [28-testing-guide.md](28-testing-guide.md) — test suite map (46 files, 548+ unit + 15 integration tests), how to add tests.
 
 ### "I'm an architect / I want to understand the design"
 
