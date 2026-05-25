@@ -79,6 +79,7 @@ REDIS_KILL_AT_S="${REDIS_KILL_AT_S:-120}"                  # 9.4 wallclock offse
 REDIS_DOWN_DURATION_S="${REDIS_DOWN_DURATION_S:-120}"      # 9.4 stay-down duration before restart
 CB_OPEN_DEADLINE_S="${CB_OPEN_DEADLINE_S:-30}"             # 9.4 must-open-by deadline
 CB_CLOSE_DEADLINE_S="${CB_CLOSE_DEADLINE_S:-90}"           # 9.4 must-close-by deadline (after restart)
+PHASE9_4_RECOVERY_SETTLE_S="${PHASE9_4_RECOVERY_SETTLE_S:-3}"  # 9.4 sleep after CB-closed before firing post-restart convergence round, so the listener's 2s FixedBackOff retry cycle completes re-subscription before the publish lands
 
 # Run-mode flags
 PHASE_FILTER=""
@@ -140,6 +141,8 @@ Env-var knobs:
   REDIS_DOWN_DURATION_S         9.4 stay-down duration before restart (default 120)
   CB_OPEN_DEADLINE_S            9.4 must-open-by deadline (default 30)
   CB_CLOSE_DEADLINE_S           9.4 must-close-by deadline (default 90)
+  PHASE9_4_RECOVERY_SETTLE_S    9.4 sleep after CB-closed before convergence round
+                                 (default 3 — covers 2s FixedBackOff + 1s margin)
   ... (see top of script)
 
 Output:
@@ -1292,6 +1295,16 @@ phase_9_4_failure_mode() {
   echo "$!" > "${exerciser_pid_file}"
   echo "  [info] CB-exerciser started (PID $(cat "${exerciser_pid_file}"), every 3s × 3 replicas)"
 
+  # Pre-kill snapshot: baseline counter values for resilience4j.circuitbreaker.calls
+  # (kind=successful/failed/not_permitted/ignored). Used post-hoc to diagnose whether
+  # the CB sliding window saw enough failures during the kill window.
+  echo "  [info] capturing pre-kill metric snapshots (3 replicas)"
+  for i in 1 2 3; do
+    actuator::snapshot_phase9_metrics \
+      "$(multi_stack::actuator_url ${i})" \
+      "${pdir}/metric-snapshot-app-${i}-pre-kill.json"
+  done
+
   local t_kill
   t_kill=$(date +%s)
   multi_stack::kill_redis
@@ -1330,6 +1343,16 @@ phase_9_4_failure_mode() {
     sleep $(( REDIS_DOWN_DURATION_S - elapsed_down ))
   fi
 
+  # Pre-restart snapshot: counters just before Redis comes back. Diff vs pre-kill =
+  # what the CB observed during the entire kill window. Critical for diagnosing
+  # why the breaker did/didn't trip (Phase 9.4 CB-engagement sub-criterion).
+  echo "  [info] capturing pre-restart metric snapshots (3 replicas)"
+  for i in 1 2 3; do
+    actuator::snapshot_phase9_metrics \
+      "$(multi_stack::actuator_url ${i})" \
+      "${pdir}/metric-snapshot-app-${i}-pre-restart.json"
+  done
+
   local t_restart
   t_restart=$(date +%s)
   multi_stack::start_redis
@@ -1360,6 +1383,16 @@ phase_9_4_failure_mode() {
     sleep 2
   done
 
+  # Post-restart snapshot: counters after CB-close (or after the deadline). Diff vs
+  # pre-restart = recovery activity. Together with pre-kill + pre-restart, this gives
+  # a full pre/mid/post forensic timeline of CB calls per replica.
+  echo "  [info] capturing post-restart metric snapshots (3 replicas)"
+  for i in 1 2 3; do
+    actuator::snapshot_phase9_metrics \
+      "$(multi_stack::actuator_url ${i})" \
+      "${pdir}/metric-snapshot-app-${i}-post-restart.json"
+  done
+
   # Stop the CB-exerciser before the convergence-recovery round; otherwise its concurrent
   # refresh fire could confuse the per-rule counter baseline used by convergence::measure_single.
   if [[ -f "${exerciser_pid_file}" ]]; then
@@ -1371,6 +1404,14 @@ phase_9_4_failure_mode() {
     rm -f "${exerciser_pid_file}"
     echo "  [info] CB-exerciser stopped"
   fi
+
+  # Settle before the post-restart convergence round so the
+  # RedisMessageListenerContainer's 2s FixedBackOff retry cycle has time to
+  # complete re-subscription. Without this, the publish lands before the
+  # listener is back on the channel and the event is lost (pub/sub is
+  # fire-and-forget). Configurable via PHASE9_4_RECOVERY_SETTLE_S.
+  echo "  [info] sleeping ${PHASE9_4_RECOVERY_SETTLE_S}s for RedisMessageListenerContainer to re-subscribe (2s FixedBackOff + safety margin)"
+  sleep "${PHASE9_4_RECOVERY_SETTLE_S}"
 
   # Post-restart convergence round: proves pub/sub re-subscribed.
   local conv_recover="${pdir}/convergence-recovery.csv"
