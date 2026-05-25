@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | All readers, especially AI agents looking up unfamiliar terms |
 | **Purpose** | Definitions of every Drools term, project-specific concept, and infrastructure word used in this corpus |
-| **Last updated** | 2026-05-10 |
+| **Last updated** | 2026-05-24 |
 | **Related docs** | All — this is the lookup reference |
 
 ---

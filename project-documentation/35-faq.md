@@ -504,7 +504,7 @@ Yes — but it'd require swapping `AdminAuthFilter` for Spring Security or a cus
 
 ### "Why does X behave this way?"
 
-→ [36-architecture-decision-records.md](36-architecture-decision-records.md). 16 ADRs for the load-bearing decisions.
+→ [36-architecture-decision-records.md](36-architecture-decision-records.md). 15 ADRs for the load-bearing decisions.
 
 ---
 

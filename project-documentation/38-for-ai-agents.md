@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Future AI sessions (Claude Code, Codex, agents) working on this repo |
 | **Purpose** | Distill the verification rules and pitfalls learned during the 2026-05-08 documentation overhaul, so future agents don't re-make the same mistakes |
-| **Last verified against** | This conversation's overhaul findings + [`.ai-workspace/documentations/CODE_FINDINGS.md`](../.ai-workspace/documentations/CODE_FINDINGS.md) on 2026-05-08 (refreshed 2026-05-10 for stack modernization + load test) |
+| **Last verified against** | This conversation's overhaul findings + [`.ai-workspace/documentations/CODE_FINDINGS.md`](../.ai-workspace/documentations/CODE_FINDINGS.md) on 2026-05-08 (refreshed 2026-05-10 for stack modernization + load test; refreshed 2026-05-24 for Phase 9 multi-instance load test + Redis CB hardening) |
 | **Related docs** | [00-system-overview.md](00-system-overview.md), [12-error-code-catalog.md](12-error-code-catalog.md), [36-architecture-decision-records.md](36-architecture-decision-records.md), [`../.ai-workspace/README.md`](../.ai-workspace/README.md) |
 
 ---
@@ -39,14 +39,14 @@ If you can't cite, don't write. If you cited and the cite is wrong, the doc is w
 
 ### 3. Don't trust counts — verify them
 
-**What we found**: every count we typed from memory during the rebuild was off by some amount.
-- "56 Java source files" → actual 57 (`find src/main/java -name "*.java" | wc -l`)
-- "9 distinct error codes" → actual 10
-- "18 sandbox import prefixes / 13 blocked classes / 15 blocked methods" → actual 20 / 12 / 19
-- "66 cases" in `DrlSanitizerTest` → actual 23
-- "~1,181 tests" → actual 597
+**What we found** (counts drift fast as the codebase evolves — these are examples of *the kind of mistake*, not necessarily today's values):
+- Java source file count drifts with every PR — verify with `find src/main/java -name "*.java" | wc -l` (was 57 on 2026-05-08; 59 on 2026-05-24)
+- "9 distinct error codes" → actually 10 (was a guess pre-2026-05-08)
+- "18 sandbox import prefixes / 13 blocked classes / 15 blocked methods" → actually 20 / 12 / 19 (verified against `DrlSanitizer.java`)
+- "66 cases" or "23 cases" in `DrlSanitizerTest` → actually 8 test methods (4 `@Test` + 4 `@ParameterizedTest` over `@MethodSource` streams that expand to ~50+ effective cases)
+- Total test count drifts — was 597 mid-2026, then 545 after dead-`RuleCache` deletion, then 548 after Phase 9.4 added 3 unit tests for SCAN-CB-wrap. Verify with `mvn test` summary line.
 
-**The rule**: counts are cheap to verify (`find … | wc -l`, `grep -c`, `wc -l`). Always verify before quoting; never copy a count from another doc that hasn't been re-verified.
+**The rule**: counts are cheap to verify (`find … | wc -l`, `grep -c`, `wc -l`, `mvn test`). Always verify before quoting; never copy a count from another doc that hasn't been re-verified against source.
 
 ### 4. Watch for silent passes in validators
 

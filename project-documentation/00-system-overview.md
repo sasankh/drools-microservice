@@ -56,7 +56,7 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 2. [04-architecture.md](04-architecture.md) — full architecture (8 security layers, threading, Drools 10 `updateToVersion`)
 3. [14-security-architecture.md](14-security-architecture.md) — threat model + 8 layers
 4. [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md) — failure handling
-5. [36-architecture-decision-records.md](36-architecture-decision-records.md) — 16 ADRs explaining "why"
+5. [36-architecture-decision-records.md](36-architecture-decision-records.md) — 15 ADRs explaining "why"
 
 ### ⚙️ Operator / SRE
 
@@ -194,7 +194,7 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 - [35-faq.md](35-faq.md) — 65+ Q&A
 
 ### Advanced (36-39)
-- [36-architecture-decision-records.md](36-architecture-decision-records.md) — 16 ADRs + extension points
+- [36-architecture-decision-records.md](36-architecture-decision-records.md) — 15 ADRs + extension points
 - [37-glossary.md](37-glossary.md) — every term defined
 - [38-for-ai-agents.md](38-for-ai-agents.md) — verification rules and pitfalls for AI sessions working on this repo
 - [39-load-test-findings.md](39-load-test-findings.md) — measured numbers, architectural trade-offs, production-planning guidance from the 2026-05-10 single-container load test (1,000 rules, mixed-workload soak) + 2026-05-24 Phase 9.4 addendum (3-replica + pub/sub convergence + Redis-kill failure mode)

@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Architects, senior developers, future contributors trying to understand "why was this done this way?" |
 | **Purpose** | Capture the load-bearing design decisions and their rationale, so future changes don't re-litigate the same choices unaware |
-| **Last updated** | 2026-05-20 (ADR-016 added — Redis decorator + pub/sub; ADR-004 and ADR-005 marked Superseded) |
+| **Last updated** | 2026-05-24 (ADR-016 Phase 9.4 hardening addendum — SCAN-CB-wrap + REDIS_TIMEOUT + listener FixedBackOff; index sanity-checked at 15 ADRs) |
 | **Related docs** | All — ADRs reference specific implementation files |
 
 ---
@@ -865,14 +865,12 @@ The current cache layer is `RedisCachedRuleStorage`, a decorator on `RuleStorage
 
 ## Future ADRs to write (placeholders)
 
-These decisions are anticipated but not yet documented as ADRs:
+These decisions are anticipated but not yet documented as ADRs. Numbering picks up where the index leaves off (the last written ADR is 016; the next free number is 017 — ADR-015 was reserved for the structured-logging decision and is the lone gap in the index).
 
-- **ADR-013**: Choice of Spring Boot 3.2.5 specifically (over 3.3+)
-- **ADR-014**: Choice of Apache HTTP client for AWS SDK v2 (over Netty)
-- **ADR-015**: Logback + logstash-logback-encoder for structured logs (over alternatives)
-- **ADR-016**: Custom in-memory rate limiter (decision details from ADR-010)
-- **ADR-017**: Maven over Gradle
-- **ADR-018**: Container Java distribution: Amazon Corretto (over Temurin / Liberica)
+- **ADR-015**: Logback + logstash-logback-encoder for structured logs (over alternatives) — number reserved, write-up still pending
+- **ADR-017**: Choice of Apache HTTP client for AWS SDK v2 (over Netty)
+- **ADR-018**: Maven over Gradle
+- **ADR-019**: Container Java distribution: Amazon Corretto (over Temurin / Liberica)
 
 If anyone is making a major change to the corresponding component, write the ADR before changing the code.
 
@@ -880,7 +878,7 @@ If anyone is making a major change to the corresponding component, write the ADR
 
 ## How to write a new ADR
 
-1. Pick the next number (013, 014, ...).
+1. Pick the next number (017, 018, ... — ADR-015 is reserved but not yet written; ADR-016 is the last written).
 2. Add an entry to the index above.
 3. Add the section below.
 4. Cite specific code lines.

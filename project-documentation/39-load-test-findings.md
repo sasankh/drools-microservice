@@ -4,9 +4,9 @@
 |---|---|
 | **Audience** | Engineers, operators, capacity planners |
 | **Purpose** | What this rule engine actually does under load — measured numbers, architectural trade-offs, production-planning guidance, bugs surfaced during testing |
-| **When tested** | 2026-05-10 |
-| **Stack tested** | docker-compose (app + LocalStack S3 + Redis), Java 25 + Spring Boot 3.5.3 + Drools 10.2.0 |
-| **Verdict** | ✅ **PASS** — production-ready against documented acceptance criteria |
+| **When tested** | 2026-05-10 (Phases 0–7 single-instance 1000-rule baseline) + 2026-05-23 (Phase 9 sub-tests 9.1–9.4: multi-instance + Redis-fault) |
+| **Stack tested** | docker-compose (app + LocalStack S3 + Redis), Java 25 + Spring Boot 3.5.3 + Drools 10.2.0; Phase 9 also runs a 3-replica + nginx LB topology via [`scripts/docker-compose.loadtest-multi.yml`](../scripts/docker-compose.loadtest-multi.yml) |
+| **Verdict** | ✅ **PASS** — production-ready against documented acceptance criteria (Phase 9.4 partial-PASS with 2 deferred follow-ups documented below) |
 | **Related docs** | [26-performance-tuning-runbook.md](26-performance-tuning-runbook.md), [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md), [36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal) (load-test sign-off note appended), [04-architecture.md](04-architecture.md) |
 
 ---
@@ -277,6 +277,52 @@ These were intentionally not tested in this run; capture as follow-ups if releva
 | **Refresh window** | The period during which a refresh is in progress. For full refresh: ~50 s cold / ~1 s warm; reads are non-blocking during this. For single-rule refresh: ~510 ms warm; reads block during this. |
 
 ---
+
+---
+
+## Phase 9 addendum — multi-instance + Redis cache + pub/sub (2026-05-23)
+
+Phase 9 adds four sub-tests that exercise the multi-instance topology shipped with the Redis cache + pub/sub layer (ADR-016). Each sub-test runs through `scripts/run-load-test.sh --phase 9.x`; the multi-container compose file is [`scripts/docker-compose.loadtest-multi.yml`](../scripts/docker-compose.loadtest-multi.yml) (3 app replicas + nginx LB + LocalStack + named `drools-redis`).
+
+### Phase 9.1 — single-instance regression (`REDIS_ENABLED=false`)
+
+Verifies the 2026-05-10 baseline still holds after the Phase 4–8 code changes.
+
+| Metric | Acceptance | Measured | Verdict |
+|---|---|---|---|
+| Throughput | ≥ 50 RPS | **520 RPS sustained** | ✅ |
+| P99 latency | < 200 ms | **9 ms** | ✅ |
+| Error rate | 0% | **0% over 2991 samples** | ✅ |
+
+### Phase 9.2 — cache-only 3-replica (`REDIS_ENABLED=true, REDIS_PUBSUB_ENABLED=false`)
+
+Verifies the Redis decorator works across replicas without pub/sub fan-out. Per-replica Redis activity confirmed via `drools.cache.{hit,miss}{layer=redis}` counters.
+
+| Metric | Acceptance | Measured | Verdict |
+|---|---|---|---|
+| P99 latency | < 200 ms | **10 ms** | ✅ |
+| Error rate | 0% | **0%** | ✅ |
+| Per-replica cache hits | > 0 on each | confirmed all 3 replicas | ✅ |
+
+Caveat: Phase 9 spec called for 2 replicas in 9.2 but the harness uses 3 uniformly across 9.2/9.3/9.4 to reduce topology churn — does not change the underlying assertion.
+
+### Phase 9.3 — full mode + pub/sub convergence (`REDIS_ENABLED=true, REDIS_PUBSUB_ENABLED=true`)
+
+The flagship Phase 9 test: refresh on one replica → sibling replicas should converge (i.e., reload + swap `kieContainer`) within 2000ms.
+
+| Test | Acceptance | Measured | Verdict |
+|---|---|---|---|
+| Single-rule convergence (3 sibling replicas, idle) | max ≤ 2000ms | **max 47ms** | ✅ |
+| Bulk convergence (refresh-all, 3 sibling replicas, idle) | max ≤ 2000ms | **max 45ms** | ✅ |
+| Single-rule convergence under load (100 RPS background) | max ≤ 2000ms | **max 42ms** | ✅ |
+| `drools.refresh.skipped_self` on publisher | > 0 | 9 (proves self-dedup is firing) | ✅ |
+| Cross-replica subscriber receives | all 3 | all 3 received every event | ✅ |
+
+Critical harness fix during development: `t_pub` (publication timestamp) must be anchored **after** the `POST /admin/refresh-rules/{id}` HTTP call returns, not before — bulk refresh takes ~5s server-side before the publisher's `convertAndSend()` fires. Anchoring before yielded false convergence-deadline FAILs.
+
+### Phase 9.4 — Redis-fault failure mode
+
+See [Phase 9.4 addendum](#phase-94-addendum--redis-cb--pubsub-hardening-2026-05-24) below — kept as a separate section because it covers the production-side hardening (SCAN-CB-wrap, REDIS_TIMEOUT, FixedBackOff) that landed as a follow-up.
 
 ---
 
