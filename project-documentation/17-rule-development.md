@@ -208,6 +208,8 @@ curl -X POST http://localhost:8080/admin/refresh-rules
 
 ## 💡 Rule Examples
 
+> ⚠️ **The examples in this section use `eval(...)` extensively for readability, but `DrlSanitizer` rejects every `eval()` call** (see [16-drl-sandboxing.md](16-drl-sandboxing.md#check-4--eval-is-forbidden)). To make any of these compile against the live sandbox, port the `eval()` conditions to Map-pattern syntax — e.g., `$data : Map(this["amount"] != null, ((Number)this["amount"]).doubleValue() > 50)`. For copy-pasteable, sandbox-passing examples, see [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) (all 17 entries verified live).
+
 ### 1. Simple Pricing Rule
 
 ```drools
@@ -761,14 +763,17 @@ All DRL rule files are scanned by `DrlSanitizer` before compilation. Rules that 
 
 ### Allowed Imports
 
-Only the following import packages are permitted in DRL files:
+Only the following import packages are permitted in DRL files (see [16-drl-sandboxing.md](16-drl-sandboxing.md) for the full 20-prefix allowlist verified against `DrlSanitizer.ALLOWED_IMPORT_PREFIXES`):
 
 | Package | Purpose |
 |---------|---------|
 | `java.util.*` | Collections, Maps, Lists, etc. |
 | `java.math.*` | BigDecimal, BigInteger |
 | `java.time.*` | Date/time classes (LocalDate, etc.) |
-| `com.company.*` | Application domain classes |
+| `java.lang.{Math,String,Number,Integer,Long,Double,Float,Boolean,Byte,Short,Character,Comparable,Object,Enum}` | individually-listed JDK types |
+| `java.text.{DecimalFormat,NumberFormat,SimpleDateFormat}` | formatting classes |
+
+> **`com.company.*` is NOT in the allowlist.** Sample rules don't import any company classes — they manipulate the input `Map` directly. To add a custom-package allowlist entry, edit `DrlSanitizer.ALLOWED_IMPORT_PREFIXES` (code change, not config).
 
 ### Blocked Content
 
@@ -931,9 +936,9 @@ S3 Structure:
 
 ### Examples in repo
 - [`sample-rules/`](../sample-rules/) — 17 production-ready sample rules
-- [`src/test/java/com/company/drools/`](../src/test/java/com/company/drools/) — 45 test files documenting actual behavior
+- [`src/test/java/com/company/drools/`](../src/test/java/com/company/drools/) — 46 test files documenting actual behavior
 
 ---
 
-**Last Updated**: 2026-05-10
-**Version**: 1.2.0
+**Last Updated**: 2026-05-24
+**Version**: 1.3.0

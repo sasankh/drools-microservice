@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Rule authors, operators uploading rules |
 | **Purpose** | How rule IDs map to file paths and S3 keys, what the format constraints are, and how to organize rules in storage |
-| **Last verified against** | [`StorageFactory.java`](../src/main/java/com/company/drools/storage/StorageFactory.java), [`S3RuleStorage.java`](../src/main/java/com/company/drools/storage/S3RuleStorage.java), [`LocalFileStorage.java`](../src/main/java/com/company/drools/storage/LocalFileStorage.java), [`RuleIdValidator.java`](../src/main/java/com/company/drools/api/validation/RuleIdValidator.java) on 2026-05-10 |
+| **Last verified against** | [`StorageFactory.java`](../src/main/java/com/company/drools/storage/StorageFactory.java), [`S3RuleStorage.java`](../src/main/java/com/company/drools/storage/S3RuleStorage.java), [`LocalFileStorage.java`](../src/main/java/com/company/drools/storage/LocalFileStorage.java), [`RuleIdValidator.java`](../src/main/java/com/company/drools/api/validation/RuleIdValidator.java) on 2026-05-24 |
 | **Related docs** | [16-drl-sandboxing.md](16-drl-sandboxing.md), [17-rule-development.md](17-rule-development.md), [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md), [09-environment-variables-reference.md](09-environment-variables-reference.md) |
 
 ---
@@ -41,7 +41,7 @@ A rule has four "names" that all map 1:1:
 
 ### The transformation in code
 
-[`S3RuleStorage.java:333-343`](../src/main/java/com/company/drools/storage/S3RuleStorage.java#L333-L343):
+[`S3RuleStorage.java:321-327`](../src/main/java/com/company/drools/storage/S3RuleStorage.java#L321-L327):
 
 ```java
 private String ruleIdToS3Key(String ruleId) {
@@ -53,7 +53,7 @@ private String ruleIdToS3Key(String ruleId) {
 }
 ```
 
-[`S3RuleStorage.java:345-355`](../src/main/java/com/company/drools/storage/S3RuleStorage.java#L345-L355) (reverse):
+[`S3RuleStorage.java:347-353`](../src/main/java/com/company/drools/storage/S3RuleStorage.java#L347-L353) (reverse):
 
 ```java
 private String s3KeyToRuleId(String s3Key) {
@@ -65,7 +65,7 @@ private String s3KeyToRuleId(String s3Key) {
 }
 ```
 
-The `LocalFileStorage` does the same dot-to-slash transformation for filesystem paths ([`LocalFileStorage.java:157-165`](../src/main/java/com/company/drools/storage/LocalFileStorage.java#L157-L165)).
+The `LocalFileStorage` does the same dot-to-slash transformation for filesystem paths ([`LocalFileStorage.java:156-164`](../src/main/java/com/company/drools/storage/LocalFileStorage.java#L156-L164)).
 
 ---
 
@@ -97,7 +97,7 @@ The `LocalFileStorage` does the same dot-to-slash transformation for filesystem 
 
 Validation happens in **three places** for defense-in-depth:
 
-1. **`@ValidRuleId`** annotation on `RuleExecutionRequest.ruleId` ([`RuleIdValidator.java:23-56`](../src/main/java/com/company/drools/api/validation/RuleIdValidator.java#L23-L56)). Rejects with HTTP 400 `INVALID_INPUT` before any business logic runs.
+1. **`@ValidRuleId`** annotation on `RuleExecutionRequest.ruleId` ([`RuleIdValidator.java:26-65`](../src/main/java/com/company/drools/api/validation/RuleIdValidator.java#L26-L65)). Rejects with HTTP 400 `INVALID_INPUT` before any business logic runs.
 2. **`@ValidRuleId`** on `AdminController` path variable for `/admin/refresh-rules/{ruleId}`.
 3. **Storage layer** path-traversal check in `S3RuleStorage.ruleIdToS3Key()` and `LocalFileStorage.getRuleFilePath()` — second-line defense in case validation is bypassed.
 
@@ -243,7 +243,7 @@ Path traversal is defended at three layers:
 
 ### Layer 1: `@ValidRuleId` annotation
 
-[`RuleIdValidator.java:48-52`](../src/main/java/com/company/drools/api/validation/RuleIdValidator.java#L48-L52) explicitly rejects rule IDs containing:
+[`RuleIdValidator.java:50-56`](../src/main/java/com/company/drools/api/validation/RuleIdValidator.java#L50-L56) explicitly rejects rule IDs containing:
 - `..`
 - `/`
 - `\`
@@ -252,7 +252,7 @@ Plus the regex `^[a-zA-Z0-9._-]+$` already excludes most other path-relevant cha
 
 ### Layer 2: S3RuleStorage path check
 
-[`S3RuleStorage.java:339-341`](../src/main/java/com/company/drools/storage/S3RuleStorage.java#L339-L341):
+[`S3RuleStorage.java:323-325`](../src/main/java/com/company/drools/storage/S3RuleStorage.java#L323-L325):
 ```java
 if (s3Key.contains("../") || s3Key.startsWith("/")) {
   throw new IllegalArgumentException("Invalid rule ID: path traversal detected");
@@ -263,7 +263,7 @@ This is *after* the dot-to-slash transformation. So if the validator missed some
 
 ### Layer 3: LocalFileStorage path normalization
 
-[`LocalFileStorage.java:159-163`](../src/main/java/com/company/drools/storage/LocalFileStorage.java#L159-L163):
+[`LocalFileStorage.java:158-162`](../src/main/java/com/company/drools/storage/LocalFileStorage.java#L158-L162):
 ```java
 Path filePath = Paths.get(rulesDirectory, relativePath).normalize();
 Path rulesRoot = Paths.get(rulesDirectory).normalize();
@@ -396,7 +396,7 @@ Both file and S3 backends recurse. If a subdirectory's rules aren't appearing, c
 
 ```bash
 # Check what's loaded
-curl -fsS http://localhost:8080/admin/rules | jq '.total_rules'   # → 10
+curl -fsS http://localhost:8080/admin/rules | jq '.total_rules'   # → 17
 curl -fsS http://localhost:8080/admin/rules | jq '.rules[].rule_id'
 
 # Check what's in storage (S3 / LocalStack)
