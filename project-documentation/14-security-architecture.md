@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Architects, security reviewers, operators, developers |
 | **Purpose** | Complete picture of how the service is defended in depth — eight layers, with code citations and threat-model rationale |
-| **Last verified against** | All `api/filter/`, `core/engine/DrlSanitizer.java`, `common/LogSanitizer.java`, `config/CorsConfig.java`, `config/S3Config.java` on 2026-05-10 |
+| **Last verified against** | All `api/filter/`, `core/engine/DrlSanitizer.java`, `common/LogSanitizer.java`, `config/CorsConfig.java`, `config/S3Config.java` on 2026-05-24 |
 | **Related docs** | [15-admin-authentication.md](15-admin-authentication.md), [16-drl-sandboxing.md](16-drl-sandboxing.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) |
 
 ---
@@ -194,14 +194,14 @@ Applied to the `data` field. Verifies:
 | Number values: |value| ≤ 1B | `DROOLS_VALIDATION_DATA_MAX_NUMBER_VALUE` | Sanity bound |
 | Other types: stringify and re-check | — | Catch-all |
 
-Validation failures bubble up as `MethodArgumentNotValidException` → `INVALID_INPUT` (HTTP 400) via [`GlobalExceptionHandler`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L46-L60).
+Validation failures bubble up as `MethodArgumentNotValidException` → `INVALID_INPUT` (HTTP 400) via [`GlobalExceptionHandler`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L50-L65).
 
 ### Storage-layer path traversal (defense in depth)
 
 Even though `@ValidRuleId` rejects `..`, `/`, `\` in rule IDs, the storage backends **also** validate paths:
 
-- [`S3RuleStorage.java:339-341`](../src/main/java/com/company/drools/storage/S3RuleStorage.java#L339-L341): rejects S3 keys containing `../` or starting with `/`.
-- [`LocalFileStorage.java:161`](../src/main/java/com/company/drools/storage/LocalFileStorage.java#L161): `path.normalize().startsWith(rulesRoot)` check.
+- [`S3RuleStorage.java:323`](../src/main/java/com/company/drools/storage/S3RuleStorage.java#L323): rejects S3 keys containing `../` or starting with `/`.
+- [`LocalFileStorage.java:158-160`](../src/main/java/com/company/drools/storage/LocalFileStorage.java#L158-L160): `path.normalize().startsWith(rulesRoot)` check.
 
 Two layers of path traversal defense.
 
@@ -220,7 +220,7 @@ Summary:
 - `eval()` is forbidden.
 - Static imports are forbidden.
 
-Verified by [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) — 23 test cases.
+Verified by [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) — 8 test methods (4 `@Test` + 4 `@ParameterizedTest` over `@MethodSource` streams that expand to ~40+ effective cases covering every blocked import, class, and method).
 
 This is the single most important security control in the service. Without it, DRL is a Turing-complete code-execution surface inside the JVM.
 
