@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | All readers — developers, architects, operators, external integrators, AI agents |
 | **Purpose** | Answer "what is this project, why does it exist, and what does it do?" in five minutes |
-| **Last verified against code** | 2026-05-10 (post-modernization, post-load-test) |
+| **Last verified against code** | 2026-05-24 (post-modernization, post-load-test, post-Redis-cache-+-pub/sub layer, post-Phase-9.4-hardening) |
 | **Related docs** | [02-project-structure.md](02-project-structure.md), [03-tech-stack.md](03-tech-stack.md), [04-architecture.md](04-architecture.md), [10-api-reference.md](10-api-reference.md) |
 
 ---
@@ -58,7 +58,7 @@ This service externalizes business rules into a dedicated execution layer. Engin
 The service is **production-ready** as of 2026-02-26:
 
 - **39 of 42 security findings closed** across 9 security phases.
-- **548 unit tests** across 45 test files (down from 597 after deleting the dead `RuleCache` layer on 2026-05-20, then back up with `SCAN`-CB-wrap unit tests on 2026-05-24). 14 Testcontainers integration tests, surefire-excluded on macOS-DinD (run on Linux CI).
+- **548 unit tests** across 46 test files (down from 597 after deleting the dead `RuleCache` layer on 2026-05-20, then back up with `SCAN`-CB-wrap unit tests on 2026-05-24). 14 Testcontainers integration tests, surefire-excluded on macOS-DinD (run on Linux CI).
 - **Docker integration test plan**: 30 checks across 9 steps, all passing as of last run.
 - **Memory leak fixed** (2026-02-19, hardened 2026-05-10): KieContainer lifecycle now uses Drools 10's `updateToVersion` + explicit `KieRepository.removeKieModule(oldReleaseId)` cleanup. Verified leak-free under sustained refresh load (1 MB drift / 98 refreshes — see [39-load-test-findings.md](39-load-test-findings.md)).
 - **Java 25 enforced** at build time via Maven Enforcer Plugin (bumped from Java 17 on 2026-05-09 — see [ADR-013](36-architecture-decision-records.md#adr-013-java-17--25--spring-boot-modernization-2026-05-09)).

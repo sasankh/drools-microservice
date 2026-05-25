@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, architects |
 | **Purpose** | Every technology used, with version, purpose, and rationale. The single source of truth for "what version of X are we on?" |
-| **Last verified against** | [pom.xml](../pom.xml), [Dockerfile](../Dockerfile) on 2026-05-10 |
+| **Last verified against** | [pom.xml](../pom.xml), [Dockerfile](../Dockerfile) on 2026-05-24 |
 | **Related docs** | [02-project-structure.md](02-project-structure.md), [27-development-setup.md](27-development-setup.md), [36-architecture-decision-records.md](36-architecture-decision-records.md) |
 
 ---
@@ -82,7 +82,7 @@ The Maven build stage uses `maven:3.9-eclipse-temurin-25` (separate JDK distribu
 - `spring-boot-starter-web` — Spring MVC, embedded Tomcat, Jackson
 - `spring-boot-starter-actuator` — `/actuator/*` endpoints (port 8081)
 - `spring-boot-starter-validation` — Jakarta Bean Validation, Hibernate Validator
-- `spring-boot-starter-data-redis` — Lettuce client, Spring Data Redis (currently dormant; see ADR-005)
+- `spring-boot-starter-data-redis` — Lettuce client, Spring Data Redis. Active when `REDIS_ENABLED=true` via `RedisCachedRuleStorage` decorator + `RuleRefreshPublisher`/`Subscriber` pub/sub fan-out; see [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20). (ADR-005's "dormant Redis bean" pattern was superseded 2026-05-20.)
 
 ### Embedded Tomcat (via Spring Boot)
 
@@ -253,9 +253,12 @@ Base test classes: `BaseUnitTest` (Mockito + mocked `MeterRegistry`) and `BaseIn
 
 For integration tests that need real AWS S3 behavior. The `localstack` Testcontainers module spins up a fresh LocalStack container per test class.
 
-Used in:
-- `S3StorageIntegrationTest` — verifies `S3RuleStorage` against real S3 API
+Used in (5 integration test classes total — all excluded from default `mvn test` via `pom.xml` surefire `excludes`; run on Linux CI):
+- `S3StorageIntegrationTest` — verifies `S3RuleStorage` against real S3 API (LocalStack)
 - `RuleExecutionIntegrationTest` — full request → S3 → KieBase → response flow
+- `RuleRefreshIntegrationTest` — refresh path with Redis populate
+- `RedisCachedStorageIntegrationTest` — read-through cache + circuit-breaker fallback against real Redis
+- `RedisPubSubIntegrationTest` — pub/sub fan-out across two simulated instances
 
 ### Awaitility
 

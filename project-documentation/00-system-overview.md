@@ -48,7 +48,7 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 2. [27-development-setup.md](27-development-setup.md) — local Java + Maven setup, conventions
 3. [02-project-structure.md](02-project-structure.md) — annotated directory tree (clickable)
 4. [04-architecture.md](04-architecture.md) — system design
-5. [28-testing-guide.md](28-testing-guide.md) — test suite map (45 files, 548 tests)
+5. [28-testing-guide.md](28-testing-guide.md) — test suite map (46 files, 548 unit + 14 integration tests)
 
 ### 🏛️ Architect / design reviewer
 
@@ -56,7 +56,7 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 2. [04-architecture.md](04-architecture.md) — full architecture (8 security layers, threading, Drools 10 `updateToVersion`)
 3. [14-security-architecture.md](14-security-architecture.md) — threat model + 8 layers
 4. [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md) — failure handling
-5. [36-architecture-decision-records.md](36-architecture-decision-records.md) — 12 ADRs explaining "why"
+5. [36-architecture-decision-records.md](36-architecture-decision-records.md) — 16 ADRs explaining "why"
 
 ### ⚙️ Operator / SRE
 
@@ -119,12 +119,12 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 | Stat | Value |
 |---|---|
 | Total documentation files | **40** (including this one) |
-| Total Java source files | 57 |
-| Total test files | 45 |
+| Total Java source files | 59 |
+| Total test files | 46 |
 | Total tests (`@Test` + `@ParameterizedTest`) | **548** unit + 14 Testcontainers integration (surefire-excluded; CI-only) |
 | Test coverage (instruction / branch) | 96.2% / 89.7% |
 | Sample rules in `sample-rules/` | 17 |
-| Environment variables actually read | 66 |
+| Environment variables actually read | 67 |
 | Distinct error codes | 10 |
 | Spring profiles | 4 (`local`, `dev`, `prod`, `docker`) |
 | Filter chain order | 4 filters (-1, 0, 1, none) |
@@ -194,7 +194,7 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 - [35-faq.md](35-faq.md) — 65+ Q&A
 
 ### Advanced (36-39)
-- [36-architecture-decision-records.md](36-architecture-decision-records.md) — 12 ADRs + extension points
+- [36-architecture-decision-records.md](36-architecture-decision-records.md) — 16 ADRs + extension points
 - [37-glossary.md](37-glossary.md) — every term defined
 - [38-for-ai-agents.md](38-for-ai-agents.md) — verification rules and pitfalls for AI sessions working on this repo
 - [39-load-test-findings.md](39-load-test-findings.md) — measured numbers, architectural trade-offs, production-planning guidance from the 2026-05-10 single-container load test (1,000 rules, mixed-workload soak) + 2026-05-24 Phase 9.4 addendum (3-replica + pub/sub convergence + Redis-kill failure mode)

@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, AI agents (the navigation map both reach for first) |
 | **Purpose** | Annotated tree of every file and folder in the repo, so a reader can find any code, config, or doc by purpose |
-| **Last verified against repo** | 2026-05-10 (post-modernization, post-load-test) |
+| **Last verified against repo** | 2026-05-24 (post-modernization, post-load-test, post-Redis-cache layer + Phase 9.4 hardening) |
 | **Related docs** | [01-project-overview.md](01-project-overview.md), [03-tech-stack.md](03-tech-stack.md), [27-development-setup.md](27-development-setup.md) |
 
 ---
@@ -52,7 +52,7 @@ drools-microservice/
 
 ### `src/main/java/com/company/drools/`
 
-The Java root. 57 files organized into 5 functional packages plus the `Application.java` entrypoint.
+The Java root. 59 files organized into 6 functional packages (`api`, `cache`, `common`, `config`, `core`, `storage`) plus the `Application.java` entrypoint.
 
 ```
 com/company/drools/
@@ -127,7 +127,7 @@ com/company/drools/
 ├── common/                            # Shared utilities
 │   └── LogSanitizer.java                  # Masks sensitive data in logs (CC, SSN, tokens, etc.)
 │
-└── config/                            # 16 Spring @Configuration classes
+└── config/                            # 17 Spring @Configuration classes
     ├── DroolsConfig.java                  # KieServices/KieContainer beans
     ├── S3Config.java                      # AWS S3 client + connection pool + endpoint validation
     ├── RedisConfig.java                   # Lettuce ConnectionFactory + RedisTemplate<String,Rule> + RedisMessageListenerContainer (when enabled)
@@ -160,7 +160,7 @@ The `application.yml` is the most-referenced config file in the codebase. See [0
 
 ### `src/test/java/com/company/drools/`
 
-45 test files, **548 unit tests + 14 Testcontainers integration tests** passing. The Testcontainers integration tests are excluded from default `mvn test` via `pom.xml` surefire `excludes` (macOS DinD blocker; run on Linux CI). Coverage roughly preserved from the 96.2% / 89.7% pre-modernization baseline.
+46 test files, **548 unit tests + 14 Testcontainers integration tests** passing. The Testcontainers integration tests are excluded from default `mvn test` via `pom.xml` surefire `excludes` (macOS DinD blocker; run on Linux CI). Coverage roughly preserved from the 96.2% / 89.7% pre-modernization baseline.
 
 ```
 src/test/java/com/company/drools/
@@ -181,7 +181,7 @@ src/test/java/com/company/drools/
 ├── storage/                           # S3RuleStorageTest, LocalFileStorageTest, InMemoryRuleStorageTest, StorageFactoryTest, RedisCachedRuleStorageTest
 ├── cache/                             # RefreshEventTest, RuleRefreshPublisherTest, RuleRefreshSubscriberTest
 ├── common/                            # LogSanitizerTest
-├── config/                            # 11 config tests — one per @Configuration class
+├── config/                            # 12 config tests — close to one per @Configuration class
 │
 ├── integration/                       # End-to-end with Testcontainers (all excluded from default mvn test — see pom.xml surefire <excludes>; require host-side Docker)
 │   ├── RuleExecutionIntegrationTest.java
