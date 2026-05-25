@@ -6,7 +6,7 @@
 **Target effort:** ~13 dev-days
 **Target calendar time:** 3–4 weeks including stage soak
 
-## Quick status (2026-05-20)
+## Quick status (2026-05-24)
 
 | Phase | Status | Commit | Notes |
 |---|---|---|---|
@@ -23,7 +23,7 @@
 | 10. Rollout (stage → prod) | ⏳ | — | Pending merge |
 | 11. Backward-compat cleanup | ⏳ | — | Optional, +1 release |
 
-**Test count:** 545 unit tests pass (down from 597 — net of 30+ deleted dead-cache tests, added decorator + pub/sub tests). 13 Testcontainers integration tests excluded from default `mvn test`.
+**Test count:** 548 unit tests pass (down from 597 — net of 30+ deleted dead-cache tests + decorator/pub/sub tests added; Phase 9.4 added 3 more SCAN-CB-wrap tests). 14 Testcontainers integration tests excluded from default `mvn test` (13 from Phase 7 + 1 added in Phase 9.4 for SCAN CB fallback).
 
 ---
 
@@ -771,9 +771,9 @@ When promoting this change (Phase 10 — not yet executed):
   - [ ] Remove `LRU_CACHE_MAX_SIZE` (no-op)
   - [ ] Optionally set `REDIS_DRL_RULES_KEY_PREFIX` (default `drools:rule:`)
   - [ ] Set `REDIS_PUBSUB_ENABLED=true` for multi-task ECS deployments
-  - [ ] Optionally set `REDIS_PUBSUB_CHANNEL` if naming collision
+  - [ ] Optionally set `REDIS_REFRESH_CHANNEL` if naming collision (default `drools:rule:events`)
 - [ ] Verify `REDIS_ENABLED` matches intent
-- [ ] Update monitoring dashboards: cache hit-rate metric source is `drools.cache.hit` / `drools.cache.miss` (no `layer=` tag) plus new `drools.refresh.*` family
+- [ ] Update monitoring dashboards: cache hit-rate metric source is `drools.cache.hit{layer=redis}` / `drools.cache.miss{layer=redis}` (the `layer` tag is present — verified in [`RedisCachedRuleStorage.java:124,135`](../../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java#L124-L135)) plus the bulk-path counters `drools.cache.bulk.hit` / `drools.cache.bulk.miss` (no `layer` tag on the bulk pair) and the new `drools.refresh.*` family
 - [ ] Update any CI scripts that parse `/admin/rules` `cached` field (now dropped)
 - [ ] Provision Redis memory: ~100 MB at 10k rules
 - [ ] Document for downstream services that consume `drools:rule:*`:
