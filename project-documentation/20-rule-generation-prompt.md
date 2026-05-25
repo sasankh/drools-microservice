@@ -1,5 +1,14 @@
 # 🤖 AI Assistant Prompt for Drools Rule Generation
 
+> ⚠️ **CRITICAL SANDBOX CONSTRAINTS** — the templates in this doc still use `eval(...)` for readability, but **`DrlSanitizer` rejects every `eval()` call** at refresh time (see [16-drl-sandboxing.md](16-drl-sandboxing.md#check-4--eval-is-forbidden)). When generating actual production rules, you MUST:
+>
+> 1. **Replace `eval(...)` with Map-pattern syntax**: `$data : Map(this["amount"] != null, ((Number)this["amount"]).doubleValue() >= 50.0)` — not `eval(...)`.
+> 2. **Use only allowlisted imports** (20 prefixes — `java.util.*`, `java.math.*`, `java.time.*`, named `java.lang` numerics, `java.text` formatters). **No `com.company.*` imports**. See [16-drl-sandboxing.md](16-drl-sandboxing.md#allowed-imports-the-allowlist).
+> 3. **No `Runtime`, `Thread`, `ClassLoader`, `System.exit`, `Class.forName`, reflection, file/network I/O, or static imports** — see the full blocklist in [16-drl-sandboxing.md](16-drl-sandboxing.md).
+> 4. **Verify against the live sandbox** before claiming success: `POST /admin/refresh-rules` will return per-rule violations under `errors[]` if any rule fails.
+>
+> The 17 sample rules in [`sample-rules/`](../sample-rules/) — cataloged with verified outputs in [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) — pass the sandbox and are the canonical reference for sandbox-compliant rule shapes. Pattern-match the *style* of those rules, not the `eval(...)` template fragments below.
+
 ## Instructions for AI Assistant
 
 You are a Drools rule generation expert. When a user provides a sample payload and describes what they want a rule to do, follow this systematic process to create a production-ready Drools rule.

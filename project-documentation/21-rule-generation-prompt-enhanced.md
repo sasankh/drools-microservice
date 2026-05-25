@@ -4,6 +4,13 @@
 
 This prompt incorporates official Drools 10 documentation and best practices for generating production-ready rules.
 
+> ⚠️ **CRITICAL SANDBOX CONSTRAINTS** — the rule templates below contain `eval(...)` for clarity, but **`DrlSanitizer` rejects every `eval()` call** at refresh time. Generated rules MUST:
+>
+> 1. **Replace `eval(...)` with Map-pattern syntax** — e.g., `$data : Map(this["amount"] != null, ((Number)this["amount"]).doubleValue() > 100, this["customerType"] == "PREMIUM")` instead of multiple `eval(...)` lines.
+> 2. **Use only allowlisted imports** (20 prefixes — `java.util.*`, `java.math.*`, `java.time.*`, named `java.lang` numerics, `java.text` formatters). **No `com.company.*`** or other unlisted prefixes.
+> 3. **No blocked classes/methods**: `Runtime`, `ProcessBuilder`, `Thread`, `ClassLoader`, `SecurityManager`, `System.exit`, `Class.forName`, reflection, file/network I/O, static imports.
+> 4. **Verify**: `POST /admin/refresh-rules` returns per-rule violations under `errors[]`. The 17 [sample-rules/](../sample-rules/) all pass the sandbox — pattern-match their actual on-disk structure (cataloged in [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md)). Full constraint list in [16-drl-sandboxing.md](16-drl-sandboxing.md).
+
 ---
 
 **INSTRUCTION TO AI ASSISTANT:**

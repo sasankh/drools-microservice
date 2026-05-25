@@ -592,8 +592,8 @@ rule "Simple Discount (exclusive)"
     activation-group "discount"
     no-loop true
 when
-    $data : Map(this["amount"] != null)
-    eval(((Number) $data.get("amount")).doubleValue() >= 50.0)
+    // Use Map-pattern syntax (sandbox rejects eval() — see 16-drl-sandboxing.md)
+    $data : Map(this["amount"] != null, ((Number)this["amount"]).doubleValue() >= 50.0)
 then
     // ... apply 10% simple discount
 end
