@@ -161,7 +161,7 @@ docker build -t drools-rule-engine:latest .
 
 # Run the container
 docker run -p 8080:8080 -p 8081:8081 \
-  -e RULE_SOURCE=memory \
+  -e RULE_SOURCE=local \
   drools-rule-engine:latest
 ```
 
@@ -275,7 +275,7 @@ The application supports multiple configuration methods (in priority order):
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `RULE_SOURCE` | Storage backend: `s3`, `local`, or `memory` | `memory` | Yes |
+| `RULE_SOURCE` | Storage backend: `local` (in-memory sample rules), `file` (filesystem), or `s3` (AWS S3 / LocalStack) | `local` | Yes |
 | `RULE_BUCKET_NAME` | S3 bucket name for rules | `local-rules` | If RULE_SOURCE=s3 |
 | `AWS_ENDPOINT` | S3 endpoint URL (LocalStack: http://localhost:4566) | AWS default | If using LocalStack |
 
@@ -317,16 +317,16 @@ The application supports multiple configuration methods (in priority order):
 
 ### Storage Backend Configuration
 
-#### 1. Memory Storage (Development)
-```bash
-export RULE_SOURCE=memory
-```
-Uses built-in sample rules. No additional setup required.
-
-#### 2. Local File Storage (Development)
+#### 1. In-Memory Storage (Development — built-in sample rules)
 ```bash
 export RULE_SOURCE=local
-export RULE_BASE_PATH=/path/to/rules
+```
+Uses 2 built-in sample rules from `InMemoryRuleStorage` (`pricing.discount.simple`, `pricing.discount.vip`). No additional setup required. (Despite the value `local`, this backend is purely in-memory — see [StorageFactory.java](src/main/java/com/company/drools/storage/StorageFactory.java) for the mapping.)
+
+#### 2. Local File Storage (Development — your own `.drl` files)
+```bash
+export RULE_SOURCE=file
+export LOCAL_RULES_DIRECTORY=/path/to/rules
 ```
 
 #### 3. S3 Storage (Production)
@@ -1014,13 +1014,13 @@ docker compose down
 ### Testing Different Storage Backends
 
 ```bash
-# Test with memory storage
-export RULE_SOURCE=memory
+# Test with in-memory storage (built-in sample rules)
+export RULE_SOURCE=local
 mvn spring-boot:run
 
-# Test with file storage
-export RULE_SOURCE=local
-export RULE_BASE_PATH=./test-rules
+# Test with file storage (your own .drl files)
+export RULE_SOURCE=file
+export LOCAL_RULES_DIRECTORY=./test-rules
 mvn spring-boot:run
 
 # Test with S3 storage
@@ -1336,7 +1336,7 @@ docker-compose exec app jstat -gc 1
 - Check existing issues: [GitHub Issues](https://github.com/your-repo/issues)
 - Review logs: `tail -f logs/application.log`
 - Verify configuration: `curl http://localhost:8080/admin/health`
-- Test with memory storage: `export RULE_SOURCE=memory`
+- Test with in-memory built-in rules: `export RULE_SOURCE=local`
 
 ## 📞 Support
 

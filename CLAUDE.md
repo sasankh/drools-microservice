@@ -326,7 +326,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
    # Test container startup and health
    docker run -d --name test-container -p 9080:8080 -p 9081:8081 \
-     -e RULE_SOURCE=memory drools-rule-engine:latest
+     -e RULE_SOURCE=local drools-rule-engine:latest
    curl http://localhost:9081/admin/health
    docker stop test-container && docker rm test-container
    ```
