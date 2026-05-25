@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | New contributors, engineers extending the service |
 | **Purpose** | Clone-to-running-tests in under 30 minutes. Plus the conventions and patterns this codebase follows so contributions are consistent. |
-| **Last verified against** | [`pom.xml`](../pom.xml), [`Dockerfile`](../Dockerfile), [`setup-dev-environment.sh`](../setup-dev-environment.sh) on 2026-05-10 |
+| **Last verified against** | [`pom.xml`](../pom.xml), [`Dockerfile`](../Dockerfile), [`setup-dev-environment.sh`](../setup-dev-environment.sh) on 2026-05-24 |
 | **Related docs** | [03-tech-stack.md](03-tech-stack.md), [28-testing-guide.md](28-testing-guide.md), [32-getting-started.md](32-getting-started.md), [34-java-setup-guide.md](34-java-setup-guide.md) |
 
 ---
@@ -67,7 +67,7 @@ The `set-java-env.sh` is macOS-specific (uses `/usr/libexec/java_home`). Linux u
 ```bash
 mvn clean compile         # compile only
 # OR
-mvn clean package         # compile + run all 548 unit tests + package jar (14 Testcontainers integration tests surefire-excluded; run on Linux CI)
+mvn clean package         # compile + run all 548 unit tests + package jar (15 Testcontainers integration tests surefire-excluded; run on Linux CI)
 # OR
 mvn clean package -DskipTests   # if you want to skip tests
 ```
@@ -87,7 +87,7 @@ docker compose ps
 
 # LocalStack S3 should have rules from sample-rules/ uploaded
 docker compose exec localstack awslocal s3 ls s3://local-rules/ --recursive
-# Should show 10 .drl files
+# Should show 17 .drl files
 ```
 
 ### 5. Run the application locally
@@ -169,7 +169,7 @@ These plugins run as part of the build pipeline. Awareness of what they enforce 
 | Plugin | Phase | What it does | Failure mode |
 |---|---|---|---|
 | **maven-enforcer-plugin** 3.6.2 | `validate` | Requires Java 25 (`[25,26)`) and Maven 3.8+ | Build aborts with clear error if Java mismatch |
-| **maven-compiler-plugin** 3.11.0 | `compile` | Source/target = 17, `parameters: true` (preserves param names) | Standard compile errors |
+| **maven-compiler-plugin** 3.11.0 | `compile` | Source/target = 25, `parameters: true` (preserves param names) | Standard compile errors |
 | **spring-boot-maven-plugin** 3.5.3 | `package` | Repackages the jar as a Spring Boot fat jar; excludes Lombok | If executable jar isn't produced, this is the cause |
 | **spotless-maven-plugin** 2.36.0 | `verify` (when `spotless:check`) | Code formatting via Google Java Format 1.17.0; removes unused imports; trims trailing whitespace | `mvn spotless:check` fails if any file is unformatted |
 | **jacoco-maven-plugin** 0.8.8 | `test` | Records coverage; outputs `target/site/jacoco/` | None (no threshold gate currently — see CODE_FINDINGS F-029) |
@@ -315,7 +315,7 @@ refactor(cache): extract RedisCachedRuleStorage decorator
 
 PR checklist before merging:
 - [ ] `mvn spotless:apply` ran
-- [ ] `mvn test` passes (all 597+ tests)
+- [ ] `mvn test` passes (all 548+ unit tests — integration tests excluded from default surefire run)
 - [ ] `mvn spotbugs:check` clean (or new warnings explained)
 - [ ] If env var added: documented in [09-environment-variables-reference.md](09-environment-variables-reference.md)
 - [ ] If endpoint added: documented in [10-api-reference.md](10-api-reference.md)
@@ -355,8 +355,8 @@ If any step fails locally, fix and re-run before pushing.
 ### IntelliJ IDEA (recommended)
 
 1. Open project → "Open as Maven Project"
-2. **Project SDK**: 17 (set in File → Project Structure)
-3. **Language Level**: 17
+2. **Project SDK**: 25 (set in File → Project Structure)
+3. **Language Level**: 25
 4. Install the **Lombok** plugin (project uses Lombok extensively for `@Slf4j`, `@Data`, `@Builder`)
 5. Enable annotation processing: Settings → Build, Execution, Deployment → Compiler → Annotation Processors → Enable
 6. Install the **google-java-format** plugin and configure:
@@ -376,7 +376,7 @@ If any step fails locally, fix and re-run before pushing.
 
 You can:
 - Build: `mvn package`
-- Run tests: `mvn test` (all 597 pass)
+- Run tests: `mvn test` (all 548+ pass — integration tests excluded by default)
 - Run service: `mvn spring-boot:run -Dspring-boot.run.profiles=dev`
 - Hit `/execute-rule` and get a result
 - Format code: `mvn spotless:apply`

@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, AI agents inspecting test coverage |
 | **Purpose** | Test suite map, how to run tests, how to add new ones, and the test cases that prove the most important behaviors |
-| **Last verified against** | All `src/test/java/com/company/drools/**/*.java` on 2026-05-11 (45 test files, 597 `@Test`/`@ParameterizedTest` annotations) |
+| **Last verified against** | All `src/test/java/com/company/drools/**/*.java` on 2026-05-24 (46 test files, ~543 `@Test`/`@ParameterizedTest` annotations across all files, 548 unit tests after parameterized expansion) |
 | **Related docs** | [27-development-setup.md](27-development-setup.md), [16-drl-sandboxing.md](16-drl-sandboxing.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
@@ -22,7 +22,7 @@
 
 ## Test inventory by package
 
-Counts are `@Test` + `@ParameterizedTest` annotations per file (verified 2026-05-10).
+Counts are `@Test` + `@ParameterizedTest` annotations per file (verified 2026-05-24).
 
 ### `api/controller/` — 64 tests across 4 files
 
@@ -51,7 +51,7 @@ Counts are `@Test` + `@ParameterizedTest` annotations per file (verified 2026-05
 | File | Tests | Notable |
 |---|---:|---|
 | [`AdminAuthFilterTest.java`](../src/test/java/com/company/drools/api/filter/AdminAuthFilterTest.java) | 9 | Verifies dev-mode bypass when `ADMIN_API_KEY` empty; 401 when wrong key; non-admin paths skip filter |
-| [`RateLimitingFilterTest.java`](../src/test/java/com/company/drools/api/filter/RateLimitingFilterTest.java) | 18 | Verifies `/admin/*` exemption (line 120-127), per-client buckets, X-Forwarded-For ignored, multi-tier client identification |
+| [`RateLimitingFilterTest.java`](../src/test/java/com/company/drools/api/filter/RateLimitingFilterTest.java) | 18 | Verifies `/admin/*` exemption (line 125-132), per-client buckets, X-Forwarded-For ignored, multi-tier client identification |
 | [`RequestSizeValidationFilterTest.java`](../src/test/java/com/company/drools/api/filter/RequestSizeValidationFilterTest.java) | 12 | Content-Length check + chunked stream wrapping |
 | [`SecurityHeadersFilterTest.java`](../src/test/java/com/company/drools/api/filter/SecurityHeadersFilterTest.java) | 1 | All 7 headers verified present with exact values |
 
@@ -84,12 +84,13 @@ The dead `LocalLRUCacheTest` / `RedisRuleCacheTest` / `CacheStatisticsTest` file
 |---|---:|
 | [`LogSanitizerTest.java`](../src/test/java/com/company/drools/common/LogSanitizerTest.java) | 24 — credit card masking, SSN masking, nested map recursion, false-positive avoidance |
 
-### `config/` — 93 tests across 11 files
+### `config/` — 12 files
 
 | File | Tests |
 |---|---:|
 | `CircuitBreakerConfigTest.java` | 5 |
 | `DroolsConfigTest.java` | 4 |
+| `InstanceIdConfigTest.java` | (added 2026-05-20 for per-instance UUID bean used by pub/sub layer) |
 | `LoggingConfigTest.java` | 9 |
 | `MetricsConfigTest.java` | 13 |
 | `RateLimitingConfigTest.java` | 18 |
@@ -125,12 +126,15 @@ The dead `LocalLRUCacheTest` / `RedisRuleCacheTest` / `CacheStatisticsTest` file
 | [`InMemoryRuleStorageTest.java`](../src/test/java/com/company/drools/storage/InMemoryRuleStorageTest.java) | 19 |
 | [`StorageFactoryTest.java`](../src/test/java/com/company/drools/storage/StorageFactoryTest.java) | 5 |
 
-### `integration/` — 15 tests (Testcontainers, slower)
+### `integration/` — 5 files (Testcontainers, slower; surefire-excluded by default)
 
-| File | Tests | Stack |
-|---|---:|---|
-| [`RuleExecutionIntegrationTest.java`](../src/test/java/com/company/drools/integration/RuleExecutionIntegrationTest.java) | 8 | Real Drools KieBase + sample rules from filesystem |
-| [`S3StorageIntegrationTest.java`](../src/test/java/com/company/drools/integration/S3StorageIntegrationTest.java) | 7 | Real LocalStack S3 via Testcontainers |
+| File | Stack |
+|---|---|
+| [`RuleExecutionIntegrationTest.java`](../src/test/java/com/company/drools/integration/RuleExecutionIntegrationTest.java) | Real Drools KieBase + sample rules from filesystem; includes the `SampleRulesExecution` nested class that pin-tests outputs for all 17 sample rules |
+| [`S3StorageIntegrationTest.java`](../src/test/java/com/company/drools/integration/S3StorageIntegrationTest.java) | Real LocalStack S3 via Testcontainers |
+| [`RuleRefreshIntegrationTest.java`](../src/test/java/com/company/drools/integration/RuleRefreshIntegrationTest.java) | Refresh-path integration including `KieRepository.removeKieModule` cleanup verification (Drools 10 pattern) |
+| [`RedisCachedStorageIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisCachedStorageIntegrationTest.java) | Redis decorator end-to-end (cold→warm cache, TTL, bulk SCAN+MGET, refreshCache, refreshRule, write-through, Redis-kill CB fallback) |
+| [`RedisPubSubIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisPubSubIntegrationTest.java) | Two-instance pub/sub fan-out (single + bulk + delete events, wire-format end-to-end, source-instance dedup) |
 
 ### `testutil/` — helpers
 
@@ -172,7 +176,7 @@ Use this for tests that exercise the real Drools engine, real storage layer, or 
 mvn test
 ```
 
-Takes ~30-60 seconds. Output ends with `BUILD SUCCESS` and a summary like `Tests run: 597, Failures: 0, Errors: 0, Skipped: 0`.
+Takes ~30-60 seconds. Output ends with `BUILD SUCCESS` and a summary like `Tests run: 548+, Failures: 0, Errors: 0, Skipped: 0`. (Integration tests under `*IntegrationTest` are excluded from the default surefire run; explicitly include them with `mvn test -Dtest='*IntegrationTest'`.)
 
 ### Single class
 
@@ -370,7 +374,7 @@ void allRuleIdsHaveValidFormat(String ruleId) {
 }
 ```
 
-Counts as one entry in `mvn test` output but one `@Test` annotation in our count. (Why our count is 597 — many tests are parameterized and run multiple cases each.)
+Counts as one entry in our `@Test`/`@ParameterizedTest` annotation count, but multiple in `mvn test` output (one per parameter set). Our raw annotation count is ~543; surefire reports 548+ after parameterized expansion.
 
 ---
 
@@ -440,19 +444,35 @@ Tests should verify *our* logic, not Spring/Mockito/Drools. If a test is just ve
 
 ---
 
-## Performance test gap
+## Load test orchestrator
 
-There is **no JMeter / k6 / wrk load test suite** committed to the repo. Phase 4.3 of the original project plan was deferred. If you need to load-test:
+The repo ships a full load-test orchestrator at [`scripts/run-load-test.sh`](../scripts/run-load-test.sh) (added 2026-05-10, extended with Phase 9 sub-tests on 2026-05-23). It runs:
+
+- **Phase 0–8**: 1000-rule baseline, JMeter mixed-workload soak, refresh-storm
+- **Phase 9.1**: single-instance regression (~520 RPS, P99 9ms, 0% errors)
+- **Phase 9.2**: cache-only 3-replica mode (P99 10ms, 0% errors; per-replica Redis activity confirmed)
+- **Phase 9.3**: full mode + pub/sub convergence (single-rule max 47ms / bulk 45ms / under-load 42ms across 3 sibling instances — all under 2000ms deadline)
+- **Phase 9.4**: failure-mode (Redis kill / restart) — graceful-degradation ✅; 2 deferred follow-ups documented in [39-load-test-findings.md](39-load-test-findings.md) Phase 9.4 addendum
 
 ```bash
-# Crude single-host load test
+# Run individual phases (faster, ~2-5 min each)
+./scripts/run-load-test.sh --quick --phase 9.1
+./scripts/run-load-test.sh --quick --phase 9.3
+
+# Run the full suite
+./scripts/run-load-test.sh
+```
+
+Multi-container Phase 9 harness uses [`scripts/docker-compose.loadtest-multi.yml`](../scripts/docker-compose.loadtest-multi.yml) (3 replicas + nginx LB + named Redis). See [39-load-test-findings.md](39-load-test-findings.md) for the full results catalog and [26-performance-tuning-runbook.md](26-performance-tuning-runbook.md) for what to watch during a test.
+
+For ad-hoc smoke load:
+
+```bash
 seq 1 1000 | xargs -P 50 -I {} curl -s -o /dev/null \
   -X POST http://localhost:8080/execute-rule \
   -H 'Content-Type: application/json' \
   -d '{"rule_id":"pricing.discount.simple","data":{"amount":100}}'
 ```
-
-For real load testing, use [k6](https://k6.io) or [JMeter](https://jmeter.apache.org). See [26-performance-tuning-runbook.md](26-performance-tuning-runbook.md) for what to watch during the test.
 
 ---
 
