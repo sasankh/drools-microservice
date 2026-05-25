@@ -26,7 +26,7 @@ This guide provides comprehensive documentation for configuring the Drools Rule 
 
 ### Key Configuration Areas
 - **Rule Storage**: S3, Local, In-Memory backends
-- **Caching**: Local LRU + Redis distributed caching
+- **Caching**: Optional `RedisCachedRuleStorage` decorator over base storage + Redis pub/sub fan-out for cross-instance refresh convergence. No in-process LRU layer (dead `RuleCache` deleted 2026-05-20 — see [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20)).
 - **Security**: Admin authentication, input validation, rate limiting, CORS, DRL sandboxing, security headers
 - **Performance**: Thread pools, timeouts, circuit breakers
 - **Monitoring**: Health checks, metrics, logging
@@ -65,7 +65,8 @@ When `REDIS_ENABLED=true`, `RedisCachedRuleStorage` wraps the base `RuleStorage`
 | `REDIS_DRL_RULES_TTL_MINUTES` | Cache TTL for DRL JSON (minutes) | `15` | `5`, `30`, `60` |
 | `REDIS_DRL_RULES_KEY_PREFIX` | Key prefix for SCAN+MGET bulk path | `drools:rule:` | `myapp:rules:` |
 | `REDIS_PUBSUB_ENABLED` | Enable cross-instance refresh fan-out | `true` (when Redis enabled) | `true`, `false` |
-| `REDIS_PUBSUB_CHANNEL` | Pub/sub channel for refresh events | `drools:rule:events` | `myapp:rule:events` |
+| `REDIS_REFRESH_CHANNEL` | Pub/sub channel for refresh events | `drools:rule:events` | `myapp:rule:events` |
+| `REDIS_TIMEOUT` | Lettuce command timeout (Spring data.redis.timeout) | `500ms` | `1s`, `1500ms` |
 
 ### Performance Configuration
 
@@ -87,8 +88,9 @@ When `REDIS_ENABLED=true`, `RedisCachedRuleStorage` wraps the base `RuleStorage`
 | `DROOLS_VALIDATION_NUMBER_MAX_VALUE` | Max numeric value | `1000000000` | `1000000`, `10000000000` |
 | `DROOLS_VALIDATION_REQUEST_MAX_SIZE_MB` | Max request size (MB) | `10` | `5`, `20`, `50` |
 | `DROOLS_CORS_ALLOWED_ORIGINS` | CORS allowed origins | *(empty)* | `https://app.company.com` |
-| `DROOLS_RATE_LIMITING_PER_MINUTE_LIMIT` | Requests per minute limit | `1000` | `100`, `5000`, `10000` |
-| `DROOLS_RATE_LIMITING_PER_HOUR_LIMIT` | Requests per hour limit | `50000` | `10000`, `100000` |
+| `DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE` | Requests per minute limit (per-client) | `1000` | `100`, `5000`, `10000` |
+| `DROOLS_RATE_LIMITING_REQUESTS_PER_HOUR` | Requests per hour limit (per-client) | `10000` | `5000`, `100000` |
+| `DROOLS_RATE_LIMITING_BURST_SIZE` | Token-bucket burst size | `100` | `50`, `200` |
 | `DROOLS_RATE_LIMITING_MAX_CLIENTS` | Max tracked rate-limit clients | `10000` | `5000`, `50000` |
 | `ADMIN_API_KEY` | API key for admin endpoint auth | *(empty/disabled)* | `your-secure-api-key` |
 
@@ -168,7 +170,7 @@ redis:
     key-prefix: ${REDIS_DRL_RULES_KEY_PREFIX:drools:rule:}
   pubsub:
     enabled: ${REDIS_PUBSUB_ENABLED:true}
-    channel: ${REDIS_PUBSUB_CHANNEL:drools:rule:events}
+    channel: ${REDIS_REFRESH_CHANNEL:drools:rule:events}
 
 # Thread Pool Configuration
 thread-pools:
@@ -207,9 +209,12 @@ drools:
     allowed-headers: "*"
     allow-credentials: true
   rate-limiting:
-    enabled: true
-    per-minute-limit: ${DROOLS_RATE_LIMITING_PER_MINUTE_LIMIT:1000}
-    per-hour-limit: ${DROOLS_RATE_LIMITING_PER_HOUR_LIMIT:50000}
+    enabled: ${DROOLS_RATE_LIMITING_ENABLED:true}
+    requests-per-minute: ${DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE:1000}
+    requests-per-hour: ${DROOLS_RATE_LIMITING_REQUESTS_PER_HOUR:10000}
+    burst-size: ${DROOLS_RATE_LIMITING_BURST_SIZE:100}
+    max-clients: ${DROOLS_RATE_LIMITING_MAX_CLIENTS:10000}
+    cleanup-interval-minutes: ${DROOLS_RATE_LIMITING_CLEANUP_INTERVAL:5}
 
 # Circuit Breaker Configuration
 resilience4j:
@@ -260,10 +265,9 @@ aws:
   s3:
     endpoint: http://localhost:4566  # LocalStack
 
-cache:
-  redis:
-    enabled: true
-    url: redis://localhost:6379
+redis:
+  enabled: true
+  url: redis://localhost:6379
 
 logging:
   level:
@@ -281,15 +285,12 @@ spring:
 drools:
   rule-source: s3
   bucket-name: dev-drools-rules
-
-cache:
-  redis:
-    enabled: true
-    url: redis://dev-redis.company.com:6379
-
-drools:
   rate-limiting:
-    per-minute-limit: 5000
+    requests-per-minute: 5000
+
+redis:
+  enabled: true
+  url: redis://dev-redis.company.com:6379
 
 logging:
   level:
@@ -311,14 +312,29 @@ server:
 drools:
   rule-source: s3
   bucket-name: prod-drools-rules
+  rate-limiting:
+    requests-per-minute: 10000
+    requests-per-hour: 500000
+  cors:
+    allowed-origins: https://app.company.com,https://admin.company.com
 
-cache:
-  lru:
-    max-size: 500
-  redis:
+spring:
+  data:
+    redis:
+      timeout: ${REDIS_TIMEOUT:500ms}
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 10
+          min-idle: 2
+
+redis:
+  enabled: true
+  url: redis://prod-redis.company.com:6379
+  drl-rules:
+    ttl-minutes: 15
+  pubsub:
     enabled: true
-    url: redis://prod-redis.company.com:6379
-    connection-pool-max-size: 20
 
 thread-pools:
   rule-execution:
@@ -328,18 +344,13 @@ thread-pools:
     core-size: 10
     max-size: 30
 
-drools:
-  rate-limiting:
-    per-minute-limit: 10000
-    per-hour-limit: 500000
-  cors:
-    allowed-origins: https://app.company.com,https://admin.company.com
-
 logging:
   level:
     root: WARN
     com.company.drools: INFO
 ```
+
+> No `cache.lru.*` block exists anymore — the dead `RuleCache` (LocalLRUCache + old RedisRuleCache) was deleted on 2026-05-20. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20).
 
 ---
 
@@ -395,13 +406,13 @@ drools:
 # Multi-tier rate limiting
 drools:
   rate-limiting:
-    enabled: true
-    per-minute-limit: ${DROOLS_RATE_LIMITING_PER_MINUTE_LIMIT:1000}
-    per-hour-limit: ${DROOLS_RATE_LIMITING_PER_HOUR_LIMIT:50000}
+    enabled: ${DROOLS_RATE_LIMITING_ENABLED:true}
+    requests-per-minute: ${DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE:1000}
+    requests-per-hour: ${DROOLS_RATE_LIMITING_REQUESTS_PER_HOUR:10000}
+    burst-size: ${DROOLS_RATE_LIMITING_BURST_SIZE:100}
     max-clients: ${DROOLS_RATE_LIMITING_MAX_CLIENTS:10000}
-    client-identification: request.getRemoteAddr()  # Always uses remote IP (X-Forwarded-For ignored for security)
-    cleanup:
-      interval-minutes: 60  # Clean old entries every hour
+    cleanup-interval-minutes: ${DROOLS_RATE_LIMITING_CLEANUP_INTERVAL:5}
+    # Client identification: always uses request.getRemoteAddr() — X-Forwarded-For is ignored for security
 ```
 
 ### Admin Authentication Configuration
@@ -543,13 +554,16 @@ aws:
       backoff-multiplier: 2
       max-backoff-seconds: 30
 
-# Redis connection optimization
-cache:
-  redis:
-    connection-pool-max-size: 20
-    connection-pool-min-idle: 5
-    connection-timeout-seconds: 5
-    command-timeout-seconds: 3
+# Redis connection optimization (Spring data.redis namespace; Lettuce client)
+spring:
+  data:
+    redis:
+      timeout: ${REDIS_TIMEOUT:500ms}        # Lettuce command timeout — sits below Redis CB slowCallDurationThreshold=2s
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 5
+          min-idle: 1
 ```
 
 ---
@@ -588,22 +602,19 @@ management:
 
 ### Health Check Configuration
 
+The project exposes **two** health endpoints with different shapes:
+
+- **`GET /actuator/health`** (port 8081, Spring Boot Actuator) — auto-discovered Spring `HealthIndicator` beans (`diskSpace`, `ping`, `redis` when Redis is enabled). Configured via standard `management.health.*` keys.
+- **`GET /admin/health`** (port 8080, our custom enriched endpoint in `AdminController`) — returns `{drools, s3, redis, cache, circuit-breakers, memory}` components with details. **Not configurable via `management.health.*`** — the component list is hardcoded in `AdminController`. See [10-api-reference.md](10-api-reference.md) for the response shape.
+
+Standard Spring tunables for the actuator endpoint:
+
 ```yaml
-# Health check components
 management:
-  health:
-    components:
-      drools:
-        enabled: true
-      storage:
-        enabled: true
-      cache:
-        enabled: true
-      redis:
-        enabled: true
-      circuit-breakers:
-        enabled: true
-    show-details: always
+  endpoint:
+    health:
+      show-details: when-authorized   # or 'always' / 'never'
+      show-components: always
     status:
       order: FATAL,DOWN,OUT_OF_SERVICE,UNKNOWN,UP
 ```
@@ -735,7 +746,7 @@ export REDIS_DRL_RULES_TTL_MINUTES=15
 export REDIS_PUBSUB_ENABLED=true
 export THREAD_POOL_RULE_EXECUTION_CORE_SIZE=20
 export THREAD_POOL_RULE_EXECUTION_MAX_SIZE=100
-export DROOLS_RATE_LIMITING_PER_MINUTE_LIMIT=10000
+export DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE=10000
 export DROOLS_CORS_ALLOWED_ORIGINS=https://app.company.com,https://admin.company.com
 export ADMIN_API_KEY=your-secure-api-key
 export LOGGING_LEVEL_ROOT=WARN
@@ -751,5 +762,5 @@ export LOGGING_LEVEL_COM_COMPANY_DROOLS=DEBUG
 
 ---
 
-**Last Updated**: 2026-02-26
-**Version**: 1.1.0
+**Last Updated**: 2026-05-24
+**Version**: 1.2.0

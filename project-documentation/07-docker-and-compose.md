@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, operators |
 | **Purpose** | Line-by-line walkthrough of `Dockerfile` and `docker-compose.yml` so a reader understands every flag, env var, healthcheck, and volume |
-| **Last verified against** | [`Dockerfile`](../Dockerfile), [`docker-compose.yml`](../docker-compose.yml) on 2026-05-10 |
+| **Last verified against** | [`Dockerfile`](../Dockerfile), [`docker-compose.yml`](../docker-compose.yml) on 2026-05-24 |
 | **Related docs** | [03-tech-stack.md](03-tech-stack.md), [05-environments-and-profiles.md](05-environments-and-profiles.md), [06-deployment.md](06-deployment.md), [24-jvm-optimization.md](24-jvm-optimization.md) |
 
 ---
@@ -211,11 +211,11 @@ app:
     # Redis configuration (decorator + pub/sub)
     - REDIS_ENABLED=true
     - REDIS_URL=redis://redis:6379          # ← compose-network DNS
-    - REDIS_TIMEOUT=500ms                   # Lettuce command timeout (added 2026-05-24; sits below CB slowCallDurationThreshold=2s)
     - REDIS_DRL_RULES_TTL_MINUTES=15
-    - REDIS_DRL_RULES_KEY_PREFIX=drools:rule:
     - REDIS_PUBSUB_ENABLED=true
-    - REDIS_REFRESH_CHANNEL=drools:rule:events
+    # Note: REDIS_TIMEOUT (default 500ms), REDIS_DRL_RULES_KEY_PREFIX (default drools:rule:),
+    # and REDIS_REFRESH_CHANNEL (default drools:rule:events) inherit from application.yml.
+    # Override them here if you need non-default values.
 
     # Execution
     - RULE_EXECUTION_TIMEOUT_SECONDS=30
