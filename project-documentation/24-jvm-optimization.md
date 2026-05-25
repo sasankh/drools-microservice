@@ -196,6 +196,8 @@ env:
 - **500 RPS**: <100ms P99 latency with 4GB heap
 - **1000 RPS**: <200ms P99 latency with 8GB heap
 
+> **Measured numbers (Phase 9 load test, 2026-05-23)**: with default Docker JAVA_OPTS (Xms 512m / Xmx 2g) and 3-replica nginx-balanced stack, the rule-execution path measured **518 RPS sustained, P99 = 9ms, error rate 0%** over 3000 samples — well below the conservative "Expected" projections above. See [39-load-test-findings.md](39-load-test-findings.md) for the full test matrix (single-rule + bulk + under-load convergence, Redis-fault scenarios).
+
 ## Troubleshooting
 
 ### Common Issues

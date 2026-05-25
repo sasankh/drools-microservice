@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Operators, on-call engineers, performance engineers |
 | **Purpose** | Decision-tree runbook for diagnosing and tuning performance issues. Each branch leads to a concrete tuning action. |
-| **Last verified against** | Running stack on 2026-05-10 (load-tested at 1000 rules — see [39-load-test-findings.md](39-load-test-findings.md) for measured numbers) |
+| **Last verified against** | Running stack on 2026-05-24 (load-tested at 1000 rules + 3-replica Phase 9 multi-instance harness — see [39-load-test-findings.md](39-load-test-findings.md) for measured numbers) |
 | **Related docs** | [09-environment-variables-reference.md](09-environment-variables-reference.md), [24-jvm-optimization.md](24-jvm-optimization.md), [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md), [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md), [30-runbooks-and-monitoring.md](30-runbooks-and-monitoring.md), [39-load-test-findings.md](39-load-test-findings.md) |
 
 ---
@@ -519,13 +519,14 @@ This still recompiles the **full rule set** (Drools 10 has no public per-rule in
 | Metric | Target | Achieved (sample-rules workload) |
 |---|---|---|
 | P50 latency, cached rule | < 10ms | 1-5ms |
-| P99 latency, cached rule | < 100ms | 5-40ms |
+| P99 latency, cached rule | < 100ms | 9ms (Phase 9 single-replica), 10ms (3-replica cache-only) |
 | P99 latency, cache miss | < 500ms | < 100ms (LocalStack) |
-| Sustained RPS per replica | 100-1000 | 45+ tested, more is plausible |
+| Sustained RPS per replica | 100-1000 | 518 RPS (Phase 9 single-replica, 0% errors over 3000 samples) |
 | Redis cache hit rate (when `REDIS_ENABLED=true`) | > 90% on multi-instance | depends on fan-out activity; see `drools.cache.hit{layer=redis}` Micrometer counter; the pre-2026-05-20 "~95%" figure was for the deleted LRU and is no longer meaningful |
 | Startup time | < 60s | ~1.3s for sample workload |
-| Memory baseline | stable | yes (KieContainer disposal fix verified) |
+| Memory baseline | stable | yes (Drools 10 `updateToVersion` + `removeKieModule` pattern verified by Phase 9 long-running load test) |
 | GC pause P99 | < 200ms | yes with default G1GC config |
+| Pub/sub convergence (single-rule refresh, 3-replica) | < 2000ms | max 47ms across 3 sibling instances (Phase 9.3) |
 
 If you're hitting these on synthetic load but the production workload is failing, the workload is probably not what you think. Profile first.
 
