@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, operators, AI agents (the lookup table for "what env var controls X?") |
 | **Purpose** | Exhaustive catalog of every environment variable the code reads. The single source of truth for runtime configuration. |
-| **Last verified against** | [`application.yml`](../src/main/resources/application.yml) and `@Value` annotations in `src/main/java/com/company/drools/config/` on 2026-05-10 |
+| **Last verified against** | [`application.yml`](../src/main/resources/application.yml) and `@Value` annotations in `src/main/java/com/company/drools/config/` on 2026-05-24 |
 | **Related docs** | [05-environments-and-profiles.md](05-environments-and-profiles.md), [08-configuration.md](08-configuration.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
@@ -99,7 +99,7 @@ All values are seconds.
 | `DROOLS_HTTP_READ_TIMEOUT` | `30` | HTTP client read timeout. |
 | `DROOLS_RULE_EXECUTION_TIMEOUT` | `30` | Same as `RULE_EXECUTION_TIMEOUT_SECONDS` — both bind to `drools.timeout.rule-execution`. **Use only one to avoid confusion.** |
 | `DROOLS_STORAGE_OPERATION_TIMEOUT` | `60` | Time the storage layer (S3 / file / memory) has to complete a fetch. |
-| `DROOLS_CACHE_OPERATION_TIMEOUT` | `5` | Time a cache (LRU / Redis) operation has to complete. |
+| `DROOLS_CACHE_OPERATION_TIMEOUT` | `5` | Time a Redis cache operation has to complete (legacy umbrella; the Lettuce-level cap is `REDIS_TIMEOUT=500ms`, which fires first in practice). |
 
 > **Profile-specific overrides** (see [05-environments-and-profiles.md](05-environments-and-profiles.md)):
 > - `dev`: HTTP=5/15, rule-exec=15, storage=30, cache=3 — tighter; fail fast in development.
@@ -246,7 +246,7 @@ Refactored 2026-05-20 — see [ADR-016](36-architecture-decision-records.md#adr-
 | `AWS_S3_CONNECTION_TIMEOUT` | `10` | Connection-establish timeout (seconds). |
 | `AWS_S3_SOCKET_TIMEOUT` | `60` | Socket read timeout (seconds). |
 
-> The `dev` profile also reads `AWS_ACCESS_KEY_ID_DEV` / `AWS_SECRET_ACCESS_KEY_DEV` (defaulting to `test`/`test`) — see [application.yml:220-221](../src/main/resources/application.yml#L220-L221).
+> The `dev` profile also reads `AWS_ACCESS_KEY_ID_DEV` / `AWS_SECRET_ACCESS_KEY_DEV` (defaulting to `test`/`test`) — see [application.yml:228-229](../src/main/resources/application.yml#L228-L229).
 
 ---
 

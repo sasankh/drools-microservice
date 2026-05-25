@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | External integrators, partner application developers |
 | **Purpose** | How to call this service from a client application — language-agnostic patterns plus copy-paste examples in curl, Python, Java, and Node.js |
-| **Last verified against** | Live stack on 2026-05-10 |
+| **Last verified against** | Live stack on 2026-05-24 |
 | **Related docs** | [10-api-reference.md](10-api-reference.md), [12-error-code-catalog.md](12-error-code-catalog.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md), [15-admin-authentication.md](15-admin-authentication.md) |
 
 ---

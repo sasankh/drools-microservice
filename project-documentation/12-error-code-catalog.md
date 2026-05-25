@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, operators, partners, AI agents |
 | **Purpose** | Single-page reference for every error code the service emits — what triggers it, what the response looks like, how to fix it |
-| **Last verified against** | [`GlobalExceptionHandler.java`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java), [`RateLimitingFilter.java`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java), [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java), [`RequestSizeValidationFilter.java`](../src/main/java/com/company/drools/api/filter/RequestSizeValidationFilter.java) on 2026-05-10 |
+| **Last verified against** | [`GlobalExceptionHandler.java`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java), [`RateLimitingFilter.java`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java), [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java), [`RequestSizeValidationFilter.java`](../src/main/java/com/company/drools/api/filter/RequestSizeValidationFilter.java) on 2026-05-24 |
 | **Related docs** | [10-api-reference.md](10-api-reference.md), [11-integration-guide.md](11-integration-guide.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md), [31-troubleshooting.md](31-troubleshooting.md) |
 
 ---
@@ -72,7 +72,7 @@ curl -X POST http://localhost:8080/execute-rule \
 }
 ```
 
-**Code path**: [`GlobalExceptionHandler.java:22-31`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L22-L31). Triggered by [`RuleNotFoundException`](../src/main/java/com/company/drools/api/exception/RuleNotFoundException.java) thrown from `DroolsEngineService.executeRule()` when `loadedRules.get(ruleId) == null`.
+**Code path**: [`GlobalExceptionHandler.java:26-35`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L26-L35). Triggered by [`RuleNotFoundException`](../src/main/java/com/company/drools/api/exception/RuleNotFoundException.java) thrown from `DroolsEngineService.executeRule()` when `loadedRules.get(ruleId) == null`.
 
 **Fix**:
 1. Verify the rule exists in storage:
@@ -105,7 +105,7 @@ curl -X POST http://localhost:8080/execute-rule \
 }
 ```
 
-> Note: the *internal* error message is logged with full detail server-side; the client gets a generic message. This is intentional (avoids leaking internal class names, line numbers, etc.). See `LogSanitizer` integration in [`GlobalExceptionHandler.java:36-44`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L36-L44).
+> Note: the *internal* error message is logged with full detail server-side; the client gets a generic message. This is intentional (avoids leaking internal class names, line numbers, etc.). See `LogSanitizer` integration in [`GlobalExceptionHandler.java:37-48`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L37-L48).
 
 **Common causes**:
 - Rule's `then` block threw a `NullPointerException` because input data is missing a key the rule reads. Always null-check in DRL: `eval($data.get("amount") != null)`.
@@ -128,8 +128,8 @@ curl -X POST http://localhost:8080/execute-rule \
 ## INVALID_INPUT (400)
 
 **When**: Request validation failed. Two distinct triggers:
-1. **Bean validation** ([`MethodArgumentNotValidException`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L46-L60)) — `@ValidRuleId`, `@ValidRuleData`, or other JSR-380 annotations rejected the input.
-2. **`IllegalArgumentException`** ([line 98-107](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L98-L107)) — typically from path-traversal checks in storage layer or other defensive validation.
+1. **Bean validation** ([`MethodArgumentNotValidException`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L50-L65)) — `@ValidRuleId`, `@ValidRuleData`, or other JSR-380 annotations rejected the input.
+2. **`IllegalArgumentException`** ([line 103-112](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L103-L112)) — typically from path-traversal checks in storage layer or other defensive validation.
 
 **Response (validation)**:
 ```json
@@ -184,7 +184,7 @@ curl -X POST http://localhost:8080/execute-rule \
 }
 ```
 
-**Code path**: [`AdminAuthFilter.java:74-92`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java#L74-L92). Filter intercepts requests where `uri.startsWith("/admin/")` and compares the `X-Admin-API-Key` header to the configured value.
+**Code path**: [`AdminAuthFilter.java:74-93`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java#L74-L93). Filter intercepts requests where `uri.startsWith("/admin/")` and compares the `X-Admin-API-Key` header to the configured value.
 
 **Fix**:
 - Include the header on every admin request:
@@ -213,7 +213,7 @@ curl -X POST http://localhost:8080/execute-rule \
 }
 ```
 
-**Code path**: [`GlobalExceptionHandler.java:131-141`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L131-L141). Spring Boot 3.x throws `NoResourceFoundException` for unhandled paths; we map it to a clean error envelope.
+**Code path**: [`GlobalExceptionHandler.java:159-169`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L159-L169). Spring Boot 3.x throws `NoResourceFoundException` for unhandled paths; we map it to a clean error envelope.
 
 **Common causes**:
 - Typo in the URL (e.g., `/exec-rule` instead of `/execute-rule`).
@@ -241,7 +241,7 @@ curl -X POST http://localhost:8080/execute-rule \
 }
 ```
 
-**Code path**: [`GlobalExceptionHandler.java:62-75`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L62-L75). Triggered by [`TimeoutException`](../src/main/java/com/company/drools/api/exception/TimeoutException.java) which carries the operation name and timeout value.
+**Code path**: [`GlobalExceptionHandler.java:67-80`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L67-L80). Triggered by [`TimeoutException`](../src/main/java/com/company/drools/api/exception/TimeoutException.java) which carries the operation name and timeout value.
 
 In rule execution, the timeout is enforced via `CompletableFuture.get(timeoutSeconds, SECONDS)` in [`RuleExecutor`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java). On timeout, `future.cancel(true)` is called to interrupt the rule-firing thread. The `maxRuleFirings = 10000` cap also prevents infinite-loop rules from running forever even within the timeout window.
 
@@ -267,8 +267,8 @@ In rule execution, the timeout is enforced via `CompletableFuture.get(timeoutSec
 **When**: Request body exceeds `DROOLS_VALIDATION_REQUEST_MAX_SIZE_BYTES` (default 1 MiB) OR Spring Boot's multipart caps.
 
 Two code paths emit this:
-1. **`RequestSizeValidationFilter`** ([line 82-90](../src/main/java/com/company/drools/api/filter/RequestSizeValidationFilter.java#L82-L90)) — checks Content-Length and wraps the input stream with a `SizeLimitedInputStream` for chunked transfers.
-2. **Spring Boot multipart** (`MaxUploadSizeExceededException`) — handled at [`GlobalExceptionHandler.java:109-124`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L109-L124).
+1. **`RequestSizeValidationFilter`** ([line 80-100](../src/main/java/com/company/drools/api/filter/RequestSizeValidationFilter.java#L80-L100)) — checks Content-Length and wraps the input stream with a `SizeLimitedInputStream` for chunked transfers.
+2. **Spring Boot multipart** (`MaxUploadSizeExceededException`) — handled at [`GlobalExceptionHandler.java:137-152`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L137-L152).
 
 **Response**:
 ```json
@@ -315,7 +315,7 @@ Two code paths emit this:
 - `X-RateLimit-Remaining: 0`
 - `X-RateLimit-Reset: <epoch_seconds>`
 
-**Code path**: [`RateLimitingFilter.java:115-126`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java#L115-L126). Filter writes the response directly without going through `GlobalExceptionHandler`.
+**Code path**: [`RateLimitingFilter.java:115-137`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java#L115-L137). Filter writes the response directly without going through `GlobalExceptionHandler`.
 
 **Fix**:
 - Slow down. Read `X-RateLimit-Reset` and back off until then.
@@ -347,7 +347,7 @@ Two code paths emit this:
 
 The breaker name (`s3` or `redis`) is in the message. The state is in lowercase (`open`, `half-open`).
 
-**Code path**: [`GlobalExceptionHandler.java:77-96`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L77-L96). Triggered by [`CircuitBreakerException`](../src/main/java/com/company/drools/api/exception/CircuitBreakerException.java) when `S3RuleStorage` is rejected by the S3 breaker. Note: `RedisCachedRuleStorage` Redis-op failures do NOT surface to clients — the decorator falls through to base storage silently when the Redis breaker is open.
+**Code path**: [`GlobalExceptionHandler.java:82-101`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L82-L101). Triggered by [`CircuitBreakerException`](../src/main/java/com/company/drools/api/exception/CircuitBreakerException.java) when `S3RuleStorage` is rejected by the S3 breaker. Note: `RedisCachedRuleStorage` Redis-op failures do NOT surface to clients — the decorator falls through to base storage silently when the Redis breaker is open.
 
 **Common causes**:
 - S3 rate-limited or throttling the client.
@@ -389,7 +389,7 @@ See [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.m
 }
 ```
 
-**Code path**: [`GlobalExceptionHandler.java:143-155`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L143-L155). The catch-all.
+**Code path**: [`GlobalExceptionHandler.java:171-183`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L171-L183). The catch-all.
 
 > The full stack trace is logged server-side (level `ERROR`). The client gets only a generic message. This is intentional — avoids leaking internal class names, line numbers, and stack traces to potentially-untrusted callers.
 
