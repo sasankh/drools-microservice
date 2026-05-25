@@ -522,7 +522,7 @@ This still recompiles the **full rule set** (Drools 10 has no public per-rule in
 | P99 latency, cached rule | < 100ms | 5-40ms |
 | P99 latency, cache miss | < 500ms | < 100ms (LocalStack) |
 | Sustained RPS per replica | 100-1000 | 45+ tested, more is plausible |
-| Cache hit rate | > 90% | ~95% in steady state |
+| Redis cache hit rate (when `REDIS_ENABLED=true`) | > 90% on multi-instance | depends on fan-out activity; see `drools.cache.hit{layer=redis}` Micrometer counter; the pre-2026-05-20 "~95%" figure was for the deleted LRU and is no longer meaningful |
 | Startup time | < 60s | ~1.3s for sample workload |
 | Memory baseline | stable | yes (KieContainer disposal fix verified) |
 | GC pause P99 | < 200ms | yes with default G1GC config |

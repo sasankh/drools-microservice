@@ -10,7 +10,7 @@ info:
     - **Real-time Monitoring**: Memory diagnostics with automatic warnings
     - **Security Hardened**: Admin auth, DRL sandboxing, security headers, input validation, rate limiting, CORS
     - **Production Ready**: Health monitoring, metrics, circuit breakers
-    - **Scalable**: Multi-tier caching with S3 storage backend
+    - **Scalable**: `RedisCachedRuleStorage` decorator + pub/sub fan-out (opt-in via `REDIS_ENABLED`), S3 storage backend
 
     ## Architecture
     - **Main API**: Rule execution on port 8080
@@ -26,7 +26,14 @@ info:
     - CORS configuration (empty default; wildcard only in dev profiles)
     - Sensitive data sanitization in logs
 
-    ## Recent Updates (2026-05-11)
+    ## Recent Updates (2026-05-24)
+    - **Phase 9.4 production hardening**: SCAN now wrapped in `redisCircuitBreaker` (was the lone Redis op bypassing the CB); Lettuce timeout lowered 2000ms→500ms via new `REDIS_TIMEOUT` env var; `RedisMessageListenerContainer.setRecoveryBackoff(FixedBackOff(2s, ∞))` for deterministic pub/sub re-subscribe after Redis restart. 548 unit tests (+3 SCAN-CB-wrap tests) + 14 integration tests
+    - **Phase 9 load-test harness**: 3-replica + nginx LB + Redis-kill failure-mode sub-tests in `scripts/run-load-test.sh --phase 9`
+
+    ## Previous Updates (2026-05-20)
+    - **Redis cache + pub/sub layer (ADR-016)**: `RedisCachedRuleStorage` decorator + `RuleRefreshPublisher`/`Subscriber` replace the dead `RuleCache`/`LocalLRUCache`/`RedisRuleCache` layer (~600 LOC deleted); env-var migration (`REDIS_TTL_MINUTES`→`REDIS_DRL_RULES_TTL_MINUTES`, `LRU_CACHE_MAX_SIZE` removed; added `REDIS_DRL_RULES_KEY_PREFIX`, `REDIS_PUBSUB_ENABLED`, `REDIS_REFRESH_CHANNEL`). `/admin/rules` `cached` boolean field dropped (was always meaningless)
+
+    ## Previous Updates (2026-05-11)
     - **Sonar Quality Gates**: Maintainability 0, Reliability 0, Security Hotspots 0 — Quality Gate OK
     - **ReDoS Fixes**: CorsConfig regex split + DrlSanitizer IMPORT_PATTERN possessive quantifiers (S5852)
 

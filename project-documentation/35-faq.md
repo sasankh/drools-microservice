@@ -410,7 +410,13 @@ Default heap: 512m-2048m. Production sizing: depends on rule count and complexit
 
 ### What's the cache hit rate?
 
-Default LRU size 100 rules. With 17 sample rules and any sustained traffic, ~95% hit rate. Larger rule sets (e.g., the 1000-rule load test) or higher refresh frequency reduce this — see [39-load-test-findings.md](39-load-test-findings.md).
+The legacy in-process LRU was removed on 2026-05-20 (ADR-016). What's left:
+
+- **`/execute-rule` path**: reads compiled rules from `kieContainer` in-memory; never consults any cache. "Hit rate" doesn't apply.
+- **Refresh / startup path** (when `REDIS_ENABLED=true`): goes through `RedisCachedRuleStorage`. Hit rate depends on whether sibling instances have populated Redis since the last refresh. Tracked via `drools.cache.hit{layer=redis}` / `drools.cache.miss{layer=redis}` Micrometer counters (visible at `/admin/health` → `components.cache.details.statistics` and `/actuator/metrics`).
+- **Multi-instance deployment**: after one task refreshes and publishes on `drools:rule:events`, sibling tasks process the event and read from a now-warm Redis. Their bulk hit counters incremented during Phase 9.2 test runs.
+
+Single-instance deployments with `REDIS_ENABLED=false` have no cache at all — base storage is consulted on every refresh. See [39-load-test-findings.md](39-load-test-findings.md) Phase 9 addendum for measured numbers.
 
 ---
 

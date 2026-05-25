@@ -433,13 +433,13 @@ File Path: "./rules/pricing/discount/vip.drl"
 
 ---
 
-### 4. Cache Layer (`com.company.drools.cache`)
+### 4. Pub/Sub Refresh Fan-Out (`com.company.drools.cache`)
 
-**Purpose**: Multi-tier caching for optimal performance and reduced S3 calls
+**Purpose**: cross-instance compiled-state coherence after a rule refresh. The `cache/` package no longer contains a cache (per ADR-016, the in-process LRU was removed 2026-05-20); the actual Redis cache lives in [`storage/RedisCachedRuleStorage.java`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java). Today's `cache/` package contains `RefreshEvent`, `RuleRefreshPublisher`, `RuleRefreshSubscriber` — the pub/sub fan-out mechanism.
 
 #### Caching Architecture
 
-**Execution path** (POST /execute-rule — LRU and Redis are NOT consulted):
+**Execution path** (POST /execute-rule — Redis is NOT consulted):
 ```
 Request for Rule ID
     ↓
@@ -542,9 +542,9 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
 - Old KieBase discarded (garbage collected)
 
 **Performance Impact**:
-- Rule compilation: 50-500ms (expensive)
-- Cached execution: 1-10ms (fast)
-- Cache hit rate: ~95% in production
+- Rule compilation: 50-500ms per rule (expensive)
+- Compiled execution (cached `kieContainer`): 1-10ms (fast)
+- Redis cache hit rate (post-2026-05-20 architecture): tracked via `drools.cache.hit{layer=redis}` Micrometer counter; depends on multi-instance fan-out activity, not a fixed steady-state number. See [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md) and [39-load-test-findings.md](39-load-test-findings.md) Phase 9 addendum.
 
 ---
 
