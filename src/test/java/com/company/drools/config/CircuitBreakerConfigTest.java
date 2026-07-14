@@ -85,6 +85,46 @@ class CircuitBreakerConfigTest {
     assertThat(cb.getState()).isEqualTo(CircuitBreaker.State.CLOSED);
   }
 
+  @Test
+  @DisplayName("redisCircuitBreaker records the 5 expected exception classes as failures")
+  void testRedisCircuitBreakerRecordsExpectedExceptions() {
+    // Guards against the Phase 9.4 bug where Lettuce's RedisCommandTimeoutException
+    // — translated to org.springframework.dao.QueryTimeoutException by Spring's
+    // LettuceExceptionConverter — was not in recordExceptions, so the CB classified
+    // timeouts as kind=successful and never tripped during a Redis outage.
+    // QueryTimeoutException is a SIBLING of RedisSystemException under DataAccessException,
+    // not a subtype, so it must be listed explicitly.
+    CircuitBreakerRegistry registry = config.circuitBreakerRegistry(meterRegistry);
+    CircuitBreaker cb = config.redisCircuitBreaker(registry);
+
+    java.util.function.Predicate<Throwable> recordPredicate =
+        cb.getCircuitBreakerConfig().getRecordExceptionPredicate();
+
+    assertThat(
+            recordPredicate.test(
+                new org.springframework.data.redis.RedisConnectionFailureException("test")))
+        .as("RedisConnectionFailureException should count as CB failure")
+        .isTrue();
+    assertThat(
+            recordPredicate.test(
+                new org.springframework.data.redis.RedisSystemException(
+                    "test", new RuntimeException())))
+        .as("RedisSystemException should count as CB failure")
+        .isTrue();
+    assertThat(
+            recordPredicate.test(
+                new org.springframework.dao.QueryTimeoutException("Redis command timed out")))
+        .as(
+            "QueryTimeoutException (Lettuce timeout via LettuceExceptionConverter) should count as CB failure")
+        .isTrue();
+    assertThat(recordPredicate.test(new java.util.concurrent.TimeoutException("test")))
+        .as("java.util.concurrent.TimeoutException should count as CB failure")
+        .isTrue();
+    assertThat(recordPredicate.test(new java.net.ConnectException("test")))
+        .as("java.net.ConnectException should count as CB failure")
+        .isTrue();
+  }
+
   private void setField(Object target, String fieldName, Object value) throws Exception {
     java.lang.reflect.Field field = target.getClass().getDeclaredField(fieldName);
     field.setAccessible(true);

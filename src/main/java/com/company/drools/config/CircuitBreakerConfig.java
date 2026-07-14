@@ -118,9 +118,17 @@ public class CircuitBreakerConfig {
                 Duration.ofSeconds(2)) // Calls slower than 2s are considered slow
             .permittedNumberOfCallsInHalfOpenState(3)
             .automaticTransitionFromOpenToHalfOpenEnabled(true)
+            // Lettuce throws io.lettuce.core.RedisCommandTimeoutException on its
+            // commandTimeout; Spring's LettuceExceptionConverter translates that to
+            // org.springframework.dao.QueryTimeoutException, NOT to RedisSystemException
+            // (they're siblings under DataAccessException, not parent-child). Without
+            // QueryTimeoutException in this allow-list, Resilience4j classifies the
+            // throw as kind=successful and the CB never trips during a Redis outage
+            // — see Phase 9.4 follow-up plan in .ai-workspace/project-plans/.
             .recordExceptions(
                 org.springframework.data.redis.RedisConnectionFailureException.class,
                 org.springframework.data.redis.RedisSystemException.class,
+                org.springframework.dao.QueryTimeoutException.class,
                 java.util.concurrent.TimeoutException.class,
                 java.net.ConnectException.class)
             .build();
