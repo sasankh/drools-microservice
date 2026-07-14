@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, operators |
 | **Purpose** | The 4 Spring profiles (`local`, `dev`, `prod`, `docker`): what each one overrides, when to use which, and the full diff table |
-| **Last verified against** | [`application.yml`](../src/main/resources/application.yml) lines 165–350 on 2026-05-10 |
+| **Last verified against** | [`application.yml`](../src/main/resources/application.yml) on 2026-05-24 |
 | **Related docs** | [06-deployment.md](06-deployment.md), [09-environment-variables-reference.md](09-environment-variables-reference.md), [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md) |
 
 ---
@@ -108,7 +108,7 @@ mvn spring-boot:run                      # default profile is `local`
 mvn spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
-**What's in the cache**: 3 sample rules hardcoded in `InMemoryRuleStorage.java`. Real rule files in `sample-rules/` are NOT loaded in this mode.
+**What's loaded**: 2 sample rules hardcoded in [`InMemoryRuleStorage.java:87-88`](../src/main/java/com/company/drools/storage/InMemoryRuleStorage.java#L87-L88) (`pricing.discount.simple`, `pricing.discount.vip`). The 17 real rule files in `sample-rules/` are NOT loaded in this mode — they're only uploaded to LocalStack S3 by `init-localstack.sh` for the `dev`/`docker` profiles.
 
 ---
 

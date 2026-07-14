@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Partners, developers, AI agents |
 | **Purpose** | Complete prose reference for every HTTP endpoint, with request/response shapes and live curl examples |
-| **Last verified against** | Controller files in [`src/main/java/com/company/drools/api/controller/`](../src/main/java/com/company/drools/api/controller/), [`api-reference/openapi.yml`](api-reference/openapi.yml) on 2026-05-10 |
+| **Last verified against** | Controller files in [`src/main/java/com/company/drools/api/controller/`](../src/main/java/com/company/drools/api/controller/), [`api-reference/openapi.yml`](api-reference/openapi.yml) on 2026-05-24 |
 | **Related docs** | [11-integration-guide.md](11-integration-guide.md), [12-error-code-catalog.md](12-error-code-catalog.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md), [15-admin-authentication.md](15-admin-authentication.md), [api-reference/openapi.yml](api-reference/openapi.yml) |
 
 ---
@@ -203,19 +203,17 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/health
         "rule_source": "s3",
         "s3_bucket": "local-rules",
         "s3_accessible": true,
-        "total_rules": 10
+        "total_rules": 17
       }
     },
     "cache": {
       "status": "UP",
       "details": {
+        "mode": "redis",
         "enabled": true,
-        "size": 10,
-        "max_size": 100,
         "statistics": {
           "hits": 0,
           "misses": 0,
-          "evictions": 0,
           "hit_rate": "0.00%"
         }
       }
@@ -247,7 +245,7 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/health
 - Overall `status` is `"UP"` if `drools` and `storage` are UP. `cache`, `redis`, `circuit-breakers` going DOWN does not flip the overall status (they are protection / acceleration mechanisms).
 - `cache.statistics.hit_rate` is a string (formatted percentage); `drools.cache_hit_rate` is a float.
 
-**Source**: [`AdminController.java:89-155`](../src/main/java/com/company/drools/api/controller/AdminController.java#L89-L155).
+**Source**: [`AdminController.java:113-184`](../src/main/java/com/company/drools/api/controller/AdminController.java#L113-L184).
 
 ---
 
@@ -269,7 +267,7 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/info | jq
 }
 ```
 
-**Source**: [`AdminController.java:316-325`](../src/main/java/com/company/drools/api/controller/AdminController.java#L316-L325).
+**Source**: [`AdminController.java:358-367`](../src/main/java/com/company/drools/api/controller/AdminController.java#L358-L367).
 
 ---
 
@@ -293,7 +291,6 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/rules | jq
       "last_modified": null,
       "execution_count": 0,
       "avg_execution_time_ms": 0.0,
-      "cached": true,
       "version": "1.0"
     },
     ...
@@ -308,16 +305,17 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/rules | jq
 | `last_modified` | ISO-8601 timestamp from the storage layer (S3 LastModified). **`null` if the rule has never been refetched** — it's set by storage operations, not on initial load. |
 | `execution_count` | Increments per `/execute-rule` call. Starts at 0 for unused rules. |
 | `avg_execution_time_ms` | Tracked in [`RuleMetadata`](../src/main/java/com/company/drools/core/model/RuleMetadata.java) using **incremental averaging** (Welford's method) to avoid numeric overflow. `0.0` for unused rules. |
-| `cached` | True if the rule is in `LocalLRUCache`. |
 | `version` | Source-defined version. Currently always `"1.0"` — versioning is roadmap. |
 
-**Source**: [`AdminController.java:479-520`](../src/main/java/com/company/drools/api/controller/AdminController.java#L479-L520).
+> The `cached` boolean was removed on 2026-05-20 when the dead `LocalLRUCache` layer was deleted. Cache state now lives in Redis (when `REDIS_ENABLED=true`) and is observable via `drools.cache.hit` / `drools.cache.miss` counters in `/admin/health` and `/actuator/metrics`. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20).
+
+**Source**: [`AdminController.java:530-569`](../src/main/java/com/company/drools/api/controller/AdminController.java#L530-L569).
 
 ---
 
 ### `POST /admin/refresh-rules` — Reload all rules
 
-Re-fetches all rules from storage, sandbox-scans them, recompiles, and updates the long-lived `KieContainer` in place via Drools 10's `KieContainer.updateToVersion(ReleaseId)`. Existing `/execute-rule` traffic continues during compilation — the compile happens outside the write lock, and the lock is held only briefly for the version swap. See [04-architecture.md](04-architecture.md), [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal), and [39-load-test-findings.md](39-load-test-findings.md) for measured behavior at 1000 rules.
+Pipeline: (1) `RedisCachedRuleStorage.refreshCache()` clears Redis keys matching the prefix and re-populates them from base storage (S3/file/memory) via write-through — no-op when `REDIS_ENABLED=false`; (2) the resulting `Rule` set is recompiled into a fresh versioned `KieModule` via `KieFileSystem` + `KieBuilder`; (3) `KieContainer.updateToVersion(ReleaseId)` atomically swaps under a brief write lock; (4) `KieRepository.removeKieModule(oldReleaseId)` releases the prior `ProjectClassLoader` (Drools 10 does NOT auto-clean); (5) when `REDIS_PUBSUB_ENABLED=true`, `RuleRefreshPublisher.publishBulkRefresh()` emits `{event_type: RULE_REFRESHED_BULK, source_instance_id}` to channel `drools:rule:events` so other instances reload + swap. In-flight `/execute-rule` requests keep their existing `KieBase` until session disposal. See [04-architecture.md](04-architecture.md), [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal), [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20), and [39-load-test-findings.md](39-load-test-findings.md) for measured behavior at 1000 rules.
 
 ```bash
 curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/refresh-rules | jq
@@ -354,7 +352,7 @@ curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/re
 
 > When this returns, the new rule set is live for subsequent requests. In-flight requests use whichever `KieBase` was current when the `KieSession` was created — Drools 10's `updateToVersion` is non-blocking for in-flight sessions.
 
-**Source**: [`AdminController.java:368-414`](../src/main/java/com/company/drools/api/controller/AdminController.java#L368-L414).
+**Source**: [`AdminController.java:415-461`](../src/main/java/com/company/drools/api/controller/AdminController.java#L415-L461).
 
 ---
 
@@ -399,7 +397,7 @@ curl -X POST \
 }
 ```
 
-**Source**: [`AdminController.java:417-476`](../src/main/java/com/company/drools/api/controller/AdminController.java#L417-L476).
+**Source**: [`AdminController.java:464-527`](../src/main/java/com/company/drools/api/controller/AdminController.java#L464-L527).
 
 ---
 
@@ -433,7 +431,7 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/thread-poo
 }
 ```
 
-**Source**: [`AdminController.java:328-365`](../src/main/java/com/company/drools/api/controller/AdminController.java#L328-L365).
+**Source**: [`AdminController.java:370-412`](../src/main/java/com/company/drools/api/controller/AdminController.java#L370-L412).
 
 > Use this to spot pool saturation. If `active_count` ≈ `max_size` and `queue_size` is growing, you're under-provisioned. See [26-performance-tuning-runbook.md](26-performance-tuning-runbook.md).
 
@@ -486,7 +484,7 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/memory/inf
 - Heap > 80%: `"WARNING: Heap usage above 80%"`
 - Heap > 70%: `"CAUTION: Heap usage above 70%"`
 
-**Source**: [`MemoryController.java:43-141`](../src/main/java/com/company/drools/api/controller/MemoryController.java#L43-L141). See [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md) for diagnostic flow.
+**Source**: [`MemoryController.java:49-141`](../src/main/java/com/company/drools/api/controller/MemoryController.java#L49-L141). See [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md) for diagnostic flow.
 
 ---
 
@@ -510,7 +508,7 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/memory/sna
 
 Use for time-series collection. **Don't poll `/admin/memory/info` every second** — it's heavier.
 
-**Source**: [`MemoryController.java:183-195`](../src/main/java/com/company/drools/api/controller/MemoryController.java#L183-L195).
+**Source**: [`MemoryController.java:193-205`](../src/main/java/com/company/drools/api/controller/MemoryController.java#L193-L205).
 
 ---
 
@@ -535,7 +533,7 @@ curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/me
 
 The JVM is free to ignore the request (it's a hint via `System.gc()`). Useful for forcing GC before taking a heap dump or measuring "true" working set after a load test.
 
-**Source**: [`MemoryController.java:143-181`](../src/main/java/com/company/drools/api/controller/MemoryController.java#L143-L181).
+**Source**: [`MemoryController.java:153-185`](../src/main/java/com/company/drools/api/controller/MemoryController.java#L153-L185).
 
 ---
 
@@ -552,7 +550,7 @@ These are managed by Spring Boot, not by us. Documented here for completeness.
 | `GET /actuator/prometheus` | Metrics in Prometheus format | Only present if `micrometer-registry-prometheus` is on the classpath (currently not — only `cloudwatch2`). |
 | `GET /actuator/configprops` | Resolved configuration properties | Useful for verifying which env vars / profile values are actually applied. |
 
-These run on **port 8081** (`management.server.port`). Configured exposure in [application.yml:13-24](../src/main/resources/application.yml#L13-L24):
+These run on **port 8081** (`management.server.port`). Configured exposure in [application.yml:11-24](../src/main/resources/application.yml#L11-L24):
 
 ```yaml
 management:
@@ -603,7 +601,7 @@ To verify these endpoints against your running stack:
 curl -fsS http://localhost:8080/admin/health | jq '.status'        # → "UP"
 
 # rules listed
-curl -fsS http://localhost:8080/admin/rules | jq '.total_rules'    # → 10
+curl -fsS http://localhost:8080/admin/rules | jq '.total_rules'    # → 17
 
 # basic rule execution
 curl -sX POST http://localhost:8080/execute-rule \

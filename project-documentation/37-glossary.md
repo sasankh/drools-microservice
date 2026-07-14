@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | All readers, especially AI agents looking up unfamiliar terms |
 | **Purpose** | Definitions of every Drools term, project-specific concept, and infrastructure word used in this corpus |
-| **Last updated** | 2026-05-10 |
+| **Last updated** | 2026-05-24 |
 | **Related docs** | All — this is the lookup reference |
 
 ---
@@ -96,11 +96,23 @@ The dot-separated identifier for a rule. Format: `{domain}.{category}.{specific}
 ### Rule source
 The storage backend, controlled by `RULE_SOURCE` env var. Three values: `local` (in-memory), `file` (filesystem), `s3` (AWS S3 / LocalStack). Default `local`.
 
-### LRU cache
-The in-process `Map`-based cache of **DRL source text** (`LocalLRUCache`). `@Primary` Spring bean. Stores raw `.drl` content + metadata (`Rule` objects, ~10 KB each) — **not compiled KieBases**. Used during rule refresh and startup warm-up only; the execution hot path bypasses it entirely (goes directly to `DroolsEngineService.kieContainer`). Uses **write lock on `get()`** because `LinkedHashMap` with `accessOrder=true` mutates internally on access (see ADR-004).
+### `RedisCachedRuleStorage`
+Read-through Redis cache decorator over the base `RuleStorage` (S3/local/memory). Active only when `REDIS_ENABLED=true`. Stores DRL source text (`Rule` objects) keyed `drools:rule:{ruleId}` with TTL `REDIS_DRL_RULES_TTL_MINUTES` (default 15 min). All Redis ops wrapped in a resilience4j circuit breaker; on Redis failure or breaker-open, reads fall through to the delegate. Bulk reads use Redis `SCAN`+`MGET`; refresh invalidation uses `SCAN`+`DEL`. **Not** in the execution hot path — execution reads `DroolsEngineService.kieContainer` directly. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20).
 
-### `RedisRuleCache`
-Distributed cache using Redis. Bean exists but is **dormant by default** because `LocalLRUCache` is `@Primary`. Activated when `REDIS_ENABLED=true` AND another bean is no longer marked primary. See ADR-005.
+### `RuleRefreshPublisher`
+Publishes `RefreshEvent`s to the Redis pub/sub channel (default `drools:rule:events`) when a local refresh completes. Wrapped in circuit breaker; fire-and-forget — publish failures log WARN but don't propagate. Active only when `REDIS_ENABLED=true && REDIS_PUBSUB_ENABLED=true`.
+
+### `RuleRefreshSubscriber`
+Spring `MessageListener` that receives `RefreshEvent`s and refreshes this task's `kieContainer`. Skips events from its own instance (per-instance UUID dedup via `droolsInstanceId` bean). For `RULE_REFRESHED`, fetches the rule from `RuleStorage` (Redis is already populated by the publisher) and calls `DroolsEngineService.loadOrReplaceRule()`. For `RULE_REFRESHED_BULK`, calls `loadRules(getAllRules())`. For `RULE_DELETED`, logs INFO (auto-deletion deferred to a future iteration).
+
+### `RefreshEvent`
+JSON event published on `drools:rule:events`. Fields: `event` (enum: `RULE_REFRESHED` / `RULE_REFRESHED_BULK` / `RULE_DELETED`), `rule_id`, `source_instance_id` (UUID), `timestamp`. Schema is part of the cross-service contract — see [04-architecture.md](04-architecture.md).
+
+### LRU cache (historical)
+Refers to the deleted `LocalLRUCache` class. Was the in-process `LinkedHashMap`-based cache of DRL source text. Removed on 2026-05-20 — see [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20). Mentioned in older ADRs (004) and historical changelog entries.
+
+### `RedisRuleCache` (historical)
+Refers to the deleted `RedisRuleCache` class. Was the `@ConditionalOnProperty("redis.enabled")` bean that implemented the `RuleCache` interface but was never actually injected (LocalLRUCache was `@Primary`). Replaced by `RedisCachedRuleStorage` on 2026-05-20 — see [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20).
 
 ### `DrlSanitizer`
 The text-level scanner that rejects DRL content with dangerous imports/classes/methods/`eval()`. Defined in [`DrlSanitizer.java`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java). See [16-drl-sandboxing.md](16-drl-sandboxing.md).

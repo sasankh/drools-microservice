@@ -6,9 +6,7 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-import com.company.drools.cache.CacheStatistics;
-import com.company.drools.cache.RedisRuleCache;
-import com.company.drools.cache.RuleCache;
+import com.company.drools.cache.RuleRefreshPublisher;
 import com.company.drools.config.ThreadPoolConfig;
 import com.company.drools.core.engine.DroolsEngineService;
 import com.company.drools.core.model.Rule;
@@ -19,7 +17,6 @@ import com.company.drools.storage.StorageFactory;
 import com.company.drools.testutil.ValidationConfigTestHelper;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,7 +42,7 @@ class AdminControllerTest {
 
   @Mock private DroolsEngineService droolsEngineService;
   @Mock private StorageFactory storageFactory;
-  @Mock private RuleCache ruleCache;
+  @Mock private RuleRefreshPublisher refreshPublisher;
   @Mock private ThreadPoolConfig threadPoolConfig;
   @Mock private RuleStorage mockStorage;
 
@@ -60,13 +57,15 @@ class AdminControllerTest {
         new AdminController(
             droolsEngineService,
             storageFactory,
-            ruleCache,
             meterRegistry,
             threadPoolConfig,
             null,
             null,
             null,
-            null);
+            null,
+            refreshPublisher);
+    // Default: redis disabled — cache section in /admin/health reports "off"
+    ReflectionTestUtils.setField(adminController, "redisEnabled", false);
 
     // Create a Spring context with ValidationConfig so @ValidRuleId validator works.
     // The SpringConstraintValidatorFactory allows Hibernate Validator to inject Spring beans
@@ -90,14 +89,6 @@ class AdminControllerTest {
 
     // Default: storageFactory returns our mock storage
     lenient().when(storageFactory.createRuleStorage()).thenReturn(mockStorage);
-
-    // Default cache behavior
-    lenient().when(ruleCache.isEnabled()).thenReturn(true);
-    lenient().when(ruleCache.size()).thenReturn(5L);
-    lenient().when(ruleCache.maxSize()).thenReturn(100L);
-    lenient()
-        .when(ruleCache.getStatistics())
-        .thenReturn(new CacheStatistics(80, 20, 2, 5, 100, Instant.now()));
   }
 
   // ===== Health Check Tests (6) =====
@@ -160,25 +151,19 @@ class AdminControllerTest {
 
   @Test
   @DisplayName("Health: cache DOWN does not affect overall status")
-  void testHealth_CacheDown_DoesNotAffectOverallStatus() throws Exception {
-    // Given - drools and storage are healthy
+  void testHealth_CacheDisabled_ReportsOff() throws Exception {
+    // Given - drools and storage are healthy, Redis disabled (default in setUp)
     when(droolsEngineService.getLoadedRulesCount()).thenReturn(5);
     when(droolsEngineService.getActiveRulesCount()).thenReturn(5L);
     when(mockStorage.getTotalRuleCount()).thenReturn(5L);
 
-    // Cache: isEnabled() returns true for checkDroolsHealth -> calculateCacheHitRate,
-    // but then checkCacheHealth sees size() throw
-    when(ruleCache.isEnabled()).thenReturn(true);
-    when(ruleCache.getStatistics())
-        .thenReturn(new CacheStatistics(80, 20, 2, 5, 100, Instant.now()));
-    when(ruleCache.size()).thenThrow(new RuntimeException("Cache connection lost"));
-
-    // When/Then - overall should still be UP because cache is non-critical
+    // When/Then - cache section reports off when Redis is disabled, overall stays UP
     mockMvc
         .perform(get("/admin/health"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.status").value("UP"))
-        .andExpect(jsonPath("$.components.cache.status").value("DOWN"))
+        .andExpect(jsonPath("$.components.cache.details.enabled").value(false))
+        .andExpect(jsonPath("$.components.cache.details.mode").value("off"))
         .andExpect(jsonPath("$.components.drools.status").value("UP"));
   }
 
@@ -217,15 +202,10 @@ class AdminControllerTest {
         .andExpect(jsonPath("$.timestamp").exists())
         .andExpect(jsonPath("$.components.drools.details.loaded_rules").value(10))
         .andExpect(jsonPath("$.components.drools.details.active_rules").value(8))
-        .andExpect(jsonPath("$.components.drools.details.cache_hit_rate").value(0.8))
+        .andExpect(jsonPath("$.components.drools.details.cache_hit_rate").value(0.0))
         .andExpect(jsonPath("$.components.storage.details.total_rules").value(10))
-        .andExpect(jsonPath("$.components.cache.details.enabled").value(true))
-        .andExpect(jsonPath("$.components.cache.details.size").value(5))
-        .andExpect(jsonPath("$.components.cache.details.max_size").value(100))
-        .andExpect(jsonPath("$.components.cache.details.statistics").exists())
-        .andExpect(jsonPath("$.components.cache.details.statistics.hits").value(80))
-        .andExpect(jsonPath("$.components.cache.details.statistics.misses").value(20))
-        .andExpect(jsonPath("$.components.cache.details.statistics.evictions").value(2));
+        .andExpect(jsonPath("$.components.cache.details.enabled").value(false))
+        .andExpect(jsonPath("$.components.cache.details.mode").value("off"));
   }
 
   // ===== Rule Management Tests (5) =====
@@ -248,10 +228,10 @@ class AdminControllerTest {
         .andExpect(jsonPath("$.rules_failed").value(0))
         .andExpect(jsonPath("$.errors", hasSize(0)));
 
-    // Verify cache was cleared before reload
-    verify(ruleCache).clear();
-    // Verify cache was warmed up with new rules
-    verify(ruleCache).warmUp(List.of(rule1, rule2));
+    // Verify storage cache was invalidated before reload (decorator no-op when Redis off)
+    verify(mockStorage).refreshCache();
+    // Verify pub/sub fan-out (no-op when publisher null, but here it's mocked)
+    verify(refreshPublisher).publishBulkRefresh();
   }
 
   @Test
@@ -304,9 +284,10 @@ class AdminControllerTest {
     // Verify the merge primitive was used, not the full-replace loadRules.
     verify(droolsEngineService).loadOrReplaceRule(rule);
     verify(droolsEngineService, never()).loadRules(anyList());
-    // Verify cache was invalidated and re-populated
-    verify(ruleCache).remove(ruleId);
-    verify(ruleCache).put(rule);
+    // Verify storage cache was invalidated (decorator no-op when Redis off)
+    verify(mockStorage).refreshRule(ruleId);
+    // Verify pub/sub fan-out
+    verify(refreshPublisher).publishRefresh(ruleId);
   }
 
   @Test
@@ -344,11 +325,11 @@ class AdminControllerTest {
     // When
     mockMvc.perform(post("/admin/refresh-rules/{ruleId}", ruleId)).andExpect(status().isOk());
 
-    // Then - cache invalidate → engine merge → cache repopulate, in that order
-    InOrder inOrder = inOrder(ruleCache, droolsEngineService);
-    inOrder.verify(ruleCache).remove(ruleId);
+    // Then - storage invalidate → engine merge → publisher fan-out, in that order
+    InOrder inOrder = inOrder(mockStorage, droolsEngineService, refreshPublisher);
+    inOrder.verify(mockStorage).refreshRule(ruleId);
     inOrder.verify(droolsEngineService).loadOrReplaceRule(rule);
-    inOrder.verify(ruleCache).put(rule);
+    inOrder.verify(refreshPublisher).publishRefresh(ruleId);
   }
 
   // ===== Listing & Info Tests (4) =====
@@ -379,8 +360,6 @@ class AdminControllerTest {
             50,
             8.3));
     when(droolsEngineService.getAllRuleMetadata()).thenReturn(allMetadata);
-    when(ruleCache.contains("pricing.discount.simple")).thenReturn(true);
-    when(ruleCache.contains("pricing.discount.vip")).thenReturn(false);
 
     // When/Then
     mockMvc
@@ -390,43 +369,6 @@ class AdminControllerTest {
         .andExpect(jsonPath("$.rules", hasSize(2)))
         .andExpect(jsonPath("$.rules[?(@.rule_id=='pricing.discount.simple')]").exists())
         .andExpect(jsonPath("$.rules[?(@.rule_id=='pricing.discount.vip')]").exists());
-  }
-
-  @Test
-  @DisplayName("List rules: includes cache status per rule")
-  void testListRules_IncludesCacheStatus() throws Exception {
-    // Given
-    Map<String, RuleMetadata> allMetadata = new LinkedHashMap<>();
-    allMetadata.put(
-        "pricing.discount.simple",
-        new RuleMetadata(
-            "1.0",
-            LocalDateTime.now(),
-            LocalDateTime.now(),
-            RuleMetadata.RuleStatus.ACTIVE,
-            null,
-            100,
-            15.2));
-    allMetadata.put(
-        "pricing.discount.vip",
-        new RuleMetadata(
-            "2.0",
-            LocalDateTime.now(),
-            LocalDateTime.now(),
-            RuleMetadata.RuleStatus.ACTIVE,
-            null,
-            50,
-            8.3));
-    when(droolsEngineService.getAllRuleMetadata()).thenReturn(allMetadata);
-    when(ruleCache.contains("pricing.discount.simple")).thenReturn(true);
-    when(ruleCache.contains("pricing.discount.vip")).thenReturn(false);
-
-    // When/Then - verify cached flag is present per rule
-    mockMvc
-        .perform(get("/admin/rules"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.rules[?(@.rule_id=='pricing.discount.simple')].cached").value(true))
-        .andExpect(jsonPath("$.rules[?(@.rule_id=='pricing.discount.vip')].cached").value(false));
   }
 
   @Test
@@ -671,8 +613,8 @@ class AdminControllerTest {
   }
 
   @Test
-  @DisplayName("Health: Redis with RedisRuleCache shows cache_type in details")
-  void testHealth_RedisWithRedisRuleCache_ShowsCacheType() throws Exception {
+  @DisplayName("Health: Redis enabled shows cache_decorator label in redis details")
+  void testHealth_RedisEnabled_ShowsCacheDecorator() throws Exception {
     // Given - healthy drools and storage
     when(droolsEngineService.getLoadedRulesCount()).thenReturn(5);
     when(droolsEngineService.getActiveRulesCount()).thenReturn(5L);
@@ -686,27 +628,18 @@ class AdminControllerTest {
     when(mockConnection.ping()).thenReturn("PONG");
     ReflectionTestUtils.setField(adminController, "redisConnectionFactory", mockFactory);
 
-    // Replace ruleCache with a mock RedisRuleCache to trigger the instanceof check
-    RedisRuleCache mockRedisCache = mock(RedisRuleCache.class);
-    lenient().when(mockRedisCache.isEnabled()).thenReturn(true);
-    lenient().when(mockRedisCache.size()).thenReturn(10L);
-    lenient().when(mockRedisCache.maxSize()).thenReturn(1000L);
-    lenient()
-        .when(mockRedisCache.getStatistics())
-        .thenReturn(new CacheStatistics(50, 10, 1, 10, 1000, Instant.now()));
-    ReflectionTestUtils.setField(adminController, "ruleCache", mockRedisCache);
-
     try {
-      // When/Then
       mockMvc
           .perform(get("/admin/health"))
           .andExpect(status().isOk())
           .andExpect(jsonPath("$.components.redis.status").value("UP"))
           .andExpect(jsonPath("$.components.redis.details.connected").value(true))
-          .andExpect(jsonPath("$.components.redis.details.cache_type").value("RedisRuleCache"));
+          .andExpect(
+              jsonPath("$.components.redis.details.cache_decorator")
+                  .value("RedisCachedRuleStorage"))
+          .andExpect(jsonPath("$.components.cache.details.enabled").value(true))
+          .andExpect(jsonPath("$.components.cache.details.mode").value("redis"));
     } finally {
-      // Restore original ruleCache
-      ReflectionTestUtils.setField(adminController, "ruleCache", ruleCache);
       ReflectionTestUtils.setField(adminController, "redisEnabled", false);
       ReflectionTestUtils.setField(adminController, "redisConnectionFactory", null);
     }
@@ -830,9 +763,9 @@ class AdminControllerTest {
         .andExpect(jsonPath("$.status").value("error"))
         .andExpect(jsonPath("$.error").value("Failed to compile rule"));
 
-    // Verify cache was invalidated but NOT re-populated
-    verify(ruleCache).remove(ruleId);
-    verify(ruleCache, never()).put(org.mockito.ArgumentMatchers.<Rule>any());
+    // Verify storage cache was invalidated but pub/sub NOT fired (refresh failed)
+    verify(mockStorage).refreshRule(ruleId);
+    verify(refreshPublisher, never()).publishRefresh(anyString());
   }
 
   @Test
@@ -894,13 +827,12 @@ class AdminControllerTest {
   }
 
   @Test
-  @DisplayName("Refresh all rules: cache disabled skips warmUp")
-  void testRefreshAllRules_CacheDisabled_SkipsWarmUp() throws Exception {
+  @DisplayName("Refresh all rules: storage.refreshCache called once before reload")
+  void testRefreshAllRules_InvalidatesCacheOnce() throws Exception {
     // Given
     Rule rule1 = createTestRule("pricing.discount.simple");
     when(mockStorage.getAllRules()).thenReturn(List.of(rule1));
     when(droolsEngineService.loadRules(anyList())).thenReturn(true);
-    when(ruleCache.isEnabled()).thenReturn(false);
 
     // When/Then
     mockMvc
@@ -909,9 +841,9 @@ class AdminControllerTest {
         .andExpect(jsonPath("$.status").value("completed"))
         .andExpect(jsonPath("$.rules_loaded").value(1));
 
-    // Verify cache.clear() was called but warmUp was NOT called
-    verify(ruleCache).clear();
-    verify(ruleCache, never()).warmUp(anyList());
+    // Verify storage.refreshCache() called once and refreshPublisher fired
+    verify(mockStorage, times(1)).refreshCache();
+    verify(refreshPublisher, times(1)).publishBulkRefresh();
   }
 
   // ===== List Rules Error Tests =====
@@ -982,15 +914,12 @@ class AdminControllerTest {
   // ===== Cache Disabled Tests =====
 
   @Test
-  @DisplayName("Health: cache disabled shows hit_rate 0.0 in drools details")
+  @DisplayName("Health: cache disabled (Redis off) shows hit_rate 0.0 in drools details")
   void testHealth_CacheDisabled_ShowsZeroHitRate() throws Exception {
-    // Given
+    // Given - default setUp already has redisEnabled=false
     when(droolsEngineService.getLoadedRulesCount()).thenReturn(5);
     when(droolsEngineService.getActiveRulesCount()).thenReturn(5L);
     when(mockStorage.getTotalRuleCount()).thenReturn(5L);
-    when(ruleCache.isEnabled()).thenReturn(false);
-    when(ruleCache.size()).thenReturn(0L);
-    when(ruleCache.maxSize()).thenReturn(100L);
 
     // When/Then
     mockMvc
@@ -998,6 +927,7 @@ class AdminControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.components.drools.details.cache_hit_rate").value(0.0))
         .andExpect(jsonPath("$.components.cache.details.enabled").value(false))
+        .andExpect(jsonPath("$.components.cache.details.mode").value("off"))
         .andExpect(jsonPath("$.components.cache.details.statistics").doesNotExist());
   }
 

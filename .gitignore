@@ -89,3 +89,8 @@ scripts/load-test-results/
 # Each developer creates their own; see CLAUDE.md "SonarQube MCP" note
 # and .env.example "SONARQUBE MCP" section for setup instructions.
 .mcp.json
+
+# Claude Code local state — per-session lock files + personal settings overrides.
+# .claude/settings.json IS tracked (shared config); these are not.
+.claude/scheduled_tasks.lock
+.claude/settings.local.json

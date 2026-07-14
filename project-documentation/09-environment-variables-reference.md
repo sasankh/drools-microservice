@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, operators, AI agents (the lookup table for "what env var controls X?") |
 | **Purpose** | Exhaustive catalog of every environment variable the code reads. The single source of truth for runtime configuration. |
-| **Last verified against** | [`application.yml`](../src/main/resources/application.yml) and `@Value` annotations in `src/main/java/com/company/drools/config/` on 2026-05-10 |
+| **Last verified against** | [`application.yml`](../src/main/resources/application.yml) and `@Value` annotations in `src/main/java/com/company/drools/config/` on 2026-05-24 |
 | **Related docs** | [05-environments-and-profiles.md](05-environments-and-profiles.md), [08-configuration.md](08-configuration.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
@@ -38,13 +38,13 @@ When this doc says "Default", it means the value used if nothing higher-priority
 - [CORS](#cors) (5 vars)
 - [Rate limiting](#rate-limiting) (6 vars)
 - [Admin authentication](#admin-authentication) (1 var)
-- [Redis](#redis) (3 vars)
+- [Redis](#redis) (7 vars)
 - [AWS](#aws) (6 vars)
 - [Logging](#logging) (1 var)
 - [Metrics](#metrics) (2 vars)
 - [Drools system properties](#drools-system-properties) (3, JVM-args only)
 
-**Total: 66 distinct env vars catalogued below.**
+**Total: 67 distinct env vars catalogued below.**
 
 ---
 
@@ -81,10 +81,11 @@ When this doc says "Default", it means the value used if nothing higher-priority
 
 | Variable | Default | Type | What it controls |
 |---|---|---|---|
-| `LRU_CACHE_MAX_SIZE` | `100` | int | Maximum entries in [`LocalLRUCache`](../src/main/java/com/company/drools/cache/LocalLRUCache.java). LRU eviction beyond this. |
 | `RULE_EXECUTION_TIMEOUT_SECONDS` | `30` | int (seconds) | Per-execution cap. `RuleExecutor` uses this to time out rule firing via `CompletableFuture.get(...)`; on timeout it calls `future.cancel(true)`. |
 | `AUTO_REFRESH_ENABLED` | `false` | bool | If true, scheduled background reload from S3 at the interval below. Default `true` only in `prod` profile. |
 | `AUTO_REFRESH_INTERVAL_MINUTES` | `5` | int (minutes) | Refresh cadence when auto-refresh is enabled. |
+
+> `LRU_CACHE_MAX_SIZE` was removed on 2026-05-20 with the deletion of `LocalLRUCache`. Cache configuration now lives under the Redis section below. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20).
 
 ---
 
@@ -98,7 +99,7 @@ All values are seconds.
 | `DROOLS_HTTP_READ_TIMEOUT` | `30` | HTTP client read timeout. |
 | `DROOLS_RULE_EXECUTION_TIMEOUT` | `30` | Same as `RULE_EXECUTION_TIMEOUT_SECONDS` — both bind to `drools.timeout.rule-execution`. **Use only one to avoid confusion.** |
 | `DROOLS_STORAGE_OPERATION_TIMEOUT` | `60` | Time the storage layer (S3 / file / memory) has to complete a fetch. |
-| `DROOLS_CACHE_OPERATION_TIMEOUT` | `5` | Time a cache (LRU / Redis) operation has to complete. |
+| `DROOLS_CACHE_OPERATION_TIMEOUT` | `5` | Time a Redis cache operation has to complete (legacy umbrella; the Lettuce-level cap is `REDIS_TIMEOUT=500ms`, which fires first in practice). |
 
 > **Profile-specific overrides** (see [05-environments-and-profiles.md](05-environments-and-profiles.md)):
 > - `dev`: HTTP=5/15, rule-exec=15, storage=30, cache=3 — tighter; fail fast in development.
@@ -218,11 +219,19 @@ See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) for
 
 ## Redis
 
+Refactored 2026-05-20 — see [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20). When `REDIS_ENABLED=true`, `StorageFactory` wraps the base `RuleStorage` with `RedisCachedRuleStorage` (read-through cache of DRL text). When `REDIS_PUBSUB_ENABLED=true` (default when Redis is on), `RuleRefreshPublisher` emits events on `drools:rule:events` after every refresh; `RuleRefreshSubscriber` receives and refreshes this task's `kieContainer`.
+
 | Variable | Default | What it does |
 |---|---|---|
-| `REDIS_ENABLED` | `false` | If true, the `RedisRuleCache` bean is wired (it's `@ConditionalOnProperty(name = "redis.enabled", havingValue = "true")`). However, `LocalLRUCache` is `@Primary`, so Redis is dormant by default even when the bean exists. See [ADR-005](36-architecture-decision-records.md). |
+| `REDIS_ENABLED` | `false` | If true, the storage chain is wrapped with `RedisCachedRuleStorage`. When false, the service goes directly to the base storage with no caching. |
 | `REDIS_URL` | `redis://localhost:6379` | Lettuce-format URL. Examples: `redis://user:pass@host:6379`, `rediss://host:6379` (TLS). |
-| `REDIS_TTL_MINUTES` | `60` | TTL for cache entries when Redis is in use. |
+| `REDIS_DRL_RULES_TTL_MINUTES` | `15` | TTL for cached DRL rule entries. Acts as eventual-consistency ceiling for cross-service consumers (if the writer's pub/sub event is missed, stale entries expire within this window). |
+| `REDIS_DRL_RULES_KEY_PREFIX` | `drools:rule:` | Key prefix for cached rule entries. Namespaced to support future Redis uses by this service. |
+| `REDIS_PUBSUB_ENABLED` | `true` (when Redis on) | Enables `RuleRefreshPublisher` and `RuleRefreshSubscriber`. Set `false` to use Redis as cache only (no cross-task fan-out). |
+| `REDIS_REFRESH_CHANNEL` | `drools:rule:events` | Channel name for refresh events. Cross-service consumers can subscribe here. |
+| `REDIS_TIMEOUT` | `500ms` | Lettuce command timeout (`spring.data.redis.timeout`). Sits below the Redis CB `slowCallDurationThreshold=2s` so command timeouts unambiguously count as failures (not slow calls) and the CB engages cleanly during Redis outages. Lowered from `2000ms` on 2026-05-24 (Phase 9.4 follow-up); see [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md#lettuce-timeout-vs-cb-slow-call-threshold). Raise to 1000–1500ms for distant or high-latency Redis. |
+
+**Deprecated (removed 2026-05-20)**: `REDIS_TTL_MINUTES` (renamed to `REDIS_DRL_RULES_TTL_MINUTES`), `LRU_CACHE_MAX_SIZE` (`LocalLRUCache` deleted).
 
 ---
 
@@ -237,7 +246,7 @@ See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) for
 | `AWS_S3_CONNECTION_TIMEOUT` | `10` | Connection-establish timeout (seconds). |
 | `AWS_S3_SOCKET_TIMEOUT` | `60` | Socket read timeout (seconds). |
 
-> The `dev` profile also reads `AWS_ACCESS_KEY_ID_DEV` / `AWS_SECRET_ACCESS_KEY_DEV` (defaulting to `test`/`test`) — see [application.yml:220-221](../src/main/resources/application.yml#L220-L221).
+> The `dev` profile also reads `AWS_ACCESS_KEY_ID_DEV` / `AWS_SECRET_ACCESS_KEY_DEV` (defaulting to `test`/`test`) — see [application.yml:228-229](../src/main/resources/application.yml#L228-L229).
 
 ---
 

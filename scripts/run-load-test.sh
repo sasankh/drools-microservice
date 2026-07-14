@@ -38,6 +38,13 @@ source "${LIB_DIR}/refresh-loop.sh"
 source "${LIB_DIR}/single-refresh-loop.sh"
 # shellcheck source=lib/heap-dump.sh
 source "${LIB_DIR}/heap-dump.sh"
+# Phase 9 (Redis cache + pub/sub) — multi-container + convergence harness.
+# shellcheck source=lib/multi-stack.sh
+source "${LIB_DIR}/multi-stack.sh"
+# shellcheck source=lib/actuator.sh
+source "${LIB_DIR}/actuator.sh"
+# shellcheck source=lib/convergence.sh
+source "${LIB_DIR}/convergence.sh"
 
 # ----------------------------------------------------------------------------
 # Defaults (overridable via env vars; --quick scales them down)
@@ -60,6 +67,20 @@ SAFE_RPS_MIN="${SAFE_RPS_MIN:-250}"
 HEAP_DRIFT_MB_MAX="${HEAP_DRIFT_MB_MAX:-100}"
 HOT_REFRESH_P99_MULTIPLIER_MAX="${HOT_REFRESH_P99_MULTIPLIER_MAX:-2}"
 
+# Phase 9 (Redis cache + pub/sub) knobs
+PHASE9_CACHE_ONLY_MIN="${PHASE9_CACHE_ONLY_MIN:-10}"       # 9.2 load duration (min)
+PHASE9_FULL_MODE_MIN="${PHASE9_FULL_MODE_MIN:-5}"          # 9.3 background load duration (min)
+PHASE9_FAILURE_MIN="${PHASE9_FAILURE_MIN:-10}"             # 9.4 total JMeter run (min)
+PHASE9_SINGLE_ROUNDS="${PHASE9_SINGLE_ROUNDS:-10}"         # 9.3 single-rule convergence rounds
+PHASE9_BULK_ROUNDS="${PHASE9_BULK_ROUNDS:-5}"              # 9.3 bulk convergence rounds
+PHASE9_UNDER_LOAD_ROUNDS="${PHASE9_UNDER_LOAD_ROUNDS:-5}"  # 9.3 convergence rounds during load
+CONVERGENCE_DEADLINE_MS="${CONVERGENCE_DEADLINE_MS:-2000}" # per-subscriber wait deadline
+REDIS_KILL_AT_S="${REDIS_KILL_AT_S:-120}"                  # 9.4 wallclock offset for Redis kill
+REDIS_DOWN_DURATION_S="${REDIS_DOWN_DURATION_S:-120}"      # 9.4 stay-down duration before restart
+CB_OPEN_DEADLINE_S="${CB_OPEN_DEADLINE_S:-30}"             # 9.4 must-open-by deadline
+CB_CLOSE_DEADLINE_S="${CB_CLOSE_DEADLINE_S:-90}"           # 9.4 must-close-by deadline (after restart)
+PHASE9_4_RECOVERY_SETTLE_S="${PHASE9_4_RECOVERY_SETTLE_S:-10}"  # 9.4 sleep after CB-closed before firing post-restart convergence round, so the listener's 2s FixedBackOff retry cycle completes re-subscription before the publish lands. Default 10s based on observed Spring Data Redis recovery time; tune down if your Redis stack reconnects faster.
+
 # Run-mode flags
 PHASE_FILTER=""
 FROM_PHASE=""
@@ -74,14 +95,15 @@ usage() {
 Usage: $(basename "$0") [options]
 
 Options:
-  --phase N         Run only phase N (2..8). Skips preflight if stack is up.
-  --from N          Resume from phase N (skip earlier phases).
+  --phase N         Run only phase N (2..8, or 9 / 9.1 / 9.2 / 9.3 / 9.4).
+                    --phase 9 runs all four Phase 9 sub-tests in sequence.
+  --from N          Resume from phase N. Accepts decimal (9.2 = run 9.2..9.4).
   --quick           Scale-down for smoke test: 100 rules, 5-min soak,
                     1-min baseline. Useful for verifying the harness itself.
   --no-cleanup      Leave the stack up after exit (skip docker compose down).
   -h, --help        Show this help.
 
-Phases:
+Phases 0-8 (existing single-container load test — see load-test-plan.md):
   0  Pre-flight checks (always runs unless --from > 0)
   2  Corpus generation + stack boot + first-refresh baseline
   3  Baseline (steady state, 50 RPS x 30 min)
@@ -93,12 +115,39 @@ Phases:
 
   (Phase 1 = Tier 1 sample-rules expansion, source-code change, not orchestrated.)
 
+Phases 9.1-9.4 (Redis cache + pub/sub validation — opt-in only):
+  9.1  Baseline regression with REDIS_ENABLED=false (single container, 30 min)
+  9.2  3-replica cache-only mode (REDIS_PUBSUB_ENABLED=false, 10 min)
+  9.3  3-replica full mode + cross-replica convergence measurement (~25 min)
+  9.4  Full mode + Redis kill/restart mid-load (failure-mode validation, ~12 min)
+  Phase 9 also writes phase-9-summary.md (in the run dir) aggregating sub-test results.
+
 Env-var knobs:
-  RULE_COUNT          1000 by default
-  SOAK_MIN            60 minutes by default
-  BASELINE_MIN        30 minutes by default
-  BASELINE_RPS        50 by default
-  RAMP_STEPS          "50,100,250,500" by default
+  RULE_COUNT                    1000 by default
+  SOAK_MIN                      60 minutes by default
+  BASELINE_MIN                  30 minutes by default
+  BASELINE_RPS                  50 by default
+  RAMP_STEPS                    "50,100,250,500" by default
+
+  Phase 9 knobs:
+  PHASE9_CACHE_ONLY_MIN         9.2 load duration (min, default 10)
+  PHASE9_FULL_MODE_MIN          9.3 background load duration (min, default 5)
+  PHASE9_FAILURE_MIN            9.4 total JMeter run (min, default 10)
+  PHASE9_SINGLE_ROUNDS          9.3 single-rule convergence rounds (default 10)
+  PHASE9_BULK_ROUNDS            9.3 bulk convergence rounds (default 5)
+  PHASE9_UNDER_LOAD_ROUNDS      9.3 convergence rounds under load (default 5)
+  CONVERGENCE_DEADLINE_MS       Per-subscriber wait deadline (default 2000)
+  REDIS_KILL_AT_S               9.4 offset for Redis kill (default 120)
+  REDIS_DOWN_DURATION_S         9.4 stay-down duration before restart (default 120)
+  CB_OPEN_DEADLINE_S            9.4 must-open-by deadline (default 30)
+  CB_CLOSE_DEADLINE_S           9.4 must-close-by deadline (default 90)
+  PHASE9_4_RECOVERY_SETTLE_S    9.4 sleep after CB-closed before convergence round
+                                 (default 10 — Spring Data Redis listener recovery
+                                  can take longer than the FixedBackOff interval alone)
+  PHASE9_4_EXERCISER_INTERVAL_S 9.4 CB-exerciser per-iteration sleep (default 1 —
+                                 lower cadence accumulates failures fast enough to
+                                 flip the 50-call CB sliding window within
+                                 CB_OPEN_DEADLINE_S)
   ... (see top of script)
 
 Output:
@@ -111,11 +160,18 @@ Output:
     summary.md         (auto-generated PASS/FAIL verdict)
 
 Examples:
-  ./scripts/run-load-test.sh                    # Full run (~6h, much unattended)
+  ./scripts/run-load-test.sh                    # Full phases 0-8 run (~6h)
   ./scripts/run-load-test.sh --quick            # Smoke test (~10 min)
   ./scripts/run-load-test.sh --phase 3          # Just baseline
   ./scripts/run-load-test.sh --from 5           # Resume from hot-refresh
   RULE_COUNT=5000 SOAK_MIN=240 ./scripts/run-load-test.sh
+
+  Phase 9 (Redis cache + pub/sub validation; opt-in):
+  ./scripts/run-load-test.sh --phase 9          # All 9.1-9.4 in sequence (~90 min)
+  ./scripts/run-load-test.sh --phase 9.1        # Single-container baseline regression
+  ./scripts/run-load-test.sh --phase 9.3        # 3-replica pub/sub convergence headline
+  ./scripts/run-load-test.sh --phase 9.4 --quick  # Quick failure-mode smoke (~5 min)
+  ./scripts/run-load-test.sh --from 9.2         # Skip 9.1, run 9.2-9.4
 EOF
 }
 
@@ -136,7 +192,16 @@ if $QUICK_MODE; then
   BASELINE_MIN=1
   HOT_REFRESH_MIN=2
   RAMP_STEP_MIN=1
+  PHASE9_CACHE_ONLY_MIN=2
+  PHASE9_FULL_MODE_MIN=1
+  PHASE9_FAILURE_MIN=4
+  REDIS_KILL_AT_S=60
+  REDIS_DOWN_DURATION_S=60
 fi
+
+# Flag preflight that Phase 9 multi-container mode (9.2/9.3/9.4) is in play, so it
+# also checks for free ports 18081/28081/38081. should_run_phase9 is safe to call here
+# even though it's defined further down — bash resolves function bodies at call time.
 
 # ----------------------------------------------------------------------------
 # Run-scoped output directory + summary state
@@ -151,10 +216,11 @@ RUN_DIR="${SCRIPT_DIR}/load-test-results/${RUN_TS}"
 
 resume_threshold=3
 should_resume=false
-if [[ -n "${PHASE_FILTER}" && "${PHASE_FILTER}" -ge "${resume_threshold}" ]]; then
+# Use integer prefix to keep bash arithmetic happy with decimal phase IDs (e.g. "9.2").
+if [[ -n "${PHASE_FILTER}" && "${PHASE_FILTER%%.*}" -ge "${resume_threshold}" ]]; then
   should_resume=true
 fi
-if [[ -n "${FROM_PHASE}" && "${FROM_PHASE}" -ge "${resume_threshold}" ]]; then
+if [[ -n "${FROM_PHASE}" && "${FROM_PHASE%%.*}" -ge "${resume_threshold}" ]]; then
   should_resume=true
 fi
 if $should_resume; then
@@ -231,10 +297,41 @@ should_run_phase() {
   if [[ -n "${PHASE_FILTER}" ]]; then
     [[ "${PHASE_FILTER}" == "${n}" ]] && return 0 || return 1
   fi
-  if [[ -n "${FROM_PHASE}" && ${n} -lt ${FROM_PHASE} ]]; then
-    return 1
+  if [[ -n "${FROM_PHASE}" ]]; then
+    # Use integer part so decimal FROM_PHASE (e.g. "9.2") still compares against integer n.
+    local from_int="${FROM_PHASE%%.*}"
+    if [[ ${n} -lt ${from_int} ]]; then
+      return 1
+    fi
+    # FROM_PHASE inside the 9.x family means "skip 0-8 entirely"; integer-phase callers
+    # should never see a 9.x FROM_PHASE asking them to run. Treat n<9 as skip.
+    if [[ ${from_int} -ge 9 && ${n} -lt 9 ]]; then
+      return 1
+    fi
   fi
   return 0
+}
+
+# Decides whether a 9.x sub-phase should run. Opt-in only: 9.x never runs unless
+# the user explicitly passed --phase 9, --phase 9.x, or --from 9[.x].
+# Args:
+#   $1 id    e.g. "9.1"
+should_run_phase9() {
+  local id="$1"
+  if [[ -n "${PHASE_FILTER}" ]]; then
+    [[ "${PHASE_FILTER}" == "${id}" || "${PHASE_FILTER}" == "9" ]] && return 0 || return 1
+  fi
+  if [[ -n "${FROM_PHASE}" ]]; then
+    local from_int="${FROM_PHASE%%.*}"
+    [[ ${from_int} -lt 9 ]] && return 1
+    # Compute decimal parts (default 0 for bare "9").
+    local from_dec=0 id_dec
+    [[ "${FROM_PHASE}" == *.* ]] && from_dec="${FROM_PHASE##*.}"
+    id_dec="${id##*.}"
+    if (( id_dec < from_dec )); then return 1; fi
+    return 0
+  fi
+  return 1
 }
 
 phase_banner() {
@@ -725,17 +822,810 @@ phase8() {
   set_phase_result phase8 PASS
 }
 
+# ============================================================================
+# Phase 9 — Redis cache + pub/sub validation
+# Opt-in only via --phase 9 / --phase 9.x / --from 9[.x].
+# See .ai-workspace/project-plans/redis-cache-layering-checklist.md section "Phase 9".
+# ============================================================================
+
+# Resolves PHASE9_CORPUS_DIR (a directory containing synthetic/ + rule-ids.csv) for the
+# corpus::upload helper. Reuses a prior corpus IFF its rule count matches RULE_COUNT;
+# otherwise (re-)generates into phase-corpus/. Idempotent — safe to call multiple times
+# in one run.
+PHASE9_CORPUS_DIR=""
+phase9::ensure_corpus() {
+  local existing rows
+  for existing in "${RUN_DIR}/phase-corpus" "${RUN_DIR}/phase-2"; do
+    if [[ -d "${existing}/synthetic" && -f "${existing}/rule-ids.csv" ]]; then
+      rows=$(($(wc -l < "${existing}/rule-ids.csv") - 1))   # subtract header
+      if [[ "${rows}" == "${RULE_COUNT}" ]]; then
+        PHASE9_CORPUS_DIR="${existing}"
+        cp -f "${existing}/rule-ids.csv" "${RULE_IDS_CSV}"
+        return 0
+      fi
+      echo "  [info] ${existing} has ${rows} rules but RULE_COUNT=${RULE_COUNT}; regenerating"
+    fi
+  done
+  PHASE9_CORPUS_DIR="${RUN_DIR}/phase-corpus"
+  rm -rf "${PHASE9_CORPUS_DIR}"
+  mkdir -p "${PHASE9_CORPUS_DIR}"
+  echo "==> Generating corpus (${RULE_COUNT} synthetic rules) for Phase 9"
+  corpus::generate "${RULE_COUNT}" "${PHASE9_CORPUS_DIR}"
+  cp -f "${PHASE9_CORPUS_DIR}/rule-ids.csv" "${RULE_IDS_CSV}"
+}
+
+# Phase 9.1 — single-container baseline regression with REDIS_ENABLED=false.
+# Acceptance: zero errors, P99 within BASELINE_P99_MS_MAX, ≥90% of expected request count.
+phase_9_1_baseline() {
+  if ! should_run_phase9 "9.1"; then return 0; fi
+  phase_banner "9.1" "Single-container baseline regression (REDIS_ENABLED=false)"
+  local pdir="${RUN_DIR}/phase-9-1"
+  # Wipe prior-run artifacts. JMeter APPENDS to .jtl files by default, so re-running
+  # without this would conflate verdicts across runs (we hit this exact bug).
+  rm -rf "${pdir}"
+  mkdir -p "${pdir}/jtl" "${pdir}/reports"
+
+  phase9::ensure_corpus
+
+  stack::down
+  stack::up_with_disabled_overlay
+  if ! stack::wait_for_health 180; then
+    set_phase_result "phase9.1" FAIL
+    echo "FAIL: stack did not become healthy" > "${pdir}/result.txt"
+    return 1
+  fi
+
+  # Sanity: if disabled-mode is wired correctly, the RedisCachedRuleStorage bean should
+  # never start. Warn (don't fail) if we see it — useful breadcrumb when the overlay misses.
+  if docker logs drools-microservice-app-1 2>&1 | grep -qi 'RedisCachedRuleStorage'; then
+    echo "  [warn] RedisCachedRuleStorage seen in app-1 logs despite REDIS_ENABLED=false — overlay merge may have failed"
+  else
+    echo "  [ok]   RedisCachedRuleStorage not loaded in disabled mode"
+  fi
+
+  corpus::clear_s3
+  corpus::upload "${PHASE9_CORPUS_DIR}"
+  echo "==> First refresh to load corpus"
+  curl -s --max-time 180 -X POST http://localhost:8080/admin/refresh-rules > "${pdir}/first-refresh.json" || true
+
+  memory_poll::start "${MEMORY_CSV}" "${MEMORY_POLL_PID}"
+  local duration_s=$(( BASELINE_MIN * 60 ))
+  local threads=$(( BASELINE_RPS / 10 )); (( threads < 5 )) && threads=5
+  if ! run_jmeter "${pdir}" "${BASELINE_RPS}" "${duration_s}" "${threads}" "baseline-disabled"; then
+    memory_poll::stop "${MEMORY_POLL_PID}"
+    set_phase_result "phase9.1" FAIL
+    echo "FAIL: jmeter run failed" > "${pdir}/result.txt"
+    return 1
+  fi
+  memory_poll::stop "${MEMORY_POLL_PID}"
+
+  local stats count p99 err_pct
+  stats=$(analyze_jtl "${pdir}/jtl/baseline-disabled.jtl")
+  echo "${stats}" > "${pdir}/stats.csv"
+  count=$(echo "${stats}" | cut -d',' -f1)
+  p99=$(echo "${stats}" | cut -d',' -f4)
+  err_pct=$(echo "${stats}" | cut -d',' -f5)
+  local min_count=$(( BASELINE_RPS * duration_s * 9 / 10 ))
+
+  local pass=true
+  local -a reasons=()
+  (( p99 > BASELINE_P99_MS_MAX )) && { pass=false; reasons+=("P99 ${p99}ms > ${BASELINE_P99_MS_MAX}ms"); }
+  if [[ "${err_pct%.*}" != "0" ]] && [[ "${err_pct}" != "0.000" ]]; then
+    pass=false; reasons+=("error rate ${err_pct}% > 0")
+  fi
+  if (( count < min_count )); then
+    pass=false; reasons+=("total ${count} < expected ${min_count} (90% of ${BASELINE_RPS} RPS × ${duration_s}s)")
+  fi
+
+  echo "  count=${count} p99=${p99}ms err=${err_pct}%"
+  if $pass; then
+    echo "PASS count=${count} p99=${p99} err=${err_pct}" > "${pdir}/result.txt"
+    set_phase_result "phase9.1" PASS
+    echo "==> Phase 9.1 PASS"
+  else
+    {
+      echo "FAIL count=${count} p99=${p99} err=${err_pct}"
+      printf -- '- %s\n' "${reasons[@]}"
+    } > "${pdir}/result.txt"
+    set_phase_result "phase9.1" FAIL
+    return 1
+  fi
+}
+
+# Phase 9.2 — 3-replica cache-only mode (REDIS_ENABLED=true, REDIS_PUBSUB_ENABLED=false).
+# Acceptance: stack runs without errors under load; Redis is actually being exercised
+# (at least one cache-related counter is non-zero on every replica); P99 ≤ 2× baseline.
+phase_9_2_cache_only() {
+  if ! should_run_phase9 "9.2"; then return 0; fi
+  phase_banner "9.2" "3-replica cache-only mode (REDIS_PUBSUB_ENABLED=false)"
+  local pdir="${RUN_DIR}/phase-9-2"
+  rm -rf "${pdir}"
+  mkdir -p "${pdir}/jtl" "${pdir}/reports"
+
+  phase9::ensure_corpus
+
+  stack::down
+  multi_stack::down
+  multi_stack::up cache-only
+  if ! multi_stack::wait_for_health 240; then
+    set_phase_result "phase9.2" FAIL
+    echo "FAIL: stack did not become healthy" > "${pdir}/result.txt"
+    return 1
+  fi
+
+  corpus::clear_s3
+  corpus::upload "${PHASE9_CORPUS_DIR}"
+
+  # CRITICAL: pub/sub is OFF here, so a single nginx-routed bulk refresh would only load
+  # rules into ONE replica — the other two would 404 every /execute-rule request and the
+  # JMeter run would post ~67% errors. Refresh each replica directly via docker exec so
+  # all three have the corpus loaded.
+  echo "==> Warming: bulk refresh on each replica directly (pub/sub is off)"
+  local i container
+  for i in 1 2 3; do
+    container=$(multi_stack::container_for_idx "${i}")
+    if multi_stack::exec_admin_post "${container}" "/admin/refresh-rules" \
+         > "${pdir}/warm-refresh-app-${i}.json"; then
+      local loaded
+      loaded=$(jq -r '.rules_loaded // empty' "${pdir}/warm-refresh-app-${i}.json" 2>/dev/null)
+      echo "  [ok]   ${container} loaded ${loaded:-?} rules"
+    else
+      echo "  [warn] refresh on ${container} did not return 2xx; load may be partial"
+    fi
+  done
+  sleep 3
+
+  # Capture per-replica forensics: snapshot Phase 9 metrics on each replica, pre-load.
+  for i in 1 2 3; do
+    actuator::snapshot_phase9_metrics \
+      "$(multi_stack::actuator_url ${i})" \
+      "${pdir}/metric-snapshot-app-${i}-pre.json"
+  done
+
+  # Sustained load through nginx.
+  memory_poll::start "${MEMORY_CSV}" "${MEMORY_POLL_PID}"
+  local duration_s=$(( PHASE9_CACHE_ONLY_MIN * 60 ))
+  local rps="${BASELINE_RPS}"
+  local threads=$(( rps / 10 )); (( threads < 5 )) && threads=5
+  run_jmeter "${pdir}" "${rps}" "${duration_s}" "${threads}" "cache-only-load" || true
+  memory_poll::stop "${MEMORY_POLL_PID}"
+
+  # Post snapshots + cross-replica Redis-touched check.
+  echo "==> Snapshotting per-replica Phase 9 metrics (post-load)"
+  {
+    echo "replica,bulk_hit,bulk_miss,hit,miss,refresh_received,refresh_published"
+    for i in 1 2 3; do
+      local url; url=$(multi_stack::actuator_url ${i})
+      actuator::snapshot_phase9_metrics "${url}" "${pdir}/metric-snapshot-app-${i}-post.json"
+      local bh bm h m rr rp
+      bh=$(actuator::counter_at "${url}" "drools.cache.bulk.hit")
+      bm=$(actuator::counter_at "${url}" "drools.cache.bulk.miss")
+      h=$(actuator::counter_at  "${url}" "drools.cache.hit" "layer:redis")
+      m=$(actuator::counter_at  "${url}" "drools.cache.miss" "layer:redis")
+      rr=$(actuator::counter_at "${url}" "drools.refresh.received")
+      rp=$(actuator::counter_at "${url}" "drools.refresh.published")
+      echo "drools-app-${i},${bh:-0},${bm:-0},${h:-0},${m:-0},${rr:-0},${rp:-0}"
+    done
+  } > "${pdir}/redis-metrics-post.csv"
+
+  # Assertion 1: every replica touched Redis at least once (bulk.hit+bulk.miss > 0).
+  local any_silent=false
+  while IFS=, read -r replica bh bm _h _m _rr _rp; do
+    [[ "${replica}" == "replica" ]] && continue
+    local sum=$(( ${bh%%.*} + ${bm%%.*} ))
+    if (( sum == 0 )); then
+      echo "  [warn] ${replica} shows zero Redis activity (bulk.hit=${bh}, bulk.miss=${bm})"
+      any_silent=true
+    fi
+  done < "${pdir}/redis-metrics-post.csv"
+
+  # Assertion 2: pub/sub was off — every replica's refresh.received should be 0.
+  local pubsub_leak=false
+  while IFS=, read -r replica _bh _bm _h _m rr _rp; do
+    [[ "${replica}" == "replica" ]] && continue
+    if (( ${rr%%.*} > 0 )); then
+      echo "  [warn] ${replica} received pub/sub events in cache-only mode (rr=${rr})"
+      pubsub_leak=true
+    fi
+  done < "${pdir}/redis-metrics-post.csv"
+
+  local stats p99 err_pct
+  stats=$(analyze_jtl "${pdir}/jtl/cache-only-load.jtl")
+  echo "${stats}" > "${pdir}/stats.csv"
+  p99=$(echo "${stats}" | cut -d',' -f4)
+  err_pct=$(echo "${stats}" | cut -d',' -f5)
+
+  local pass=true
+  local -a reasons=()
+  if $any_silent; then pass=false; reasons+=("at least one replica showed zero Redis activity"); fi
+  if $pubsub_leak; then pass=false; reasons+=("at least one replica received pub/sub events despite REDIS_PUBSUB_ENABLED=false"); fi
+  if [[ "${err_pct%.*}" != "0" ]] && [[ "${err_pct}" != "0.000" ]]; then
+    pass=false; reasons+=("load error rate ${err_pct}% > 0")
+  fi
+  local baseline_p99; baseline_p99=$(cat "${RUN_DIR}/baseline_p99_ms.txt" 2>/dev/null || echo "${BASELINE_P99_MS_MAX}")
+  local p99_max=$(( baseline_p99 * 2 ))
+  if (( p99 > p99_max )); then
+    pass=false; reasons+=("P99 ${p99}ms > 2× baseline ${baseline_p99}ms (max ${p99_max}ms)")
+  fi
+
+  echo "  P99=${p99}ms err=${err_pct}%"
+  if $pass; then
+    echo "PASS p99=${p99} err=${err_pct}" > "${pdir}/result.txt"
+    set_phase_result "phase9.2" PASS
+    echo "==> Phase 9.2 PASS"
+  else
+    {
+      echo "FAIL"
+      printf -- '- %s\n' "${reasons[@]}"
+    } > "${pdir}/result.txt"
+    set_phase_result "phase9.2" FAIL
+    return 1
+  fi
+}
+
+# Phase 9.3 — 3-replica full mode (REDIS_PUBSUB_ENABLED=true). Headline convergence test.
+# Acceptance: every convergence round (single + bulk + under-load) finishes within
+# CONVERGENCE_DEADLINE_MS for every subscriber.
+phase_9_3_full_mode() {
+  if ! should_run_phase9 "9.3"; then return 0; fi
+  phase_banner "9.3" "3-replica full mode (pub/sub convergence)"
+  local pdir="${RUN_DIR}/phase-9-3"
+  rm -rf "${pdir}"
+  mkdir -p "${pdir}/jtl" "${pdir}/reports"
+
+  phase9::ensure_corpus
+
+  stack::down
+  multi_stack::down
+  multi_stack::up full
+  if ! multi_stack::wait_for_health 240; then
+    set_phase_result "phase9.3" FAIL
+    echo "FAIL: stack did not become healthy" > "${pdir}/result.txt"
+    return 1
+  fi
+  multi_stack::wait_for_pubsub 60
+
+  corpus::clear_s3
+  corpus::upload "${PHASE9_CORPUS_DIR}"
+
+  echo "==> Warming: bulk refresh + 60s JIT-warm"
+  curl -s --max-time 180 -X POST http://localhost:8080/admin/refresh-rules > "${pdir}/warm-refresh.json" || true
+  sleep 60
+
+  # Snapshot pre.
+  local i
+  for i in 1 2 3; do
+    actuator::snapshot_phase9_metrics \
+      "$(multi_stack::actuator_url ${i})" \
+      "${pdir}/metric-snapshot-app-${i}-pre.json"
+  done
+
+  # --- Convergence: single-rule refresh ---
+  local conv_single="${pdir}/convergence-single.csv"
+  convergence::write_csv_header "${conv_single}"
+  echo "==> Convergence: ${PHASE9_SINGLE_ROUNDS} single-rule refresh rounds"
+  local single_summary
+  single_summary=$(convergence::run_rounds RULE_REFRESHED "${PHASE9_SINGLE_ROUNDS}" \
+                     "${RULE_IDS_CSV}" "${conv_single}" "${CONVERGENCE_DEADLINE_MS}") || true
+  echo "  ${single_summary}"
+
+  # --- Convergence: bulk refresh ---
+  local conv_bulk="${pdir}/convergence-bulk.csv"
+  convergence::write_csv_header "${conv_bulk}"
+  echo "==> Convergence: ${PHASE9_BULK_ROUNDS} bulk refresh rounds"
+  local bulk_summary
+  bulk_summary=$(convergence::run_rounds RULE_REFRESHED_BULK "${PHASE9_BULK_ROUNDS}" \
+                   "${RULE_IDS_CSV}" "${conv_bulk}" "${CONVERGENCE_DEADLINE_MS}") || true
+  echo "  ${bulk_summary}"
+
+  # --- Convergence under load ---
+  local conv_load="${pdir}/convergence-under-load.csv"
+  convergence::write_csv_header "${conv_load}"
+  echo "==> Convergence under load: starting ${PHASE9_FULL_MODE_MIN}-min JMeter background then ${PHASE9_UNDER_LOAD_ROUNDS} convergence rounds"
+  memory_poll::start "${MEMORY_CSV}" "${MEMORY_POLL_PID}"
+  (
+    local duration_s=$(( PHASE9_FULL_MODE_MIN * 60 ))
+    local rps=100
+    local threads=$(( rps / 10 )); (( threads < 5 )) && threads=5
+    run_jmeter "${pdir}" "${rps}" "${duration_s}" "${threads}" "full-mode-load"
+  ) &
+  local jmeter_pid=$!
+  # Stagger so JMeter ramps before we measure.
+  sleep 15
+  local load_summary
+  load_summary=$(convergence::run_rounds RULE_REFRESHED "${PHASE9_UNDER_LOAD_ROUNDS}" \
+                   "${RULE_IDS_CSV}" "${conv_load}" "${CONVERGENCE_DEADLINE_MS}") || true
+  echo "  ${load_summary}"
+  wait "${jmeter_pid}" 2>/dev/null || true
+  memory_poll::stop "${MEMORY_POLL_PID}"
+
+  # --- Self-dedup check on publisher ---
+  echo "==> Verifying skipped_self counter on publisher (app-1)"
+  local skipped_self
+  skipped_self=$(actuator::counter_at "$(multi_stack::actuator_url 1)" "drools.refresh.skipped_self")
+  skipped_self="${skipped_self:-0}"
+  local skipped_int=$(( ${skipped_self%%.*} ))
+
+  # Snapshot post.
+  for i in 1 2 3; do
+    actuator::snapshot_phase9_metrics \
+      "$(multi_stack::actuator_url ${i})" \
+      "${pdir}/metric-snapshot-app-${i}-post.json"
+  done
+
+  # --- JMeter result ---
+  local stats err_pct
+  stats=$(analyze_jtl "${pdir}/jtl/full-mode-load.jtl")
+  echo "${stats}" > "${pdir}/stats.csv"
+  err_pct=$(echo "${stats}" | cut -d',' -f5)
+
+  # --- Aggregate convergence verdict ---
+  # Parse `failures=N` from each run_rounds summary string. This captures rounds where
+  # the refresh-POST itself failed (no CSV row written) — those would be invisible to
+  # the per-row CSV awk and the phase would falsely report PASS on an empty CSV.
+  local single_fails bulk_fails load_fails
+  single_fails=$(echo "${single_summary}" | sed -n 's/.*failures=\([0-9][0-9]*\).*/\1/p')
+  bulk_fails=$(echo   "${bulk_summary}"   | sed -n 's/.*failures=\([0-9][0-9]*\).*/\1/p')
+  load_fails=$(echo   "${load_summary}"   | sed -n 's/.*failures=\([0-9][0-9]*\).*/\1/p')
+  [[ -z "${single_fails}" ]] && single_fails=999
+  [[ -z "${bulk_fails}"   ]] && bulk_fails=999
+  [[ -z "${load_fails}"   ]] && load_fails=999
+  local single_max bulk_max load_max
+  single_max=$(awk -F, 'NR>1 && $7+0>m {m=$7+0} END {print m+0}' "${conv_single}")
+  bulk_max=$(awk   -F, 'NR>1 && $7+0>m {m=$7+0} END {print m+0}' "${conv_bulk}")
+  load_max=$(awk   -F, 'NR>1 && $7+0>m {m=$7+0} END {print m+0}' "${conv_load}")
+
+  # Expected skipped_self lower bound: 1 self-event per published round (PHASE9_SINGLE_ROUNDS/3
+  # of the singles + PHASE9_BULK_ROUNDS/3 of the bulks + PHASE9_UNDER_LOAD_ROUNDS/3 land on
+  # app-1 as publisher). Tolerant lower bound is ≥1.
+  local pass=true
+  local -a reasons=()
+  if (( single_fails > 0 )); then pass=false; reasons+=("${single_fails} single convergence failures (max delta ${single_max}ms)"); fi
+  if (( bulk_fails > 0 ));   then pass=false; reasons+=("${bulk_fails} bulk convergence failures (max delta ${bulk_max}ms)"); fi
+  if (( load_fails > 0 ));   then pass=false; reasons+=("${load_fails} under-load convergence failures (max delta ${load_max}ms)"); fi
+  if [[ "${err_pct%.*}" != "0" ]] && [[ "${err_pct}" != "0.000" ]]; then
+    pass=false; reasons+=("under-load error rate ${err_pct}% > 0")
+  fi
+  if (( skipped_int < 1 )); then
+    pass=false; reasons+=("publisher's skipped_self counter is ${skipped_int}; pub/sub self-dedup did not run")
+  fi
+
+  echo "  single max=${single_max}ms fails=${single_fails} / ${PHASE9_SINGLE_ROUNDS}"
+  echo "  bulk   max=${bulk_max}ms fails=${bulk_fails} / ${PHASE9_BULK_ROUNDS}"
+  echo "  load   max=${load_max}ms fails=${load_fails} / ${PHASE9_UNDER_LOAD_ROUNDS}"
+  echo "  publisher skipped_self=${skipped_int}; under-load err=${err_pct}%"
+
+  if $pass; then
+    {
+      echo "PASS"
+      echo "single_max_ms=${single_max}  fails=${single_fails}/${PHASE9_SINGLE_ROUNDS}"
+      echo "bulk_max_ms=${bulk_max}      fails=${bulk_fails}/${PHASE9_BULK_ROUNDS}"
+      echo "load_max_ms=${load_max}      fails=${load_fails}/${PHASE9_UNDER_LOAD_ROUNDS}"
+      echo "skipped_self=${skipped_int}  err_pct=${err_pct}"
+    } > "${pdir}/result.txt"
+    set_phase_result "phase9.3" PASS
+    echo "==> Phase 9.3 PASS"
+  else
+    {
+      echo "FAIL"
+      printf -- '- %s\n' "${reasons[@]}"
+    } > "${pdir}/result.txt"
+    set_phase_result "phase9.3" FAIL
+    return 1
+  fi
+}
+
+# Reads a per-replica circuit-breaker state via actuator. Echoes one of
+# "open" / "closed" / "half_open" / "unknown". Top-level so bash 3.2 doesn't have
+# to deal with nested-function scoping quirks.
+#
+# The Micrometer-registered Resilience4j CB name for the Redis breaker is "redis"
+# (visible via `/actuator/metrics/resilience4j.circuitbreaker.state?tag=name:redis`).
+# Earlier versions queried "redisCircuitBreaker" (Spring bean name) and never matched.
+phase9_4::cb_state() {
+  local idx="$1"
+  local url; url=$(multi_stack::actuator_url "${idx}")
+  local s v
+  for s in open closed half_open; do
+    v=$(actuator::counter_at "${url}" "resilience4j.circuitbreaker.state" \
+          "name:redis,state:${s}")
+    if [[ -n "${v}" && "${v%%.*}" == "1" ]]; then
+      printf '%s' "${s}"
+      return 0
+    fi
+  done
+  printf 'unknown'
+}
+
+# Phase 9.4 — failure mode: kill Redis mid-load, verify CB engages + recovery.
+phase_9_4_failure_mode() {
+  if ! should_run_phase9 "9.4"; then return 0; fi
+  phase_banner "9.4" "Failure mode (docker kill drools-redis mid-load)"
+  local pdir="${RUN_DIR}/phase-9-4"
+  rm -rf "${pdir}"
+  mkdir -p "${pdir}/jtl" "${pdir}/reports"
+
+  phase9::ensure_corpus
+
+  stack::down
+  multi_stack::down
+  multi_stack::up full
+  if ! multi_stack::wait_for_health 240; then
+    set_phase_result "phase9.4" FAIL
+    echo "FAIL: stack did not become healthy" > "${pdir}/result.txt"
+    return 1
+  fi
+  multi_stack::wait_for_pubsub 60
+
+  corpus::clear_s3
+  corpus::upload "${PHASE9_CORPUS_DIR}"
+  curl -s --max-time 180 -X POST http://localhost:8080/admin/refresh-rules > "${pdir}/warm-refresh.json" || true
+  sleep 10
+
+  # Start JMeter in the background — full mode load.
+  memory_poll::start "${MEMORY_CSV}" "${MEMORY_POLL_PID}"
+  local duration_s=$(( PHASE9_FAILURE_MIN * 60 ))
+  local rps=100
+  local threads=$(( rps / 10 )); (( threads < 5 )) && threads=5
+  (
+    run_jmeter "${pdir}" "${rps}" "${duration_s}" "${threads}" "failure-mode"
+  ) &
+  local jmeter_pid=$!
+
+  echo "  jmeter PID=${jmeter_pid}; killing Redis at T+${REDIS_KILL_AT_S}s"
+  sleep "${REDIS_KILL_AT_S}"
+
+  # CB state timeline. Header: epoch_s,replica,state
+  local cb_csv="${pdir}/cb-state-timeline.csv"
+  echo "epoch_s,replica,state" > "${cb_csv}"
+
+  # Start background CB-exerciser. /execute-rule traffic doesn't touch Redis (kieContainer
+  # is in-memory), so without admin refreshes the CB would never see any failure and never
+  # open. Every PHASE9_4_EXERCISER_INTERVAL_S seconds, fire wget POST
+  # /admin/refresh-rules/<id> on each replica — the decorator wraps the Redis
+  # DEL in the redisCircuitBreaker; once slidingWindowSize calls accumulate
+  # failures (Redis down), the CB opens.
+  #
+  # Cadence note (Phase 9.4 follow-up): with the prior 3s cadence the exerciser
+  # generated ~20 CB ops in the 30s `CB_OPEN_DEADLINE_S` window — not enough to
+  # flip the 50-call sliding window past the 60% failure-rate threshold, even
+  # when every kill-window call failed. Real production traffic is much denser;
+  # the 1s default here is closer to that pattern. Tune via env var if needed.
+  local exerciser_interval_s="${PHASE9_4_EXERCISER_INTERVAL_S:-1}"
+  local exerciser_rid
+  exerciser_rid=$(awk -F, 'NR==2 {print $1; exit}' "${RULE_IDS_CSV}")
+  local exerciser_pid_file="${pdir}/.cb-exerciser.pid"
+  (
+    while true; do
+      local ei
+      for ei in 1 2 3; do
+        multi_stack::exec_admin_post "drools-app-${ei}" \
+          "/admin/refresh-rules/${exerciser_rid}" > /dev/null 2>&1 || true
+      done
+      sleep "${exerciser_interval_s}"
+    done
+  ) &
+  echo "$!" > "${exerciser_pid_file}"
+  echo "  [info] CB-exerciser started (PID $(cat "${exerciser_pid_file}"), every ${exerciser_interval_s}s × 3 replicas)"
+
+  # Pre-kill snapshot: baseline counter values for resilience4j.circuitbreaker.calls
+  # (kind=successful/failed/not_permitted/ignored). Used post-hoc to diagnose whether
+  # the CB sliding window saw enough failures during the kill window.
+  echo "  [info] capturing pre-kill metric snapshots (3 replicas)"
+  for i in 1 2 3; do
+    actuator::snapshot_phase9_metrics \
+      "$(multi_stack::actuator_url ${i})" \
+      "${pdir}/metric-snapshot-app-${i}-pre-kill.json"
+  done
+
+  # Also capture per-tag CB call breakdown to a single CSV so the failure-rate
+  # math (failed / (failed+successful)) is easy to compute post-hoc. The bulk
+  # JSON snapshot above only returns aggregates across tag dimensions.
+  local cb_calls_csv="${pdir}/cb-calls-per-replica.csv"
+  echo "phase,replica,name,kind,count" > "${cb_calls_csv}"
+  phase9_4::record_cb_calls() {
+    local phase_label="${1}"
+    for i in 1 2 3; do
+      local url; url=$(multi_stack::actuator_url ${i})
+      for kind in successful failed not_permitted ignored; do
+        local c; c=$(actuator::counter_at "${url}" \
+          "resilience4j.circuitbreaker.calls" "name:redis,kind:${kind}")
+        echo "${phase_label},drools-app-${i},redis,${kind},${c:-0}" >> "${cb_calls_csv}"
+      done
+    done
+  }
+  phase9_4::record_cb_calls "pre-kill"
+
+  local t_kill
+  t_kill=$(date +%s)
+  multi_stack::kill_redis
+
+  # Poll CB until each replica reports `open` OR deadline expires.
+  # bash 3.2 (macOS default) lacks associative arrays — use parallel indexed arrays.
+  # Index 0/1/2 = replica 1/2/3. Empty string = not yet seen open.
+  local -a t_open=("" "" "")
+  local deadline_open=$(( t_kill + CB_OPEN_DEADLINE_S ))
+  while true; do
+    local now; now=$(date +%s)
+    local all_open=true
+    for i in 1 2 3; do
+      local state; state=$(phase9_4::cb_state "${i}")
+      echo "${now},drools-app-${i},${state}" >> "${cb_csv}"
+      if [[ "${state}" != "open" ]]; then
+        all_open=false
+      elif [[ -z "${t_open[$((i-1))]}" ]]; then
+        t_open[$((i-1))]=${now}
+      fi
+    done
+    if $all_open; then
+      echo "  [ok]   all 3 replicas CB=open after $((now - t_kill))s"
+      break
+    fi
+    if (( now > deadline_open )); then
+      echo "  [warn] CB-open deadline (${CB_OPEN_DEADLINE_S}s) exceeded; continuing test"
+      break
+    fi
+    sleep 1
+  done
+
+  echo "  Redis down for ${REDIS_DOWN_DURATION_S}s; jmeter continues"
+  local elapsed_down=$(( $(date +%s) - t_kill ))
+  if (( elapsed_down < REDIS_DOWN_DURATION_S )); then
+    sleep $(( REDIS_DOWN_DURATION_S - elapsed_down ))
+  fi
+
+  # Pre-restart snapshot: counters just before Redis comes back. Diff vs pre-kill =
+  # what the CB observed during the entire kill window. Critical for diagnosing
+  # why the breaker did/didn't trip (Phase 9.4 CB-engagement sub-criterion).
+  echo "  [info] capturing pre-restart metric snapshots (3 replicas)"
+  for i in 1 2 3; do
+    actuator::snapshot_phase9_metrics \
+      "$(multi_stack::actuator_url ${i})" \
+      "${pdir}/metric-snapshot-app-${i}-pre-restart.json"
+  done
+  phase9_4::record_cb_calls "pre-restart"
+
+  local t_restart
+  t_restart=$(date +%s)
+  multi_stack::start_redis
+
+  # Poll CB until each replica reports `closed` OR deadline expires.
+  local -a t_close=("" "" "")
+  local deadline_close=$(( t_restart + CB_CLOSE_DEADLINE_S ))
+  while true; do
+    local now; now=$(date +%s)
+    local all_closed=true
+    for i in 1 2 3; do
+      local state; state=$(phase9_4::cb_state "${i}")
+      echo "${now},drools-app-${i},${state}" >> "${cb_csv}"
+      if [[ "${state}" != "closed" ]]; then
+        all_closed=false
+      elif [[ -z "${t_close[$((i-1))]}" ]]; then
+        t_close[$((i-1))]=${now}
+      fi
+    done
+    if $all_closed; then
+      echo "  [ok]   all 3 replicas CB=closed after $((now - t_restart))s"
+      break
+    fi
+    if (( now > deadline_close )); then
+      echo "  [warn] CB-close deadline (${CB_CLOSE_DEADLINE_S}s) exceeded; continuing test"
+      break
+    fi
+    sleep 2
+  done
+
+  # Post-restart snapshot: counters after CB-close (or after the deadline). Diff vs
+  # pre-restart = recovery activity. Together with pre-kill + pre-restart, this gives
+  # a full pre/mid/post forensic timeline of CB calls per replica.
+  echo "  [info] capturing post-restart metric snapshots (3 replicas)"
+  for i in 1 2 3; do
+    actuator::snapshot_phase9_metrics \
+      "$(multi_stack::actuator_url ${i})" \
+      "${pdir}/metric-snapshot-app-${i}-post-restart.json"
+  done
+  phase9_4::record_cb_calls "post-restart"
+
+  # Stop the CB-exerciser before the convergence-recovery round; otherwise its concurrent
+  # refresh fire could confuse the per-rule counter baseline used by convergence::measure_single.
+  if [[ -f "${exerciser_pid_file}" ]]; then
+    local epid; epid=$(cat "${exerciser_pid_file}")
+    if [[ -n "${epid}" ]] && kill -0 "${epid}" 2>/dev/null; then
+      kill "${epid}" 2>/dev/null || true
+      wait "${epid}" 2>/dev/null || true
+    fi
+    rm -f "${exerciser_pid_file}"
+    echo "  [info] CB-exerciser stopped"
+  fi
+
+  # Settle before the post-restart convergence round so the
+  # RedisMessageListenerContainer's 2s FixedBackOff retry cycle has time to
+  # complete re-subscription. Without this, the publish lands before the
+  # listener is back on the channel and the event is lost (pub/sub is
+  # fire-and-forget). Configurable via PHASE9_4_RECOVERY_SETTLE_S.
+  echo "  [info] sleeping ${PHASE9_4_RECOVERY_SETTLE_S}s for RedisMessageListenerContainer to re-subscribe (2s FixedBackOff + safety margin)"
+  sleep "${PHASE9_4_RECOVERY_SETTLE_S}"
+
+  # Post-restart convergence round: proves pub/sub re-subscribed.
+  local conv_recover="${pdir}/convergence-recovery.csv"
+  convergence::write_csv_header "${conv_recover}"
+  echo "==> Post-restart convergence round (proves RedisMessageListenerContainer re-subscribed)"
+  local urls=(
+    "$(multi_stack::actuator_url 1)"
+    "$(multi_stack::actuator_url 2)"
+    "$(multi_stack::actuator_url 3)"
+  )
+  local rid; rid=$(awk -F, 'NR==2 {print $1; exit}' "${RULE_IDS_CSV}")
+  local recovery_pass=true
+  if ! convergence::measure_single RULE_REFRESHED "${urls[0]}" \
+        "${urls[1]} ${urls[2]}" "${rid}" "${conv_recover}" "${CONVERGENCE_DEADLINE_MS}"; then
+    recovery_pass=false
+  fi
+  local recovery_delta
+  recovery_delta=$(awk -F, 'NR>1 && $7+0>m {m=$7+0} END {print m+0}' "${conv_recover}")
+
+  # Wait for JMeter to finish.
+  wait "${jmeter_pid}" 2>/dev/null || true
+  memory_poll::stop "${MEMORY_POLL_PID}"
+
+  # Events CSV: condensed timeline.
+  local events_csv="${pdir}/events.csv"
+  {
+    echo "event,epoch_s"
+    echo "redis_killed,${t_kill}"
+    echo "redis_restarted,${t_restart}"
+    local k
+    for k in 1 2 3; do
+      echo "cb_open_app-${k},${t_open[$((k-1))]:-}"
+      echo "cb_closed_app-${k},${t_close[$((k-1))]:-}"
+    done
+    echo "convergence_recovery_delta_ms,${recovery_delta}"
+  } > "${events_csv}"
+
+  # Capture app-container logs while the stack is still up. Critical for diagnosing
+  # whether Redis calls during the kill window were genuinely failing inside the app
+  # or being silently swallowed (e.g., Lettuce queueing them across reconnect).
+  # Filter to Redis/CB-relevant lines to keep file size manageable.
+  echo "  [info] capturing per-replica app logs (filtered to Redis/CB-relevant lines)"
+  for i in 1 2 3; do
+    docker logs "drools-app-${i}" 2>&1 \
+      | grep -iE 'redis|circuit|lettuce|cachedrulestorage|refresh|connect|timeout|exception' \
+      > "${pdir}/app-${i}-redis-relevant.log" 2>/dev/null || true
+  done
+
+  # Assertions.
+  local stats err_pct
+  stats=$(analyze_jtl "${pdir}/jtl/failure-mode.jtl")
+  echo "${stats}" > "${pdir}/stats.csv"
+  err_pct=$(echo "${stats}" | cut -d',' -f5)
+
+  local pass=true
+  local -a reasons=()
+  local i
+  for i in 1 2 3; do
+    if [[ -z "${t_open[$((i-1))]:-}" ]]; then
+      pass=false; reasons+=("CB did not open on app-${i} within ${CB_OPEN_DEADLINE_S}s")
+    fi
+    if [[ -z "${t_close[$((i-1))]:-}" ]]; then
+      pass=false; reasons+=("CB did not close on app-${i} within ${CB_CLOSE_DEADLINE_S}s")
+    fi
+  done
+  if [[ "${err_pct%.*}" != "0" ]] && [[ "${err_pct}" != "0.000" ]]; then
+    pass=false; reasons+=("JMeter error rate ${err_pct}% > 0 across full window")
+  fi
+  if ! $recovery_pass; then
+    pass=false; reasons+=("post-restart convergence round failed (delta=${recovery_delta}ms); pub/sub did not re-subscribe")
+  fi
+
+  echo "  err=${err_pct}%; recovery_delta=${recovery_delta}ms"
+  if $pass; then
+    echo "PASS err=${err_pct} recovery_delta_ms=${recovery_delta}" > "${pdir}/result.txt"
+    set_phase_result "phase9.4" PASS
+    echo "==> Phase 9.4 PASS"
+  else
+    {
+      echo "FAIL err=${err_pct} recovery_delta_ms=${recovery_delta}"
+      printf -- '- %s\n' "${reasons[@]}"
+    } > "${pdir}/result.txt"
+    set_phase_result "phase9.4" FAIL
+    return 1
+  fi
+}
+
+# Phase 9 summary — writes ${RUN_DIR}/phase-9-summary.md with PASS/FAIL verdict and
+# per-sub-test headlines. Always runs if any phase9.x function ran.
+phase9_summary() {
+  # Skip if no Phase 9 sub-test ran (avoid emitting a misleading empty summary).
+  local any=false
+  local key
+  for key in "phase9.1" "phase9.2" "phase9.3" "phase9.4"; do
+    if [[ -n "$(get_phase_result "${key}")" ]]; then any=true; break; fi
+  done
+  $any || return 0
+
+  local summary="${RUN_DIR}/phase-9-summary.md"
+  phase_banner "9-summary" "Phase 9 summary"
+
+  {
+    echo "# Phase 9 — Redis cache + pub/sub load test — ${RUN_TS}"
+    echo
+    echo "## Sub-test verdicts"
+    echo
+    echo "| Sub-test | Result | Detail |"
+    echo "|---|---|---|"
+    local key label
+    for key in "phase9.1" "phase9.2" "phase9.3" "phase9.4"; do
+      label="${key#phase}"
+      local res; res=$(get_phase_result "${key}")
+      [[ -z "${res}" ]] && res="SKIPPED"
+      local rfile="${RUN_DIR}/phase-9-${label//./-}/result.txt"
+      local detail=""
+      if [[ -f "${rfile}" ]]; then
+        detail=$(head -n 1 "${rfile}" | tr -d '\n')
+      fi
+      echo "| ${label} | ${res} | ${detail} |"
+    done
+    echo
+    echo "## Verdict"
+    local fails=0
+    for key in "phase9.1" "phase9.2" "phase9.3" "phase9.4"; do
+      [[ "$(get_phase_result "${key}")" == "FAIL" ]] && fails=$((fails + 1))
+    done
+    if [[ ${fails} -eq 0 ]]; then
+      echo "**Result: PASS** — Redis cache decorator + pub/sub fan-out validated end-to-end."
+    else
+      echo "**Result: FAIL** — ${fails} sub-test(s) failed. See per-phase result.txt files."
+    fi
+    echo
+    echo "## Artifacts"
+    echo
+    local label dir
+    for key in "phase9.1" "phase9.2" "phase9.3" "phase9.4"; do
+      label="${key#phase}"
+      dir="phase-9-${label//./-}"
+      if [[ -d "${RUN_DIR}/${dir}" ]]; then
+        echo "- \`${dir}/\` — jtl/, reports/, stats.csv, result.txt"
+        if compgen -G "${RUN_DIR}/${dir}/convergence-*.csv" > /dev/null; then
+          echo "  - convergence CSVs: \`$(cd "${RUN_DIR}/${dir}" && ls convergence-*.csv | tr '\n' ' ')\`"
+        fi
+      fi
+    done
+    echo
+    echo "After review, append a Phase 9 addendum to \`project-documentation/39-load-test-findings.md\` and tick the Phase 9 row in \`.ai-workspace/project-plans/redis-cache-layering-checklist.md\`."
+  } > "${summary}"
+
+  echo "==> Phase 9 summary → ${summary}"
+  cat "${summary}"
+}
+
 # ----------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------
 echo "==> Load test run starting; output dir: ${RUN_DIR}"
 $QUICK_MODE && echo "==> --quick mode: ${RULE_COUNT} rules, ${BASELINE_MIN} min baseline, ${SOAK_MIN} min soak"
 
+# Flag preflight that Phase 9 multi-container mode (9.2/9.3/9.4) will run, so it also
+# checks ports 18081/28081/38081.
+if should_run_phase9 "9.2" || should_run_phase9 "9.3" || should_run_phase9 "9.4"; then
+  export MULTI_NODE=true
+fi
+
 phase0 || exit 1
-phase2 || exit 1
-phase3 || true   # individual phase failures don't block the rest; final verdict aggregates
-phase4 || true
-phase5 || true
-phase6 || true
-phase7 || true
-phase8 || true
+# Phases 2..8 only run when no Phase 9 sub-test is selected (Phase 9 has its own stack
+# lifecycle and would interfere with phase 2's stack::up).
+if ! should_run_phase9 "9.1" && ! should_run_phase9 "9.2" && \
+   ! should_run_phase9 "9.3" && ! should_run_phase9 "9.4"; then
+  phase2 || exit 1
+  phase3 || true   # individual phase failures don't block the rest; final verdict aggregates
+  phase4 || true
+  phase5 || true
+  phase6 || true
+  phase7 || true
+  phase8 || true
+fi
+
+phase_9_1_baseline    || true
+phase_9_2_cache_only  || true
+phase_9_3_full_mode   || true
+phase_9_4_failure_mode || true
+phase9_summary        || true

@@ -112,6 +112,14 @@ The orchestrator's pre-flight checks fail loudly if any of these are missing.
 
 # Scale up
 RULE_COUNT=5000 SOAK_MIN=240 ./scripts/run-load-test.sh
+
+# Phase 9 — Redis cache + pub/sub validation (opt-in; ~90 min for all four sub-tests)
+./scripts/run-load-test.sh --phase 9          # All 9.1-9.4 in sequence
+./scripts/run-load-test.sh --phase 9.1        # Single-container REDIS=false baseline regression
+./scripts/run-load-test.sh --phase 9.2        # 3-replica cache-only mode
+./scripts/run-load-test.sh --phase 9.3        # 3-replica full mode + convergence headline
+./scripts/run-load-test.sh --phase 9.4        # Redis kill/restart failure-mode
+./scripts/run-load-test.sh --phase 9 --quick  # ~15 min smoke of all four
 ```
 
 Each run writes to `scripts/load-test-results/<UTC-timestamp>/` (gitignored). Re-runs do not clobber prior data.
@@ -129,6 +137,12 @@ Each run writes to `scripts/load-test-results/<UTC-timestamp>/` (gitignored). Re
 | 6 | Hot single-rule refresh under load | Half safe-RPS execute traffic + random single-rule refresh every 5s for 30 min | 0 errors, P95 stable |
 | 7 | 1-hour soak | Mixed workload + heap dumps at start/end | Heap drift < 100 MB, 0 errors |
 | 8 | Heap analysis + verdict | Auto-generates `summary.md` with PASS/FAIL per criterion | (Always runs) |
+| 9.1 | Phase 9 baseline (opt-in) | Single-container with `REDIS_ENABLED=false`; 30-min steady load | 0 errors, P99 within ±10% of phase-3 baseline |
+| 9.2 | Phase 9 cache-only (opt-in) | 3 replicas + nginx, `REDIS_PUBSUB_ENABLED=false`; 10-min load | Every replica touches Redis; no pub/sub events received; P99 ≤ 2× baseline |
+| 9.3 | Phase 9 full mode (opt-in) | 3 replicas + nginx + pub/sub; 10 single + 5 bulk + 5 under-load convergence rounds | All rounds within `CONVERGENCE_DEADLINE_MS` (default 2000ms); `skipped_self` increments on publisher |
+| 9.4 | Phase 9 failure mode (opt-in) | Full mode + `docker kill drools-redis` at T+120s; restart at T+240s; 10-min total load | CB opens within 30s on all 3 replicas; load error rate 0%; CB closes within 90s of restart; post-restart convergence round passes |
+
+**Phase 9 is opt-in only**: it never runs unless you pass `--phase 9`, `--phase 9.x`, or `--from 9[.x]`. When a Phase 9 sub-test is selected, phases 0 (pre-flight) runs but 2–8 are skipped — Phase 9 manages its own stack lifecycle.
 
 ## Output layout
 
@@ -170,6 +184,45 @@ scripts/load-test-results/<UTC-timestamp>/
     └── heap-delta-mb.txt
 ```
 
+Phase 9 adds an alternate sub-tree (only the dirs you ran are present):
+
+```
+scripts/load-test-results/<UTC-timestamp>/
+├── phase-9-summary.md                  # aggregate PASS/FAIL verdict — read this first
+├── phase-corpus/synthetic/...          # generated only if not reusing phase-2 corpus
+├── phase-9-1/                          # 9.1 baseline regression (single container)
+│   ├── jtl/baseline-disabled.jtl
+│   ├── reports/baseline-disabled/index.html
+│   ├── stats.csv
+│   ├── first-refresh.json
+│   └── result.txt                      # PASS|FAIL + headline numbers
+├── phase-9-2/                          # 9.2 cache-only mode (3 replicas + nginx)
+│   ├── jtl/cache-only-load.jtl
+│   ├── reports/cache-only-load/...
+│   ├── stats.csv
+│   ├── warm-refresh.json
+│   ├── redis-metrics-post.csv          # per-replica bulk.hit/miss/hit/miss/refresh.received
+│   ├── metric-snapshot-app-{1,2,3}-{pre,post}.json
+│   └── result.txt
+├── phase-9-3/                          # 9.3 full mode + convergence headline
+│   ├── jtl/full-mode-load.jtl
+│   ├── reports/full-mode-load/...
+│   ├── stats.csv
+│   ├── convergence-single.csv          # per-subscriber Δms for each single-rule round
+│   ├── convergence-bulk.csv            # per-subscriber Δms for each bulk round
+│   ├── convergence-under-load.csv      # per-subscriber Δms for rounds fired during load
+│   ├── metric-snapshot-app-{1,2,3}-{pre,post}.json
+│   └── result.txt
+└── phase-9-4/                          # 9.4 failure mode (Redis kill)
+    ├── jtl/failure-mode.jtl
+    ├── reports/failure-mode/...
+    ├── stats.csv
+    ├── cb-state-timeline.csv           # epoch_s,replica,state for full kill+restart window
+    ├── events.csv                      # condensed timeline: t_kill / t_restart / per-replica CB transitions / recovery Δms
+    ├── convergence-recovery.csv        # post-restart convergence round (proves pub/sub re-subscribed)
+    └── result.txt
+```
+
 ## Env-var knobs
 
 | Var | Default | Effect |
@@ -189,8 +242,19 @@ scripts/load-test-results/<UTC-timestamp>/
 | `SAFE_RPS_MIN` | 250 | Phase 4 acceptance |
 | `HEAP_DRIFT_MB_MAX` | 100 | Phase 7 acceptance |
 | `HOT_REFRESH_P99_MULTIPLIER_MAX` | 2 | Phase 5 acceptance |
+| `PHASE9_CACHE_ONLY_MIN` | 10 | Phase 9.2 load duration (min) |
+| `PHASE9_FULL_MODE_MIN` | 5 | Phase 9.3 background-load duration (min) |
+| `PHASE9_FAILURE_MIN` | 10 | Phase 9.4 total JMeter window (min) |
+| `PHASE9_SINGLE_ROUNDS` | 10 | Phase 9.3 single-rule convergence rounds |
+| `PHASE9_BULK_ROUNDS` | 5 | Phase 9.3 bulk convergence rounds |
+| `PHASE9_UNDER_LOAD_ROUNDS` | 5 | Phase 9.3 convergence rounds under load |
+| `CONVERGENCE_DEADLINE_MS` | 2000 | Per-subscriber convergence-wait deadline |
+| `REDIS_KILL_AT_S` | 120 | Phase 9.4 offset for `docker kill drools-redis` |
+| `REDIS_DOWN_DURATION_S` | 120 | Phase 9.4 stay-down duration before `docker start` |
+| `CB_OPEN_DEADLINE_S` | 30 | Phase 9.4 CB-must-open-by deadline |
+| `CB_CLOSE_DEADLINE_S` | 90 | Phase 9.4 CB-must-close-by deadline (after restart) |
 
-`--quick` overrides: `RULE_COUNT=100`, `BASELINE_MIN=1`, `HOT_REFRESH_MIN=2`, `SOAK_MIN=5`, `RAMP_STEP_MIN=1`.
+`--quick` overrides: `RULE_COUNT=100`, `BASELINE_MIN=1`, `HOT_REFRESH_MIN=2`, `SOAK_MIN=5`, `RAMP_STEP_MIN=1`, `PHASE9_CACHE_ONLY_MIN=2`, `PHASE9_FULL_MODE_MIN=1`, `PHASE9_FAILURE_MIN=4`, `REDIS_KILL_AT_S=60`, `REDIS_DOWN_DURATION_S=60`.
 
 ## Library helpers
 
@@ -203,6 +267,12 @@ The orchestrator sources these from `scripts/lib/`:
 - **refresh-loop.sh** — `refresh_loop::start <csv> <pid_file> [interval]`, `refresh_loop::stop <pid_file>`. Background `POST /admin/refresh-rules` loop with per-call latency capture.
 - **single-refresh-loop.sh** — same shape as refresh-loop but picks a random rule from `rule-ids.csv` each iteration and calls `POST /admin/refresh-rules/{id}`.
 - **heap-dump.sh** — `heap_dump::capture <out_path>`. `docker exec jmap -dump:live` + `docker cp` to host. Live dump triggers a full GC first so the hprof reflects retained set only.
+
+Phase 9 adds three more (sourced only when a 9.x phase runs):
+
+- **multi-stack.sh** — `multi_stack::up <cache-only|full>`, `multi_stack::down`, `multi_stack::wait_for_health <timeout>`, `multi_stack::wait_for_pubsub <timeout>`, `multi_stack::actuator_url <idx>`, `multi_stack::container_for_idx <idx>`, `multi_stack::list_app_containers`, `multi_stack::list_actuator_urls`, `multi_stack::container_for_actuator <url>`, `multi_stack::redis_container_name`, `multi_stack::kill_redis`, `multi_stack::start_redis`, `multi_stack::exec_admin_post <container> <path>`. Owns the 3-replica + nginx + named-Redis topology in [`scripts/docker-compose.loadtest-multi.yml`](docker-compose.loadtest-multi.yml).
+- **actuator.sh** — `actuator::counter_at <base_url> <metric> [tag_pair]`, `actuator::wait_for_counter <base_url> <metric> <tag_pair> <target> <deadline_epoch_ms>`, `actuator::snapshot_phase9_metrics <base_url> <out_json>`. Pure-curl helpers against Spring's `/actuator/metrics/{name}?tag=key:val` API; counter values returned as bare scalars (Micrometer's `measurements[0].value`).
+- **convergence.sh** — `convergence::write_csv_header <out>`, `convergence::measure_single <event_type> <pub_url> <sub_urls> <rule_id> <out_csv> [deadline_ms]`, `convergence::run_rounds <event_type> <rounds> <rule_ids_csv> <out_csv> [deadline_ms]`. Polls each subscriber's `drools.refresh.received{event=...}` at 50ms granularity; writes per-subscriber Δms rows.
 
 Helpers can be sourced individually for ad-hoc experiments:
 

@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Operators, on-call engineers, SREs |
 | **Purpose** | Operational procedures (start/stop/refresh/scale/incident response) plus monitoring setup (metrics, dashboards, alerts) |
-| **Last verified against** | Running stack on 2026-05-10 |
+| **Last verified against** | Running stack on 2026-05-24 |
 | **Related docs** | [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md), [26-performance-tuning-runbook.md](26-performance-tuning-runbook.md), [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md), [31-troubleshooting.md](31-troubleshooting.md) |
 
 ---
@@ -125,7 +125,8 @@ kubectl scale deployment drools --replicas=5
 
 #### Considerations
 
-- Each replica has its own `LocalLRUCache` and rate-limit buckets. Horizontal scaling **does not unify caches**. Cache hit rate per replica decreases proportionally; rate limits multiply.
+- Each replica has its own compiled `kieContainer` (the execution hot path) and per-instance rate-limit buckets. Horizontal scaling **shares the Redis cache** (when `REDIS_ENABLED=true`) via `RedisCachedRuleStorage`, but rate limits multiply across replicas.
+- Cross-instance refresh coherence is provided by `RuleRefreshPublisher`/`Subscriber` on channel `drools:rule:events` (requires `REDIS_PUBSUB_ENABLED=true`). When pub/sub is disabled, replicas must each be refreshed individually or via TTL expiry.
 - If you need cluster-wide rate limiting, you'd need to back the limiter with Redis — currently not implemented (see [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md)).
 - Cold-start time is ~30-45s per replica. Plan capacity accordingly.
 
@@ -249,9 +250,12 @@ Micrometer registry (in JVM)
 | `drools.api.response.time` | Timer | `endpoint`, `status` | Per-endpoint latency distribution |
 | `drools.rule.execution.time` | Timer | `rule_id` (or `unknown` for misses) | Per-rule latency. **Cardinality**: rules not loaded are tagged `unknown` to prevent metric explosion. |
 | `drools.rule.execution.error` | Counter | `rule_id`, `error_type` | Per-rule error rate |
-| `drools.cache.hits` | Counter | — | LocalLRU hit count |
-| `drools.cache.misses` | Counter | — | LocalLRU miss count |
-| `drools.cache.evictions` | Counter | — | LRU evictions |
+| `drools.cache.hit` | Counter | — | `RedisCachedRuleStorage` cache hit (Redis GET / MGET returned the rule) |
+| `drools.cache.miss` | Counter | — | Decorator fell through to base storage (S3/file/memory) for this rule |
+| `drools.refresh.published` | Counter | `type=single\|bulk\|delete` | `RuleRefreshPublisher` sent an event to `drools:rule:events` |
+| `drools.refresh.received` | Counter | `type=single\|bulk\|delete` | `RuleRefreshSubscriber` received an event |
+| `drools.refresh.skipped_self` | Counter | — | Subscriber skipped a self-emitted event (loop-back prevention) |
+| `drools.refresh.failed` | Counter | `layer=publisher\|subscriber\|storage\|engine` | Refresh failure by stage |
 
 #### JVM and system
 
@@ -351,8 +355,8 @@ fields @timestamp, message
 
 - Top 10 slowest rules (by P95 of `drools.rule.execution.time`)
 - Error rate per rule (`drools.rule.execution.error` / `drools.api.requests`)
-- Cache hit rate over time (`drools.cache.hits / (drools.cache.hits + drools.cache.misses)`)
-- LRU evictions (counter rate)
+- Cache hit rate over time (`drools.cache.hit / (drools.cache.hit + drools.cache.miss)`)
+- Refresh fan-out: `drools.refresh.published` vs `drools.refresh.received` (per-instance ratio should approximate cluster size − 1 after dedup)
 
 #### Dashboard 3: External dependencies
 
@@ -380,7 +384,7 @@ fields @timestamp, message
 | Memory warning | Heap usage > 80% for 10 min | P2 | Investigate |
 | GC pause anomaly | P99 GC pause > 500ms | P2 | Tune |
 | Circuit breaker open | Any breaker state == OPEN > 30s | P1 (S3) / P3 (Redis) | Investigate dependency |
-| Cache hit rate low | LRU hit rate < 70% for 30 min | P3 | Tune cache size |
+| Cache hit rate low | `drools.cache.hit{layer=redis}` hit rate < 70% for 30 min (when `REDIS_ENABLED=true`) | P3 | Check if refresh storms are evicting Redis keys; tune `REDIS_DRL_RULES_TTL_MINUTES` |
 | Rule execution errors | Per-rule error rate > 5% for 10 min | P2 | Validate rule logic |
 | Rate limit "client map at capacity" | Log line `Rate limiter client map at capacity` | P2 | Possible spoofing |
 | Admin auth disabled in production | Log line `Admin API key is not configured` AND env != local | P1 | Set `ADMIN_API_KEY` |
@@ -448,8 +452,8 @@ If either fails, page on-call.
    - Inside container: `jcmd 1 GC.heap_dump /tmp/heap.hprof` (or use the OOM auto-dump if OOM is imminent — `-XX:+HeapDumpOnOutOfMemoryError` is set).
 4. **Restart**: buys time. Schedule deeper investigation.
 5. **Investigate**: open the heap dump in MAT or VisualVM. Look for:
-   - Many `KieContainer` instances → disposal regression
-   - Huge `LocalLRUCache` map → resize gone wrong
+   - Many `KieContainer` instances → disposal regression (Drools 10 `KieRepository.removeKieModule` missing after `updateToVersion`)
+   - Many `ProjectClassLoader` instances → old `KieModule` not removed from `KieRepository`
    - Per-request objects retained → request-scoped state leak
 
 ### P2 runbook: "Latency is degraded"
@@ -488,7 +492,7 @@ If either fails, page on-call.
 | Admin API audit log | ⚠️ logs exist, but not a dedicated audit channel |
 | Backup & restore for rule storage | ⚠️ relies on S3 versioning; explicit backup procedure not documented in repo |
 | Disaster recovery plan | ⚠️ not in repo |
-| Performance baseline tests | ❌ JMeter deferred |
+| Performance baseline tests | ✅ [`scripts/run-load-test.sh`](../scripts/run-load-test.sh) — Phases 0–8 (1000-rule baseline, JMeter mixed-workload, refresh storm) + Phase 9 (3-replica multi-instance convergence). See [39-load-test-findings.md](39-load-test-findings.md). |
 
 ### Recommendations for production deployment
 

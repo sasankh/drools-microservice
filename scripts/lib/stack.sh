@@ -13,13 +13,29 @@ stack::up() {
   fi
 }
 
+# Phase 9.1 — single-container stack with REDIS_ENABLED=false applied via a third
+# overlay file. Matches the historical pre-Phase-1 (2026-05-10) baseline codepath
+# where no Redis decorator existed.
+stack::up_with_disabled_overlay() {
+  echo "==> Bringing stack up (REDIS_ENABLED=false overlay for Phase 9.1 baseline)"
+  docker compose \
+    -f docker-compose.yml \
+    -f scripts/docker-compose.loadtest.yml \
+    -f scripts/docker-compose.loadtest-disabled.yml \
+    up -d --build > /dev/null
+}
+
 stack::down() {
   echo "==> Tearing stack down (volumes removed)"
   local override="scripts/docker-compose.loadtest.yml"
+  # --remove-orphans ensures Phase 9 multi-container artifacts (nginx, app1/2/3,
+  # drools-redis) get removed even when this teardown loads only the single-container
+  # overlay. Without it, they'd survive into the next run as orphans.
   if [[ -f "${override}" ]]; then
-    docker compose -f docker-compose.yml -f "${override}" down -v > /dev/null 2>&1 || true
+    docker compose -f docker-compose.yml -f "${override}" down -v --remove-orphans \
+      > /dev/null 2>&1 || true
   else
-    docker compose down -v > /dev/null 2>&1 || true
+    docker compose down -v --remove-orphans > /dev/null 2>&1 || true
   fi
 }
 

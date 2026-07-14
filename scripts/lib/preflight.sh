@@ -43,8 +43,13 @@ preflight::check() {
 
   # Required ports — warn (not fail) if something else is bound; the stack-up step will fail
   # cleanly if there's a real conflict.
+  local -a ports=(8080 8081 4566 6379)
+  # Phase 9 multi-container mode also forwards per-replica actuators on 18081/28081/38081.
+  if [[ "${MULTI_NODE:-false}" == "true" ]]; then
+    ports+=(18081 28081 38081)
+  fi
   local port
-  for port in 8080 8081 4566 6379; do
+  for port in "${ports[@]}"; do
     if lsof -i ":${port}" -sTCP:LISTEN > /dev/null 2>&1; then
       local owner
       owner=$(lsof -i ":${port}" -sTCP:LISTEN -F c 2>/dev/null | awk '/^c/' | head -1 | cut -c2-)

@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Operators, developers |
 | **Purpose** | The Admin API key flow end-to-end — when it activates, what happens when it doesn't, and how to operate it |
-| **Last verified against** | [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java), [`AdminAuthFilterTest.java`](../src/test/java/com/company/drools/api/filter/AdminAuthFilterTest.java) on 2026-05-10 |
+| **Last verified against** | [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java), [`AdminAuthFilterTest.java`](../src/test/java/com/company/drools/api/filter/AdminAuthFilterTest.java) on 2026-05-24 |
 | **Related docs** | [10-api-reference.md](10-api-reference.md), [12-error-code-catalog.md](12-error-code-catalog.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
@@ -322,7 +322,7 @@ docker compose logs app | grep 'Admin API key'
 
 ## Test coverage
 
-[`AdminAuthFilterTest.java`](../src/test/java/com/company/drools/api/filter/AdminAuthFilterTest.java) covers (8 tests):
+[`AdminAuthFilterTest.java`](../src/test/java/com/company/drools/api/filter/AdminAuthFilterTest.java) covers (9 tests):
 - Auth disabled when key empty/null → all paths pass
 - Auth enabled, valid key → request proceeds
 - Auth enabled, missing header → 401

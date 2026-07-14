@@ -556,7 +556,7 @@ echo $RULE_BUCKET_NAME     # Should show your bucket name
 
 # Invalid values
 export RULE_SOURCE=invalid  # Should be s3|local|memory
-export LRU_CACHE_MAX_SIZE=invalid  # Should be positive integer
+export REDIS_DRL_RULES_TTL_MINUTES=invalid  # Should be positive integer (default: 15)
 ```
 
 #### Validation Script
@@ -578,9 +578,9 @@ if [[ ! "$RULE_SOURCE" =~ ^(s3|local|memory)$ ]]; then
   exit 1
 fi
 
-# Validate numeric values
-if ! [[ "$LRU_CACHE_MAX_SIZE" =~ ^[0-9]+$ ]]; then
-  echo "ERROR: LRU_CACHE_MAX_SIZE must be a positive integer"
+# Validate numeric values (Redis cache TTL)
+if [ -n "$REDIS_DRL_RULES_TTL_MINUTES" ] && ! [[ "$REDIS_DRL_RULES_TTL_MINUTES" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: REDIS_DRL_RULES_TTL_MINUTES must be a positive integer"
   exit 1
 fi
 
@@ -735,7 +735,7 @@ curl http://localhost:8081/actuator/metrics/http.server.requests
 1. ✅ Check memory usage: `free -h` and JVM metrics
 2. ✅ Increase heap size: Set `-Xmx` parameter
 3. ✅ Enable GC logging: Add GC flags to `JAVA_OPTS`
-4. ✅ Reduce cache size: Lower `LRU_CACHE_MAX_SIZE`
+4. ✅ Heap pressure from compiled rules: drop `REDIS_ENABLED=false` (no effect — Redis stores DRL JSON, not compiled `KieBase`), or scale horizontally. The compiled state lives in `kieContainer` per instance and is bounded by rule count, not cache size.
 
 ### Emergency Recovery Procedures
 
@@ -755,9 +755,8 @@ redis-cli FLUSHALL
 # 3. Check and fix configuration
 source /opt/drools-rule-engine/config/application.env
 
-# 4. Start with minimal configuration
+# 4. Start with minimal configuration (no Redis cache or pub/sub)
 export REDIS_ENABLED=false
-export LRU_CACHE_MAX_SIZE=50
 
 # 5. Restart service
 systemctl start drools-rule-engine
@@ -831,7 +830,11 @@ DRL content contains blocked class reference: ProcessBuilder
 **Solution**:
 ```bash
 # Check which imports are allowed
-# Allowed: java.util.*, java.math.*, java.time.*, com.company.*
+# Allowed (full list in 16-drl-sandboxing.md): java.util.*, java.math.*, java.time.*,
+# named java.lang numerics (Math, String, Number, Integer, Long, Double, Float,
+# Boolean, Byte, Short, Character, Comparable, Object, Enum), and java.text
+# formatters (DecimalFormat, NumberFormat, SimpleDateFormat).
+# Notably NOT allowed: com.company.*, sun.*, java.io.*, java.net.*, java.lang.reflect.*
 
 # Fix your rule to use allowed imports only
 # Instead of java.io.File, pass file data through the API input
@@ -930,5 +933,5 @@ Configuration: [relevant env vars/config]
 
 ---
 
-**Last Updated**: 2026-02-26
-**Version**: 1.1.0
+**Last Updated**: 2026-05-24
+**Version**: 1.3.0

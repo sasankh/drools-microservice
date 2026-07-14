@@ -1,6 +1,6 @@
 # project-documentation
 
-This is the documentation corpus for the **Drools Rule Engine Microservice**. 39 markdown files designed to be uploaded as a NotebookLM source corpus or read directly.
+This is the documentation corpus for the **Drools Rule Engine Microservice**. 40 numbered markdown files (00-39) plus this README, designed to be uploaded as a NotebookLM source corpus or read directly.
 
 **Start here**: [00-system-overview.md](00-system-overview.md) — entry point with role-based reading paths.
 
@@ -8,12 +8,12 @@ This is the documentation corpus for the **Drools Rule Engine Microservice**. 39
 
 ## Upload to NotebookLM
 
-NotebookLM accepts up to 50 sources, each up to 500K characters. This corpus has 39 markdown files totaling ~28,000 lines (~900 KB) — well within limits.
+NotebookLM accepts up to 50 sources, each up to 500K characters. This corpus has 40 numbered markdown files (00-39) plus this README — well within limits.
 
 ### Upload steps
 
 1. Create a new notebook at https://notebooklm.google.com.
-2. Drag-and-drop **all 39 `.md` files** from this directory.
+2. Drag-and-drop **all 40 numbered `.md` files** from this directory (README is optional).
 3. Also upload [`api-reference/openapi.yml`](api-reference/openapi.yml) for full API spec coverage.
 4. Wait for indexing (~1-2 minutes for this corpus size).
 5. Test with sample queries:
@@ -47,7 +47,7 @@ If answers come back accurate and cite the right docs, NotebookLM is ready for e
 | [06-deployment.md](06-deployment.md) | ~1100 | Local + Docker + AWS ECS reference deployment |
 | [07-docker-and-compose.md](07-docker-and-compose.md) | ~480 | Dockerfile + docker-compose.yml line-by-line |
 | [08-configuration.md](08-configuration.md) | ~750 | Configuration primer (kept from original) |
-| [09-environment-variables-reference.md](09-environment-variables-reference.md) | ~380 | All 66 env vars catalogued by category |
+| [09-environment-variables-reference.md](09-environment-variables-reference.md) | ~385 | All 67 env vars catalogued by category |
 
 ### APIs & integration (10-13)
 
@@ -91,7 +91,7 @@ If answers come back accurate and cite the right docs, NotebookLM is ready for e
 | File | Lines | Purpose |
 |---|---:|---|
 | [27-development-setup.md](27-development-setup.md) | ~385 | New-contributor onboarding + conventions |
-| [28-testing-guide.md](28-testing-guide.md) | ~460 | Test suite map (45 files, 597 tests, 96.2% coverage pre-modernization) |
+| [28-testing-guide.md](28-testing-guide.md) | ~480 | Test suite map (46 files, 548+ unit + 15 integration tests, 96.2% coverage pre-modernization) |
 | [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md) | ~420 | Resilience4j wiring + state machine |
 
 ### Operations (30-31)
@@ -110,13 +110,14 @@ If answers come back accurate and cite the right docs, NotebookLM is ready for e
 | [34-java-setup-guide.md](34-java-setup-guide.md) | ~660 | Java 25 install guide |
 | [35-faq.md](35-faq.md) | ~510 | 65+ Q&A across 10 categories |
 
-### Advanced (36-38)
+### Advanced (36-39)
 
 | File | Lines | Purpose |
 |---|---:|---|
-| [36-architecture-decision-records.md](36-architecture-decision-records.md) | ~615 | 12 ADRs + extension points appendix |
-| [37-glossary.md](37-glossary.md) | ~310 | 70+ terms + acronyms defined |
+| [36-architecture-decision-records.md](36-architecture-decision-records.md) | ~895 | 15 ADRs + extension points appendix |
+| [37-glossary.md](37-glossary.md) | ~325 | 70+ terms + acronyms defined |
 | [38-for-ai-agents.md](38-for-ai-agents.md) | ~150 | Verification rules and pitfalls for AI sessions working on this repo |
+| [39-load-test-findings.md](39-load-test-findings.md) | ~395 | Measured load-test numbers (1000-rule baseline + Phase 9 multi-instance + Redis-fault), architectural trade-offs, production-planning guidance |
 
 ### Reference assets
 
@@ -173,7 +174,7 @@ If the docs go more than 2 sprints without an audit, run a verification pass: sp
 
 ## Provenance
 
-This corpus was rebuilt 2026-05-08 from the prior 13-doc set, then refreshed 2026-05-09 for the stack modernization (Java 17→25, Spring Boot 3.2.5→3.5.3, Drools 8.44.0→10.2.0), then refreshed again 2026-05-10 for the Drools 10 rule-loading rework (`KieContainer.updateToVersion` + `KieRepository.removeKieModule`), 7 new sample rules (cookbook 10→17), and the 1000-rule load test (new doc 39). The rebuilds:
+This corpus was rebuilt 2026-05-08 from the prior 13-doc set, then refreshed 2026-05-09 for the stack modernization (Java 17→25, Spring Boot 3.2.5→3.5.3, Drools 8.44.0→10.2.0), then refreshed again 2026-05-10 for the Drools 10 rule-loading rework (`KieContainer.updateToVersion` + `KieRepository.removeKieModule`), 7 new sample rules (cookbook 10→17), and the 1000-rule load test (new doc 39). Refreshed 2026-05-20 for the Redis cache + pub/sub layer (`RedisCachedRuleStorage` decorator + `RuleRefreshPublisher`/`Subscriber`; ADR-016 added). Refreshed 2026-05-24 for the Phase 9 multi-instance load test (sub-tests 9.1–9.4) and the Redis CB hardening follow-ups (SCAN-CB-wrap + `REDIS_TIMEOUT=500ms` + `FixedBackOff` listener recovery). The rebuilds:
 - Verified every claim against actual source code
 - Live-tested every curl example
 - Found and fixed 32+ doc-vs-code inconsistencies (cataloged in `.ai-workspace/documentations/CODE_FINDINGS.md`)

@@ -20,7 +20,7 @@ This guide covers deployment options for the Drools Rule Engine Microservice, fr
 
 ### Key Features
 - **High Performance**: 100-1000 RPS capability
-- **Multi-tier Caching**: Local LRU → Redis → S3
+- **Distributed Caching**: Optional `RedisCachedRuleStorage` decorator over the base `RuleStorage` (S3 / local / memory) + Redis pub/sub fan-out for cross-instance refresh convergence. No in-process LRU layer (dead `RuleCache` was deleted 2026-05-20 — see ADR-016).
 - **Production Ready**: Health checks, metrics, circuit breakers
 - **Security Hardened**: Admin authentication, input validation, rate limiting, CORS, DRL sandboxing, security headers
 
@@ -78,13 +78,17 @@ AWS_ACCESS_KEY_ID=your-access-key         # AWS credentials
 AWS_SECRET_ACCESS_KEY=your-secret-key     # AWS credentials
 # AWS_ENDPOINT=http://localhost:4566      # LocalStack for dev
 
-# === Redis Configuration (Optional) ===
-REDIS_ENABLED=true                        # Enable Redis caching
+# === Redis Configuration (cache decorator + pub/sub fan-out) ===
+REDIS_ENABLED=true                        # Wraps base storage in RedisCachedRuleStorage
 REDIS_URL=redis://localhost:6379          # Redis connection URL
 # REDIS_PASSWORD=your-redis-password      # If authentication required
+REDIS_DRL_RULES_TTL_MINUTES=15            # Cache TTL for DRL JSON
+REDIS_DRL_RULES_KEY_PREFIX=drools:rule:   # Key prefix for SCAN+MGET
+REDIS_PUBSUB_ENABLED=true                 # Cross-instance refresh fan-out (only active when REDIS_ENABLED=true)
+REDIS_REFRESH_CHANNEL=drools:rule:events  # Pub/sub channel for refresh events
+REDIS_TIMEOUT=500ms                       # Lettuce command timeout — overrides Spring default 60s; tuned for CB-engagement (Phase 9.4 hardening, 2026-05-23)
 
 # === Performance Tuning ===
-LRU_CACHE_MAX_SIZE=100                    # Local cache size
 RULE_EXECUTION_TIMEOUT_SECONDS=30         # Rule timeout
 THREAD_POOL_RULE_EXECUTION_CORE_SIZE=10   # Thread pool core size
 THREAD_POOL_RULE_EXECUTION_MAX_SIZE=50    # Thread pool max size
@@ -93,7 +97,7 @@ THREAD_POOL_RULE_EXECUTION_MAX_SIZE=50    # Thread pool max size
 DROOLS_VALIDATION_RULE_ID_MAX_LENGTH=255          # Rule ID validation
 DROOLS_VALIDATION_DATA_MAX_FIELDS=100             # Data field limit
 DROOLS_VALIDATION_REQUEST_MAX_SIZE_MB=10          # Request size limit
-DROOLS_RATE_LIMITING_PER_MINUTE_LIMIT=1000        # Rate limit per minute
+DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE=1000     # Rate limit per minute (per-client)
 DROOLS_CORS_ALLOWED_ORIGINS=                         # CORS origins (empty = no CORS; set origins for production)
 ADMIN_API_KEY=                                       # Admin endpoint API key (empty = auth disabled)
 
@@ -138,14 +142,16 @@ drools:
   rule-source: s3
   bucket-name: ${RULE_BUCKET_NAME}
   
-# Caching
-cache:
-  lru:
-    max-size: ${LRU_CACHE_MAX_SIZE:100}
-  redis:
-    enabled: ${REDIS_ENABLED:true}
-    url: ${REDIS_URL:redis://localhost:6379}
-    ttl: 3600
+# Caching (RedisCachedRuleStorage decorator + pub/sub fan-out)
+redis:
+  enabled: ${REDIS_ENABLED:true}
+  url: ${REDIS_URL:redis://localhost:6379}
+  drl-rules:
+    ttl-minutes: ${REDIS_DRL_RULES_TTL_MINUTES:15}
+    key-prefix: ${REDIS_DRL_RULES_KEY_PREFIX:drools:rule:}
+  pubsub:
+    enabled: ${REDIS_PUBSUB_ENABLED:true}
+    channel: ${REDIS_REFRESH_CHANNEL:drools:rule:events}
 
 # Performance
 thread-pools:
@@ -166,7 +172,7 @@ drools:
   cors:
     allowed-origins: ${DROOLS_CORS_ALLOWED_ORIGINS:}
   rate-limiting:
-    per-minute-limit: ${DROOLS_RATE_LIMITING_PER_MINUTE_LIMIT:1000}
+    requests-per-minute: ${DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE:1000}
 
 # Circuit Breakers
 resilience4j:
@@ -308,17 +314,18 @@ RULE_SOURCE=s3
 RULE_BUCKET_NAME=prod-drools-rules
 AWS_REGION=us-east-1
 
-# Redis Configuration
+# Redis Configuration (shared cache + cross-instance fan-out)
 REDIS_ENABLED=true
 REDIS_URL=redis://prod-redis.company.com:6379
+REDIS_DRL_RULES_TTL_MINUTES=15
+REDIS_PUBSUB_ENABLED=true
 
 # Performance Tuning
-LRU_CACHE_MAX_SIZE=500
 THREAD_POOL_RULE_EXECUTION_CORE_SIZE=20
 THREAD_POOL_RULE_EXECUTION_MAX_SIZE=100
 
 # Security
-DROOLS_RATE_LIMITING_PER_MINUTE_LIMIT=5000
+DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE=5000
 DROOLS_CORS_ALLOWED_ORIGINS=https://app.company.com,https://admin.company.com
 ADMIN_API_KEY=your-secure-production-api-key
 
@@ -715,13 +722,26 @@ The application exports metrics via Micrometer. Configure your monitoring system
 ### 2. Key Metrics to Monitor
 
 ```yaml
-# Application Metrics
+# Application Metrics — rule execution
 - drools.rule.execution.count
 - drools.rule.execution.time
-- drools.cache.hits
-- drools.cache.misses
-- drools.storage.operations.count
-- drools.circuit.breaker.state
+
+# Application Metrics — Redis cache decorator (emitted by RedisCachedRuleStorage)
+- drools.cache.hit{layer="redis"}            # single-key getRule hits
+- drools.cache.miss{layer="redis"}           # single-key getRule misses
+- drools.cache.bulk.hit{layer="redis"}       # bulk getAllRules — keys found in Redis
+- drools.cache.bulk.miss{layer="redis"}      # bulk getAllRules — keys absent from Redis
+
+# Application Metrics — Pub/sub fan-out (emitted by RuleRefreshPublisher/Subscriber)
+- drools.refresh.published{event="single|bulk|delete",result="success|failure"}
+- drools.refresh.received{event="single|bulk|delete"}
+- drools.refresh.skipped_self                # events filtered by per-instance UUID
+- drools.refresh.failed{layer="subscriber"}  # handler errors
+- drools.refresh.processing.duration
+
+# Resilience4j circuit breakers (auto-emitted)
+- resilience4j.circuitbreaker.state{name="redis|s3",state="open|half_open|closed"}
+- resilience4j.circuitbreaker.calls{name="redis|s3",kind="successful|failed|not_permitted"}
 
 # System Metrics
 - jvm.memory.used
@@ -876,5 +896,5 @@ curl http://localhost:8080/admin/rules
 
 ---
 
-**Last Updated**: 2026-02-26
-**Version**: 1.1.0
+**Last Updated**: 2026-05-24
+**Version**: 1.2.0

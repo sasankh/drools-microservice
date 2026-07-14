@@ -1,0 +1,136 @@
+# Phase 9.2 / 9.3 / 9.4 overlay — 3 app replicas + nginx LB + named Redis.
+#
+# This overlay does NOT pull in the base `app:` service. Bring it up with an
+# explicit service list so Compose ignores the single-`app:` block from
+# docker-compose.yml (which would otherwise fight for ports 8080/8081):
+#
+#   docker compose -f docker-compose.yml \
+#                  -f scripts/docker-compose.loadtest.yml \
+#                  -f scripts/docker-compose.loadtest-multi.yml \
+#                  up -d --build app1 app2 app3 nginx redis localstack
+#
+# Topology (host ↔ container):
+#   nginx       : 8080  -> :80    (JMeter target; round-robin upstream over app1/2/3)
+#   app1        : 18081 -> :8081  (actuator only; main API hidden behind nginx)
+#   app2        : 28081 -> :8081
+#   app3        : 38081 -> :8081
+#   redis       : 6379  -> :6379  container_name=drools-redis (deterministic for `docker kill`)
+#   localstack  : 4566  -> :4566  inherited from base
+#
+# Per-replica REDIS_PUBSUB_ENABLED is exported by the harness ahead of `docker compose up`:
+#   - cache-only mode (Phase 9.2): REDIS_PUBSUB_ENABLED=false
+#   - full mode      (Phase 9.3 / 9.4): REDIS_PUBSUB_ENABLED=true
+
+x-app-replica: &app_replica
+  build:
+    # Paths in overlay files resolve relative to the project directory (location of
+    # the first `-f` file = docker-compose.yml at PROJECT_ROOT), not relative to
+    # this overlay file. So `.` = PROJECT_ROOT, matching the base `app:` build.
+    context: .
+    dockerfile: Dockerfile
+  environment:
+    # -D system properties at the end have highest precedence (beats profile YAML
+    # values). The docker profile hardcodes drools.circuit-breaker.redis.failure-rate-threshold=65
+    # without an env-var placeholder, so DROOLS_CB_REDIS_FAILURE_RATE=50 alone wouldn't override.
+    # See the test-only CB threshold note below.
+    - JAVA_OPTS=-Xms512m -Xmx2048m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+UseStringDeduplication -Ddrools.circuit-breaker.redis.failure-rate-threshold=50
+    - RULE_SOURCE=s3
+    - RULE_BUCKET_NAME=local-rules
+    - AWS_REGION=us-east-1
+    - AWS_ENDPOINT=http://localstack:4566
+    - AWS_ACCESS_KEY_ID=test
+    - AWS_SECRET_ACCESS_KEY=test
+    - REDIS_ENABLED=true
+    - REDIS_URL=redis://redis:6379
+    - REDIS_DRL_RULES_TTL_MINUTES=15
+    - REDIS_PUBSUB_ENABLED=${REDIS_PUBSUB_ENABLED:-true}
+    - RULE_EXECUTION_TIMEOUT_SECONDS=30
+    - DROOLS_THREAD_POOL_CORE_SIZE=8
+    - DROOLS_THREAD_POOL_MAX_SIZE=20
+    - DROOLS_THREAD_POOL_QUEUE_CAPACITY=50
+    - DROOLS_STORAGE_THREAD_POOL_CORE_SIZE=4
+    - DROOLS_STORAGE_THREAD_POOL_MAX_SIZE=10
+    - AWS_S3_MAX_CONNECTIONS=25
+    - AWS_S3_CONNECTION_TIMEOUT=5
+    - AWS_S3_SOCKET_TIMEOUT=30
+    - AUTO_REFRESH_ENABLED=false
+    - LOG_LEVEL=INFO
+    - SPRING_PROFILES_ACTIVE=docker
+    - DROOLS_RATE_LIMITING_ENABLED=false
+    # Phase 9.4 needs the Redis CB to engage within CB_OPEN_DEADLINE_S=30s of a
+    # docker-kill of Redis. The docker-profile 65% threshold is too high for a 60s
+    # outage with low-RPS exerciser traffic — by the end of the kill window the
+    # sliding-window failure rate sits around 50-55% (failures get diluted by
+    # pre-kill warm calls still in the window). Production traffic (hundreds
+    # of RPS) would flip the window to 100% in seconds; the test environment
+    # can't model that. The 50% override is applied via -D in JAVA_OPTS above
+    # (the docker profile hardcodes the property without an env-var placeholder).
+    # This env var alone isn't enough but is kept here for visibility — see
+    # https://docs.spring.io/spring-boot/docs/current/reference/html/features.html
+    # for the Spring property-resolution precedence.
+    - DROOLS_CB_REDIS_FAILURE_RATE=50
+  depends_on:
+    localstack:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  networks:
+    - drools-network
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/admin/health"]
+    interval: 10s
+    timeout: 5s
+    retries: 6
+    start_period: 60s
+
+services:
+  app1:
+    <<: *app_replica
+    container_name: drools-app-1
+    ports:
+      - "127.0.0.1:18081:8081"
+
+  app2:
+    <<: *app_replica
+    container_name: drools-app-2
+    ports:
+      - "127.0.0.1:28081:8081"
+
+  app3:
+    <<: *app_replica
+    container_name: drools-app-3
+    ports:
+      - "127.0.0.1:38081:8081"
+
+  # Pin Redis container name so phase_9_4_failure_mode can `docker kill drools-redis`
+  # deterministically. Inherits image / command / healthcheck / volumes from base.
+  redis:
+    container_name: drools-redis
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: drools-lb
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./scripts/nginx-loadtest.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      app1:
+        condition: service_healthy
+      app2:
+        condition: service_healthy
+      app3:
+        condition: service_healthy
+    networks:
+      - drools-network
+    restart: unless-stopped
+    healthcheck:
+      # `wget -O /dev/null` does a GET (and discards the body). Avoid `--spider` —
+      # that sends a HEAD request, which Spring's /admin/health doesn't accept
+      # (returns 405) so the container reports unhealthy even when the endpoint works.
+      test: ["CMD", "wget", "--quiet", "--tries=1", "-O", "/dev/null", "http://localhost/admin/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s

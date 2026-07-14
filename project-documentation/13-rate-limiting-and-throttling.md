@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Partners, developers, operators |
 | **Purpose** | Complete behavior of the per-client rate limiter — including the multi-tier client identification that's the most surprising part of the design |
-| **Last verified against** | [`RateLimitingFilter.java`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java), [`RateLimitingConfig.java`](../src/main/java/com/company/drools/config/RateLimitingConfig.java), [`RateLimitingFilterTest.java`](../src/test/java/com/company/drools/api/filter/RateLimitingFilterTest.java) on 2026-05-10 |
+| **Last verified against** | [`RateLimitingFilter.java`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java), [`RateLimitingConfig.java`](../src/main/java/com/company/drools/config/RateLimitingConfig.java), [`RateLimitingFilterTest.java`](../src/test/java/com/company/drools/api/filter/RateLimitingFilterTest.java) on 2026-05-24 |
 | **Related docs** | [09-environment-variables-reference.md](09-environment-variables-reference.md), [12-error-code-catalog.md](12-error-code-catalog.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
@@ -51,8 +51,8 @@ incoming request
 ```
 
 Verified by [`RateLimitingFilterTest.java`](../src/test/java/com/company/drools/api/filter/RateLimitingFilterTest.java):
-- `testFilter_AdminEndpoint_SkipsRateLimit()` (lines 120-127) proves admin endpoints are exempt
-- `testFilter_PerClient_IndependentLimits()` (lines 96-117) proves clients have independent buckets
+- `testFilter_AdminEndpoint_SkipsRateLimit()` (lines 125-132) proves admin endpoints are exempt
+- `testFilter_PerClient_IndependentLimits()` (lines 101-121) proves clients have independent buckets
 
 ---
 
@@ -60,7 +60,7 @@ Verified by [`RateLimitingFilterTest.java`](../src/test/java/com/company/drools/
 
 This is the most often-misunderstood part of the design.
 
-[`RateLimitingFilter.java:69-94`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java#L69-L94):
+[`RateLimitingFilter.java:69-95`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java#L69-L95):
 
 ```java
 private String getClientIdentifier(HttpServletRequest request) {
@@ -141,7 +141,7 @@ Example: a client sends 1000 requests in the first 6 seconds of the minute. They
 
 The rate limiter tracks per-client state in a `ConcurrentHashMap`. To prevent memory exhaustion (an attacker spoofing 10 million `X-Client-Id` values to fill the map), there's a hard cap.
 
-[`RateLimitingConfig.java:86-91`](../src/main/java/com/company/drools/config/RateLimitingConfig.java#L86-L91):
+[`RateLimitingConfig.java:85-91`](../src/main/java/com/company/drools/config/RateLimitingConfig.java#L85-L91):
 ```java
 if (!clientData.containsKey(clientId)
     && clientData.size() >= config.getMaxClients()) {

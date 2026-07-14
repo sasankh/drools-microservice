@@ -5,11 +5,6 @@ drools:
   # Use in-memory rule source for fast unit tests
   rule-source: memory
 
-  # Cache configuration
-  cache:
-    enabled: true
-    lru-max-size: 10  # Small cache for testing
-
   # Validation limits (lower for faster tests)
   validation:
     rule-id:

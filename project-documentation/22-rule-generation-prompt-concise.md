@@ -2,6 +2,8 @@
 
 ## Quick Copy Version for AI Assistants
 
+> ⚠️ **SANDBOX CONSTRAINT** — the template below uses `eval(...)` for brevity, but **`DrlSanitizer` rejects every `eval()`** at refresh time. Replace `eval(...)` with Map-pattern syntax in generated rules: `$data : Map(this["amount"] != null, ((Number)this["amount"]).doubleValue() > 100)`. Also avoid `Runtime`, `Thread`, `ClassLoader`, `System.exit`, `Class.forName`, reflection, file/network I/O, static imports, and any `import` outside the 20-prefix allowlist (`java.util.*`, `java.math.*`, `java.time.*`, named `java.lang` numerics, `java.text` formatters — no `com.company.*`). See [16-drl-sandboxing.md](16-drl-sandboxing.md); pattern-match the actual on-disk rules in [`sample-rules/`](../sample-rules/) (cataloged in [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md)).
+
 Copy this entire section and provide it to any AI assistant along with your sample payload and requirements:
 
 ---

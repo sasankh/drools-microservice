@@ -38,8 +38,9 @@ services:
       - REDIS_ENABLED=true
       - REDIS_URL=redis://redis:6379
 
-      # Cache configuration
-      - LRU_CACHE_MAX_SIZE=100
+      # Cache configuration (Redis decorator + pub/sub fan-out)
+      - REDIS_DRL_RULES_TTL_MINUTES=15
+      - REDIS_PUBSUB_ENABLED=true
       - RULE_EXECUTION_TIMEOUT_SECONDS=30
       
       # Thread pool configuration for containerized environment

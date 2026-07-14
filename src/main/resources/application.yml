@@ -45,7 +45,11 @@ spring:
   data:
     redis:
       url: ${REDIS_URL:redis://localhost:6379}
-      timeout: 2000ms
+      # Lettuce command timeout. 500ms default sits below the Redis CB's
+      # slowCallDurationThreshold (2s) so command timeouts are unambiguously classified
+      # as failures (not slow calls), which lets the CB engage cleanly during outages.
+      # Raise to 1000–1500ms for distant or high-latency Redis. See 29-circuit-breakers.
+      timeout: ${REDIS_TIMEOUT:500ms}
       lettuce:
         pool:
           max-active: 10
@@ -64,7 +68,6 @@ drools:
   local:
     rules-directory: ${LOCAL_RULES_DIRECTORY:src/main/resources/rules}
   cache:
-    lru-max-size: ${LRU_CACHE_MAX_SIZE:100}
     execution-timeout-seconds: ${RULE_EXECUTION_TIMEOUT_SECONDS:30}
   refresh:
     auto-enabled: ${AUTO_REFRESH_ENABLED:false}
@@ -126,7 +129,12 @@ drools:
 # Redis Configuration
 redis:
   enabled: ${REDIS_ENABLED:false}
-  ttl-minutes: ${REDIS_TTL_MINUTES:60}
+  drl-rules:
+    ttl-minutes: ${REDIS_DRL_RULES_TTL_MINUTES:15}
+    key-prefix: ${REDIS_DRL_RULES_KEY_PREFIX:drools:rule:}
+  pubsub:
+    enabled: ${REDIS_PUBSUB_ENABLED:true}
+    channel: ${REDIS_REFRESH_CHANNEL:drools:rule:events}
 
 # AWS Configuration
 aws:

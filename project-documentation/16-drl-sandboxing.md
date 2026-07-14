@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Rule authors (humans), AI rule-generation tools, security reviewers |
 | **Purpose** | Definitive reference for what `DrlSanitizer` blocks and what's allowed. The doc AI rule-generation tools must consume to produce sandbox-passing rules. |
-| **Last verified against** | [`DrlSanitizer.java`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java), [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) on 2026-05-10 |
+| **Last verified against** | [`DrlSanitizer.java`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java), [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) on 2026-05-24 |
 | **Related docs** | [17-rule-development.md](17-rule-development.md), [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
@@ -65,7 +65,7 @@ See [10-api-reference.md](10-api-reference.md) `POST /admin/refresh-rules` for t
 
 ## Check 1 — Imports
 
-[`DrlSanitizer.java:124-144`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java#L124-L144)
+[`DrlSanitizer.java:125-139`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java#L125-L139)
 
 The import scanner uses regex `^\h*+import\h++(static\h++)?([\w.]+\*?)\h*+;?+\h*+$` (`\h` = horizontal whitespace, possessive quantifiers `*+`/`++`/`?+` prevent ReDoS backtracking on malformed DRL — S5852 fix) and inspects every match.
 
@@ -159,7 +159,7 @@ This is intentional — even seemingly innocent custom imports are rejected beca
 
 ## Check 2 — Blocked class references
 
-[`DrlSanitizer.java:164-172`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java#L164-L172)
+[`DrlSanitizer.java:159-167`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java#L159-L167)
 
 The sanitizer scans the text for word-boundary matches against this list, regardless of import status. So even if you don't import `Runtime`, writing `Runtime.getRuntime()` anywhere in the rule body is rejected.
 
@@ -196,7 +196,7 @@ If you import `org.example.Thread` (different package, same simple name) — fir
 
 ## Check 3 — Blocked method calls
 
-[`DrlSanitizer.java:174-180`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java#L174-L180)
+[`DrlSanitizer.java:169-175`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java#L169-L175)
 
 The sanitizer does a literal substring scan for each entry. This is less precise than the class check (no word boundary), so e.g., `Class.forName` matches `MyClass.forName` if you somehow had that.
 
@@ -234,7 +234,7 @@ Verbatim from [`DrlSanitizer.java:55-75`](../src/main/java/com/company/drools/co
 
 ## Check 4 — `eval()` is forbidden
 
-[`DrlSanitizer.java:182-186`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java#L182-L186)
+[`DrlSanitizer.java:177-181`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java#L177-L181)
 
 The pattern `\beval\s*\(` matches any function call to `eval`. This is rejected unconditionally with the message:
 ```
@@ -378,7 +378,7 @@ If your rule is in `errors[]`, read the violation message.
 mvn test -Dtest=DrlSanitizerTest
 ```
 
-The test class has 23 cases covering every rejection path. Looking at the test cases shows you exactly what's rejected. See [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java).
+The test class has 8 test methods (4 `@Test` + 4 `@ParameterizedTest`) that expand to ~50+ effective cases covering every rejection path. Looking at the test methods shows you exactly what's rejected. See [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java).
 
 ### Option 3: Write a tiny test in your rule's own test file
 
@@ -430,6 +430,6 @@ To prove the sandbox is what this doc says it is, run:
 mvn test -Dtest=DrlSanitizerTest 2>&1 | grep -E 'Tests run|FAIL'
 ```
 
-Expected: ~23 tests, all pass.
+Expected: 8 test methods expanding to ~50+ parameterized invocations, all pass.
 
 Or read [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) directly — every claim in this doc has a corresponding test case.

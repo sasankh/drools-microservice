@@ -14,7 +14,7 @@ A high-performance business rule execution microservice built with Spring Boot a
 
 - **High Performance**: Sub-100ms P99 latency for cached rules, supports 100-1000 RPS
 - **Scalable Storage**: AWS S3 backend with hierarchical rule organization
-- **Multi-tier Caching**: Local LRU + Redis distributed caching for optimal performance
+- **Redis-decorator Caching**: `RedisCachedRuleStorage` wraps the base storage when `REDIS_ENABLED=true` (read-through cache of DRL text + pub/sub fan-out for cross-instance refresh; see [ADR-016](project-documentation/36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20))
 - **Rule Management**: REST APIs for hot-reloading and monitoring rules
 - **Production Ready**: Health checks, metrics, monitoring, and comprehensive security
 - **Memory Stable**: Proper resource disposal prevents memory leaks and OOM errors
@@ -26,10 +26,15 @@ A high-performance business rule execution microservice built with Spring Boot a
 ## 🏗️ Architecture
 
 ```
-Client Request → REST API → Rule Engine → Cache Layer → Storage Layer
-                    ↓           ↓            ↓           ↓
-               Controller → Drools KIE → LRU/Redis → S3/Local/Memory
+Client Request → REST API → Rule Engine → Storage Layer
+                    ↓           ↓            ↓
+               Controller → kieContainer → RedisCachedRuleStorage decorator (opt-in)
+                            (in-memory      → S3 / LocalFile / In-Memory base storage
+                             compiled       (+ Redis pub/sub fan-out on refresh)
+                             rules)
 ```
+
+`/execute-rule` reads compiled rules from the in-memory `kieContainer` only — it never touches Redis. The Redis decorator only sits in the refresh path (DRL text fetch from S3 → cache populate). Pub/sub events on `drools:rule:events` keep cross-instance compiled state in sync.
 
 ### Tech Stack
 
@@ -156,7 +161,7 @@ docker build -t drools-rule-engine:latest .
 
 # Run the container
 docker run -p 8080:8080 -p 8081:8081 \
-  -e RULE_SOURCE=memory \
+  -e RULE_SOURCE=local \
   drools-rule-engine:latest
 ```
 
@@ -270,7 +275,7 @@ The application supports multiple configuration methods (in priority order):
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `RULE_SOURCE` | Storage backend: `s3`, `local`, or `memory` | `memory` | Yes |
+| `RULE_SOURCE` | Storage backend: `local` (in-memory sample rules), `file` (filesystem), or `s3` (AWS S3 / LocalStack) | `local` | Yes |
 | `RULE_BUCKET_NAME` | S3 bucket name for rules | `local-rules` | If RULE_SOURCE=s3 |
 | `AWS_ENDPOINT` | S3 endpoint URL (LocalStack: http://localhost:4566) | AWS default | If using LocalStack |
 
@@ -278,9 +283,13 @@ The application supports multiple configuration methods (in priority order):
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `REDIS_ENABLED` | Enable Redis distributed caching | `false` |
+| `REDIS_ENABLED` | Wrap base storage in `RedisCachedRuleStorage` (read-through + write-through) | `false` |
 | `REDIS_URL` | Redis connection URL | `redis://localhost:6379` |
-| `LRU_CACHE_MAX_SIZE` | Local LRU cache size | `100` |
+| `REDIS_DRL_RULES_TTL_MINUTES` | Cache TTL for DRL JSON (minutes) | `15` |
+| `REDIS_DRL_RULES_KEY_PREFIX` | Key prefix for SCAN+MGET bulk path | `drools:rule:` |
+| `REDIS_TIMEOUT` | Lettuce command timeout (sits below CB `slowCallDurationThreshold=2s`) | `500ms` |
+| `REDIS_PUBSUB_ENABLED` | Enable cross-instance refresh fan-out via `RuleRefreshPublisher`/`Subscriber` | `true` (when Redis enabled) |
+| `REDIS_REFRESH_CHANNEL` | Pub/sub channel for refresh events | `drools:rule:events` |
 | `RULE_EXECUTION_TIMEOUT_SECONDS` | Rule execution timeout | `30` |
 | `LOG_LEVEL` | Application log level | `INFO` |
 
@@ -308,16 +317,16 @@ The application supports multiple configuration methods (in priority order):
 
 ### Storage Backend Configuration
 
-#### 1. Memory Storage (Development)
-```bash
-export RULE_SOURCE=memory
-```
-Uses built-in sample rules. No additional setup required.
-
-#### 2. Local File Storage (Development)
+#### 1. In-Memory Storage (Development — built-in sample rules)
 ```bash
 export RULE_SOURCE=local
-export RULE_BASE_PATH=/path/to/rules
+```
+Uses 2 built-in sample rules from `InMemoryRuleStorage` (`pricing.discount.simple`, `pricing.discount.vip`). No additional setup required. (Despite the value `local`, this backend is purely in-memory — see [StorageFactory.java](src/main/java/com/company/drools/storage/StorageFactory.java) for the mapping.)
+
+#### 2. Local File Storage (Development — your own `.drl` files)
+```bash
+export RULE_SOURCE=file
+export LOCAL_RULES_DIRECTORY=/path/to/rules
 ```
 
 #### 3. S3 Storage (Production)
@@ -401,13 +410,15 @@ GET /admin/health
     "active_rules": 25
   },
   "cache": {
-    "enabled": true,
-    "size": 15,
-    "max_size": 100,
-    "statistics": {
-      "hits": 1250,
-      "misses": 45,
-      "evictions": 2
+    "status": "UP",
+    "details": {
+      "mode": "redis",
+      "enabled": true,
+      "statistics": {
+        "hits": 1250,
+        "misses": 45,
+        "hit_rate": "96.53%"
+      }
     }
   },
   "storage": {
@@ -430,7 +441,6 @@ GET /admin/rules
       "loaded_at": "2025-07-21T17:00:00Z",
       "execution_count": 150,
       "avg_execution_time_ms": 12.5,
-      "cached": true,
       "version": "1.0"
     }
   ]
@@ -689,14 +699,17 @@ src/
 │   ├── core/                  # Business logic
 │   │   ├── engine/           # Drools engine integration
 │   │   └── model/            # Domain models
-│   ├── storage/              # Storage implementations
+│   ├── storage/              # Storage implementations + Redis cache decorator
 │   │   ├── RuleStorage.java  # Storage interface
-│   │   ├── S3RuleStorage.java # S3 implementation
-│   │   └── LocalFileStorage.java # File system implementation
-│   ├── cache/                # Caching implementations
-│   │   ├── RuleCache.java    # Cache interface
-│   │   ├── LocalLRUCache.java # LRU cache
-│   │   └── RedisRuleCache.java # Redis cache
+│   │   ├── S3RuleStorage.java # S3 backend
+│   │   ├── LocalFileStorage.java # File system backend
+│   │   ├── InMemoryRuleStorage.java # Test/dev backend
+│   │   ├── RedisCachedRuleStorage.java # Read-through + write-through Redis decorator (ADR-016)
+│   │   └── StorageFactory.java # Backend selector; wraps in Redis decorator when enabled
+│   ├── cache/                # Cross-instance refresh pub/sub
+│   │   ├── RefreshEvent.java # Wire format
+│   │   ├── RuleRefreshPublisher.java # Emits to drools:rule:events
+│   │   └── RuleRefreshSubscriber.java # Self-dedup + engine dispatch
 │   ├── common/               # Shared utilities
 │   │   └── LogSanitizer.java # Log sanitization
 │   └── config/               # Spring configuration
@@ -1001,13 +1014,13 @@ docker compose down
 ### Testing Different Storage Backends
 
 ```bash
-# Test with memory storage
-export RULE_SOURCE=memory
+# Test with in-memory storage (built-in sample rules)
+export RULE_SOURCE=local
 mvn spring-boot:run
 
-# Test with file storage
-export RULE_SOURCE=local
-export RULE_BASE_PATH=./test-rules
+# Test with file storage (your own .drl files)
+export RULE_SOURCE=file
+export LOCAL_RULES_DIRECTORY=./test-rules
 mvn spring-boot:run
 
 # Test with S3 storage
@@ -1072,10 +1085,11 @@ export RULE_SOURCE=s3
 export RULE_BUCKET_NAME=production-rules
 export AWS_REGION=us-east-1
 
-# Caching
+# Caching (Redis decorator + pub/sub fan-out)
 export REDIS_ENABLED=true
 export REDIS_URL=redis://prod-redis:6379
-export LRU_CACHE_MAX_SIZE=500
+export REDIS_DRL_RULES_TTL_MINUTES=15
+export REDIS_PUBSUB_ENABLED=true
 
 # Performance
 export RULE_EXECUTION_TIMEOUT_SECONDS=10
@@ -1136,16 +1150,14 @@ curl http://localhost:8080/admin/rules | jq '.rules[].avg_execution_time_ms'
 
 ### Rule Capacity & Memory Sizing
 
-Understanding the two distinct caching layers helps answer this correctly.
+Two distinct rule state stores; only one occupies JVM heap.
 
-**Two separate caching layers:**
-
-| Layer | What it stores | Used when | Memory impact |
+| Store | What it holds | Used when | Memory impact |
 |---|---|---|---|
-| `LocalLRUCache` / Redis | Raw DRL source text (`Rule` objects, ~10 KB each) | Refresh and startup warm-up only | Negligible — 100 entries ≈ 1 MB |
-| `DroolsEngineService.kieContainer` | All compiled `KieBase` objects simultaneously | Every rule execution | Significant — grows with rule count |
+| Redis (via `RedisCachedRuleStorage`) | DRL JSON for every loaded rule (~10 KB each) | Refresh, warm-start, cross-instance fan-out | None on JVM — lives in Redis |
+| `DroolsEngineService.kieContainer` | All compiled `KieBase` objects simultaneously | Every `/execute-rule` call | Significant — grows with rule count |
 
-**Key point:** `LRU_CACHE_MAX_SIZE` controls how many DRL text strings are cached before eviction to Redis/S3. It has no effect on compiled rules — all loaded rules are always compiled in the `KieContainer` simultaneously. There is no eviction of compiled rules.
+**Key point:** Redis is not in the execution hot path. Cache TTL (`REDIS_DRL_RULES_TTL_MINUTES`) only affects refresh/warm-start cost. Heap pressure comes from the compiled `kieContainer`, which holds all loaded rules with no eviction. Scale horizontally to shard compiled-state memory across instances.
 
 **Real capacity limit = heap / compiled-rule size.** Only `-Xmx` matters.
 
@@ -1324,7 +1336,7 @@ docker-compose exec app jstat -gc 1
 - Check existing issues: [GitHub Issues](https://github.com/your-repo/issues)
 - Review logs: `tail -f logs/application.log`
 - Verify configuration: `curl http://localhost:8080/admin/health`
-- Test with memory storage: `export RULE_SOURCE=memory`
+- Test with in-memory built-in rules: `export RULE_SOURCE=local`
 
 ## 📞 Support
 

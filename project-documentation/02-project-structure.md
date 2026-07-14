@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, AI agents (the navigation map both reach for first) |
 | **Purpose** | Annotated tree of every file and folder in the repo, so a reader can find any code, config, or doc by purpose |
-| **Last verified against repo** | 2026-05-10 (post-modernization, post-load-test) |
+| **Last verified against repo** | 2026-05-24 (post-modernization, post-load-test, post-Redis-cache layer + Phase 9.4 hardening) |
 | **Related docs** | [01-project-overview.md](01-project-overview.md), [03-tech-stack.md](03-tech-stack.md), [27-development-setup.md](27-development-setup.md) |
 
 ---
@@ -19,7 +19,7 @@ drools-microservice/
 ├── project-documentation/            # ★ THIS DOCUMENTATION CORPUS (NotebookLM target)
 ├── ai-instructions/                  # AI workflow protocols (excluded from doc corpus)
 ├── .ai-workspace/                    # AI planning artifacts (excluded from doc corpus)
-├── .claude/                          # Claude Code session config (excluded)
+├── .claude/                          # Claude Code config (settings.json tracked; *.lock + settings.local.json gitignored)
 ├── .vscode/                          # IDE settings (excluded)
 ├── gc-logs/                          # Mounted GC log dir for container (runtime data)
 ├── heap-dumps/                       # Mounted heap dump dir (runtime data)
@@ -52,7 +52,7 @@ drools-microservice/
 
 ### `src/main/java/com/company/drools/`
 
-The Java root. 57 files organized into 5 functional packages plus the `Application.java` entrypoint.
+The Java root. 59 files organized into 6 functional packages (`api`, `cache`, `common`, `config`, `core`, `storage`) plus the `Application.java` entrypoint.
 
 ```
 com/company/drools/
@@ -116,21 +116,22 @@ com/company/drools/
 │   ├── LocalFileStorage.java              # Filesystem backend; normalize() + startsWith() path safety
 │   ├── InMemoryRuleStorage.java           # Test/dev backend with hardcoded sample rules
 │   ├── InMemoryRuleStorageAdapter.java    # Adapter exposing InMemoryRuleStorage via RuleStorage iface
-│   └── StorageFactory.java                # Selects backend by RULE_SOURCE env (local | file | s3)
+│   ├── RedisCachedRuleStorage.java        # @ConditionalOnProperty(redis.enabled=true) — read-through + write-through decorator on RuleStorage (ADR-016)
+│   └── StorageFactory.java                # Selects backend by RULE_SOURCE; wraps in RedisCachedRuleStorage when REDIS_ENABLED=true
 │
-├── cache/                             # Caching layer
-│   ├── RuleCache.java                     # Interface
-│   ├── LocalLRUCache.java                 # @Primary — in-memory LRU (uses WRITE lock on get(); see ADR-004)
-│   ├── RedisRuleCache.java                # @ConditionalOnProperty(redis.enabled=true) — currently dormant
-│   └── CacheStatistics.java               # Hit/miss/eviction counters
+├── cache/                             # Pub/sub fan-out for cross-instance refresh (ADR-016)
+│   ├── RefreshEvent.java                  # Wire format: {event_type, rule_id, source_instance_id, timestamp}
+│   ├── RuleRefreshPublisher.java          # @ConditionalOnExpression — emits to drools:rule:events
+│   └── RuleRefreshSubscriber.java         # MessageListener — self-dedups via source_instance_id, dispatches to engine
 │
 ├── common/                            # Shared utilities
 │   └── LogSanitizer.java                  # Masks sensitive data in logs (CC, SSN, tokens, etc.)
 │
-└── config/                            # 16 Spring @Configuration classes
+└── config/                            # 17 Spring @Configuration classes
     ├── DroolsConfig.java                  # KieServices/KieContainer beans
     ├── S3Config.java                      # AWS S3 client + connection pool + endpoint validation
-    ├── RedisConfig.java                   # Redis connection (when enabled)
+    ├── RedisConfig.java                   # Lettuce ConnectionFactory + RedisTemplate<String,Rule> + RedisMessageListenerContainer (when enabled)
+    ├── InstanceIdConfig.java              # UUID-per-process bean used by RuleRefreshPublisher/Subscriber for self-dedup
     ├── CircuitBreakerConfig.java          # Resilience4j: s3CircuitBreaker, redisCircuitBreaker
     ├── ThreadPoolConfig.java              # Custom executors: ruleExecutionExecutor, storageExecutor
     ├── TimeoutConfig.java                 # Centralized timeout values
@@ -159,7 +160,7 @@ The `application.yml` is the most-referenced config file in the codebase. See [0
 
 ### `src/test/java/com/company/drools/`
 
-45 test files, 597 tests passing (1 pre-existing testcontainers env error, unrelated). Coverage roughly preserved from the 96.2% / 89.7% pre-modernization baseline.
+46 test files, **548 unit tests + 14 Testcontainers integration tests** passing. The Testcontainers integration tests are excluded from default `mvn test` via `pom.xml` surefire `excludes` (macOS DinD blocker; run on Linux CI). Coverage roughly preserved from the 96.2% / 89.7% pre-modernization baseline.
 
 ```
 src/test/java/com/company/drools/
@@ -177,14 +178,17 @@ src/test/java/com/company/drools/
 │   ├── engine/                        # DroolsEngineServiceTest, RuleCompilerTest, RuleExecutorTest, DrlSanitizerTest (23 cases — proves the sandbox)
 │   └── model/                         # RuleTest, RuleMetadataTest
 │
-├── storage/                           # S3RuleStorageTest, LocalFileStorageTest, InMemoryRuleStorageTest, StorageFactoryTest
-├── cache/                             # LocalLRUCacheTest, RedisRuleCacheTest, CacheStatisticsTest
+├── storage/                           # S3RuleStorageTest, LocalFileStorageTest, InMemoryRuleStorageTest, StorageFactoryTest, RedisCachedRuleStorageTest
+├── cache/                             # RefreshEventTest, RuleRefreshPublisherTest, RuleRefreshSubscriberTest
 ├── common/                            # LogSanitizerTest
-├── config/                            # 11 config tests — one per @Configuration class
+├── config/                            # 12 config tests — close to one per @Configuration class
 │
-├── integration/                       # End-to-end with Testcontainers
+├── integration/                       # End-to-end with Testcontainers (all excluded from default mvn test — see pom.xml surefire <excludes>; require host-side Docker)
 │   ├── RuleExecutionIntegrationTest.java
-│   └── S3StorageIntegrationTest.java
+│   ├── RuleRefreshIntegrationTest.java
+│   ├── S3StorageIntegrationTest.java
+│   ├── RedisCachedStorageIntegrationTest.java
+│   └── RedisPubSubIntegrationTest.java
 │
 └── testutil/                          # RuleTestUtils, ValidationConfigTestHelper
 ```
@@ -351,7 +355,7 @@ The following directories exist in the repo but are **intentionally excluded** f
 |---|---|---|
 | `ai-instructions/` | AI workflow protocols (`snap-memory`, `ai-context-update`, etc.) | Meta-tooling for AI agents working on the repo, not part of project functionality |
 | `.ai-workspace/` | AI planning artifacts (this overhaul's plan/checklist/findings) | Workspace, not deliverable docs |
-| `.claude/` | Claude Code session config (commands, settings) | IDE-equivalent config |
+| `.claude/` | Claude Code session config (`settings.json` is tracked as shared config; per-session `*.lock` and per-user `settings.local.json` are gitignored) | Mostly local Claude state |
 | `.vscode/` | VS Code editor settings | IDE config |
 | `gc-logs/` | Mounted runtime GC log directory | Runtime data |
 | `heap-dumps/` | Mounted heap dump directory (populated on OOM) | Runtime data |
@@ -386,8 +390,10 @@ If you are an AI agent considering whether to read those folders: don't, unless 
 | Local file backend | [LocalFileStorage.java](../src/main/java/com/company/drools/storage/LocalFileStorage.java) |
 | In-memory backend | [InMemoryRuleStorage.java](../src/main/java/com/company/drools/storage/InMemoryRuleStorage.java) |
 | Storage backend selector | [StorageFactory.java](../src/main/java/com/company/drools/storage/StorageFactory.java) |
-| LRU cache (`@Primary`, write-lock on get) | [LocalLRUCache.java](../src/main/java/com/company/drools/cache/LocalLRUCache.java) |
-| Redis cache (dormant by default) | [RedisRuleCache.java](../src/main/java/com/company/drools/cache/RedisRuleCache.java) |
+| Redis cache decorator (read-through + write-through) | [RedisCachedRuleStorage.java](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java) |
+| Refresh pub/sub publisher | [RuleRefreshPublisher.java](../src/main/java/com/company/drools/cache/RuleRefreshPublisher.java) |
+| Refresh pub/sub subscriber | [RuleRefreshSubscriber.java](../src/main/java/com/company/drools/cache/RuleRefreshSubscriber.java) |
+| Refresh event wire format | [RefreshEvent.java](../src/main/java/com/company/drools/cache/RefreshEvent.java) |
 | Log sanitizer | [LogSanitizer.java](../src/main/java/com/company/drools/common/LogSanitizer.java) |
 | Drools KIE beans | [DroolsConfig.java](../src/main/java/com/company/drools/config/DroolsConfig.java) |
 | S3 client + endpoint validation | [S3Config.java](../src/main/java/com/company/drools/config/S3Config.java) |

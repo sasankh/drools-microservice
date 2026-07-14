@@ -17,6 +17,21 @@ The legacy consolidated context file at `.ai-workspace/ai-initial-context/ai-ini
 
 ## ⚠️ Important: Recent change log (most recent first)
 
+### Redis CB + pub/sub hardening — Phase 9.4 follow-ups (2026-05-24)
+- **SCAN now wrapped in `redisCircuitBreaker`** — closes coverage gap in [`RedisCachedRuleStorage.scanKeys()`](src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java) so bulk-path failures (used by `invalidateAll`, `collectFromRedis`) contribute to the CB sliding window during a Redis outage. Previously SCAN bypassed the CB entirely — Phase 9.4 surfaced this by observing CB never opened during a 60s Redis kill.
+- **Lettuce timeout 2000ms → 500ms** via new env var `REDIS_TIMEOUT` (default `500ms`). The prior 2s value was an exact match for the CB's `slowCallDurationThreshold=2s`, putting Lettuce timeouts in an ambiguous classification window. 500ms sits cleanly below the slow-call threshold so timeouts unambiguously count as failures. Externalized for per-environment tuning.
+- **`RedisMessageListenerContainer.setRecoveryBackoff(FixedBackOff(2s, ∞))`** in [`RedisConfig.java`](src/main/java/com/company/drools/config/RedisConfig.java) — explicit pub/sub re-subscribe policy bounds worst-case latency to ≤2s after Redis becomes reachable post-restart. FixedBackOff over ExponentialBackOff for predictability (Phase 9.4 convergence deadline is fixed).
+- **Test count**: 545 → 548 unit tests; 13 → 14 Testcontainers integration tests (the new `scanKeysCircuitBreakerFallback` inherits the existing macOS-DinD surefire exclusion).
+- **Plan + checklist**: [`.ai-workspace/project-plans/redis-cb-hardening-plan.md`](.ai-workspace/project-plans/redis-cb-hardening-plan.md) and [`-checklist.md`](.ai-workspace/project-plans/redis-cb-hardening-checklist.md).
+
+### Redis cache + pub/sub layer (2026-05-20)
+- **Replaced dead `RuleCache` layer.** Forensic trace revealed both `LocalLRUCache` and `RedisRuleCache` were never read from at runtime — written to during refresh but `.get()` was never called. Deleted ~600 LOC of dead code.
+- **New `RedisCachedRuleStorage` decorator** wraps the base `RuleStorage` when `REDIS_ENABLED=true`. Read-through Redis cache of DRL text with 15-min TTL default. Circuit-breaker fallback to base storage if Redis is down.
+- **New pub/sub layer** (`RuleRefreshPublisher`, `RuleRefreshSubscriber`, `RefreshEvent`) — when one ECS task refreshes a rule, sibling tasks receive a JSON event on `drools:rule:events` and refresh their own `kieContainer` within ~1 sec. Solves the multi-instance compiled-state divergence problem.
+- **Env var migration**: `REDIS_TTL_MINUTES` → `REDIS_DRL_RULES_TTL_MINUTES`; `LRU_CACHE_MAX_SIZE` dropped; added `REDIS_DRL_RULES_KEY_PREFIX`, `REDIS_PUBSUB_ENABLED`, `REDIS_REFRESH_CHANNEL`.
+- **Test results**: 545 unit tests pass (down from 597 due to deleted dead-cache tests); +13 Testcontainers integration tests (excluded from default `mvn test` via pom.xml surefire config). `full-docker-test-plan.md` extended with Step 8 (Redis cache verification) and Step 9 (Redis-off regression); all 11 steps executed live and pass.
+- **ADR-016** added; ADR-004 and ADR-005 marked Superseded.
+
 ### Sonar quality gates cleared (2026-05-11)
 - **Maintainability**: 178 → 0 open issues (Waves 4A–4D: AssertJ modernization, parameterized tests, constructor injection, unused fields, cognitive complexity, ReDoS hotspots)
 - **Reliability**: 5 → 0 (BLOCKER fixed: KieSession try-with-resources; S2142 InterruptedException handling; S2583 dead branch; S6813 constructor injection for validators)
@@ -84,7 +99,7 @@ This is a Drools Rule Engine Microservice designed for high-performance business
 
 **Tech Stack**: Java 25 (enforced), Spring Boot 3.5.3, Drools 10.2.0, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
 
-**Health Status**: 9/10 - 597 tests, 96%/90% coverage (pre-modernization baseline), 39/42 security fixes complete, load-tested at 1000 rules, Sonar QG OK (0 maintainability / 0 reliability / 0 security issues)
+**Health Status**: 9/10 - 548 unit tests + 14 Testcontainers integration tests (CI-only, surefire-excluded on macOS-DinD), 96%/90% coverage (pre-modernization baseline), 39/42 security fixes complete, load-tested at 1000 rules (single-container 2026-05-10) + 3-replica multi-container + Redis-kill failure mode (Phase 9.4 2026-05-24), Sonar QG OK (0 maintainability / 0 reliability / 0 security issues)
 
 ## Common Commands
 
@@ -189,10 +204,12 @@ com.company.drools/
 
 1. **Rule Storage**: Rules are stored as .drl files in S3 with hierarchical organization (e.g., `pricing/discount/black-friday.drl`)
 
-2. **Caching Strategy**: 
-   - Refresh/startup path: S3 → Redis (optional, L2) → LocalLRUCache (L1, DRL text only)
-   - Execution path: DroolsEngineService.kieContainer (all compiled rules, no eviction)
-   - LocalLRUCache and Redis store raw DRL source text only — compiled KieBases live exclusively in the single long-lived KieContainer
+2. **Caching Strategy** (refactored 2026-05-20):
+   - When `REDIS_ENABLED=true`: `RedisCachedRuleStorage` decorates the base `RuleStorage` — read-through Redis cache of DRL text with configurable TTL (default 15 min via `REDIS_DRL_RULES_TTL_MINUTES`)
+   - When `REDIS_ENABLED=false`: direct base storage, no caching layer
+   - **Cross-task convergence**: when `REDIS_PUBSUB_ENABLED=true` (default when Redis is on), `RuleRefreshPublisher` emits events on `drools:rule:events` channel after refresh; sibling ECS tasks' `RuleRefreshSubscriber` receives and refreshes their own `kieContainer` within ~1 sec (single-rule) or ~7 min (bulk). Self-emitted events filtered via per-instance UUID
+   - Execution path: `DroolsEngineService.kieContainer` (all compiled rules, no eviction) — Redis stores raw DRL text only, compiled KieBases live exclusively in the long-lived `KieContainer`
+   - **Replaces dead `RuleCache` layer** (LocalLRUCache + old RedisRuleCache) — those were written to but never read from; deleted in Phase 4+5
 
 3. **API Design**:
    - Main API on port 8080 (`/execute-rule`)
@@ -236,12 +253,15 @@ RULE_SOURCE=s3                    # or 'local' for development
 RULE_BUCKET_NAME=local-rules      # S3 bucket name
 AWS_ENDPOINT=http://localhost:4566 # LocalStack endpoint
 
-# Redis (optional)
+# Redis (optional decorator over base storage + pub/sub fan-out)
 REDIS_ENABLED=false
 REDIS_URL=redis://localhost:6379
+REDIS_DRL_RULES_TTL_MINUTES=15
+REDIS_DRL_RULES_KEY_PREFIX=drools:rule:
+REDIS_PUBSUB_ENABLED=true                # only active when REDIS_ENABLED=true
+REDIS_REFRESH_CHANNEL=drools:rule:events
 
 # Performance
-LRU_CACHE_MAX_SIZE=100
 RULE_EXECUTION_TIMEOUT_SECONDS=30
 DROOLS_THREAD_POOL_MAX_SIZE=50
 AWS_S3_MAX_CONNECTIONS=50
@@ -263,7 +283,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 ## Development Workflow
 
-1. **Current Status**: 39/42 security findings addressed (Phases 1–9 complete, 2026-02-26); stack modernized 2026-05-09 (Java 25, Spring Boot 3.5.3, Drools 10.2.0); Drools 10 rule-loading rework + sample-rules expansion + 1000-rule load test 2026-05-10; Sonar Wave 4 (maintainability 178→0, reliability 5→0, 2 security hotspots resolved) 2026-05-11; 597 tests; 96% / 90% coverage (pre-modernization baseline); documentation rebuild 2026-05-08 with refreshes through 2026-05-11 (40 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
+1. **Current Status**: 39/42 security findings addressed (Phases 1–9 complete, 2026-02-26); stack modernized 2026-05-09 (Java 25, Spring Boot 3.5.3, Drools 10.2.0); Drools 10 rule-loading rework + sample-rules expansion + 1000-rule load test 2026-05-10; Sonar Wave 4 (maintainability 178→0, reliability 5→0, 2 security hotspots resolved) 2026-05-11; Redis cache + pub/sub layer + Phase 9 load-test harness + Phase 9.4 hardening (SCAN-CB-wrap, REDIS_TIMEOUT, pub/sub recovery backoff) 2026-05-20 → 2026-05-24; **548 unit tests + 14 integration**; 96% / 90% coverage (pre-modernization baseline); documentation rebuild 2026-05-08 with refreshes through 2026-05-24 (40 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
 
 2. **One-Command Development Environment**: Complete automated setup with validation
    ```bash
@@ -306,7 +326,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
    # Test container startup and health
    docker run -d --name test-container -p 9080:8080 -p 9081:8081 \
-     -e RULE_SOURCE=memory drools-rule-engine:latest
+     -e RULE_SOURCE=local drools-rule-engine:latest
    curl http://localhost:9081/admin/health
    docker stop test-container && docker rm test-container
    ```
@@ -351,10 +371,12 @@ All phases shipped:
 8. ✅ Stack Modernization — Java 17→25, Spring Boot 3.2.5→3.5.3, Drools 8.44.0→10.2.0 (2026-05-09)
 9. ✅ Drools 10 rule-loading rework + sample-rules expansion (10→17) + 1000-rule load test (2026-05-10)
 10. ✅ Sonar quality gates — Maintainability 178→0, Reliability 5→0, Security hotspots 2→0 (2026-05-11)
+11. ✅ Redis cache + pub/sub layer — `RedisCachedRuleStorage` decorator + `RuleRefreshPublisher`/`Subscriber`; dead `RuleCache`/`LocalLRUCache`/`RedisRuleCache` deleted (~600 LOC); env-var migration (ADR-016, 2026-05-20)
+12. ✅ Phase 9 load-test harness (3-replica + nginx + Redis-kill failure mode) + Phase 9.4 production hardening (SCAN-CB-wrap, `REDIS_TIMEOUT` env var lowering Lettuce timeout 2000ms→500ms, `RedisMessageListenerContainer.setRecoveryBackoff(FixedBackOff(2s, ∞))`) (2026-05-24)
 
 Current snapshot:
 - **Health Score**: 9/10
-- **Test Coverage**: 96.2% instruction / 89.7% branch (597 tests; coverage is the pre-modernization JaCoCo baseline — roughly preserved, not yet re-run)
+- **Test Coverage**: 96.2% instruction / 89.7% branch (548 unit + 14 integration tests; coverage is the pre-modernization JaCoCo baseline — roughly preserved through the 2026-05-20 dead-cache deletion and 2026-05-24 Phase 9.4 hardening, not yet re-run)
 - **Security**: 39/42 findings addressed
 - **Performance**: 100–1000 RPS target, P99 < 100ms cached / < 500ms cache miss (load-tested at 1000 rules — see [`39-load-test-findings.md`](project-documentation/39-load-test-findings.md))
 

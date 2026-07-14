@@ -20,10 +20,11 @@ POST /execute-rule  ───→  ┌──────────────�
                           │       ↓            │              cache miss
                           │ Validation         │                  │
                           │   @ValidRuleId     │     ┌────────────┴───┐
-                          │   @ValidRuleData   │     │  Cache layer    │
-                          │       ↓            │  ←  │  ├ LRU (primary)│
-                          │ DroolsEngine       │     │  └ Redis (idle) │
-                          │  └ KieSession      │     └─────────────────┘
+                          │   @ValidRuleData   │     │ Redis decorator │
+                          │       ↓            │  ←  │ (read-through   │
+                          │ DroolsEngine       │     │  cache + pub/   │
+                          │  └ KieSession      │     │  sub fan-out)   │
+                          │                    │     └─────────────────┘
                           │     fireAllRules   │              ▲
                           │       ↓            │              │
                           │ Response           │ ─→ resilience│
@@ -47,7 +48,7 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 2. [27-development-setup.md](27-development-setup.md) — local Java + Maven setup, conventions
 3. [02-project-structure.md](02-project-structure.md) — annotated directory tree (clickable)
 4. [04-architecture.md](04-architecture.md) — system design
-5. [28-testing-guide.md](28-testing-guide.md) — test suite map (45 files, 598 tests)
+5. [28-testing-guide.md](28-testing-guide.md) — test suite map (46 files, 548 unit + 14 integration tests)
 
 ### 🏛️ Architect / design reviewer
 
@@ -55,7 +56,7 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 2. [04-architecture.md](04-architecture.md) — full architecture (8 security layers, threading, Drools 10 `updateToVersion`)
 3. [14-security-architecture.md](14-security-architecture.md) — threat model + 8 layers
 4. [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md) — failure handling
-5. [36-architecture-decision-records.md](36-architecture-decision-records.md) — 12 ADRs explaining "why"
+5. [36-architecture-decision-records.md](36-architecture-decision-records.md) — 15 ADRs explaining "why"
 
 ### ⚙️ Operator / SRE
 
@@ -102,7 +103,7 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 | Framework | Spring Boot | 3.5.3 |
 | Rule engine | Drools | 10.2.0 |
 | Storage | AWS S3 (via SDK v2) | 2.34.0 |
-| Cache | LocalLRU primary; Redis dormant | — |
+| Cache | `RedisCachedRuleStorage` decorator (opt-in via `REDIS_ENABLED`) + Redis pub/sub fan-out | — |
 | Resilience | Resilience4j | 2.3.0 |
 | Metrics | Micrometer (CloudWatch registry) | 1.14.7 |
 | Logging | Logback + logstash-logback-encoder | 7.4 |
@@ -118,12 +119,12 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 | Stat | Value |
 |---|---|
 | Total documentation files | **40** (including this one) |
-| Total Java source files | 57 |
-| Total test files | 45 |
-| Total tests (`@Test` + `@ParameterizedTest`) | **597** |
+| Total Java source files | 59 |
+| Total test files | 46 |
+| Total tests (`@Test` + `@ParameterizedTest`) | **548** unit + 14 Testcontainers integration (surefire-excluded; CI-only) |
 | Test coverage (instruction / branch) | 96.2% / 89.7% |
 | Sample rules in `sample-rules/` | 17 |
-| Environment variables actually read | 66 |
+| Environment variables actually read | 67 |
 | Distinct error codes | 10 |
 | Spring profiles | 4 (`local`, `dev`, `prod`, `docker`) |
 | Filter chain order | 4 filters (-1, 0, 1, none) |
@@ -193,10 +194,10 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 - [35-faq.md](35-faq.md) — 65+ Q&A
 
 ### Advanced (36-39)
-- [36-architecture-decision-records.md](36-architecture-decision-records.md) — 12 ADRs + extension points
+- [36-architecture-decision-records.md](36-architecture-decision-records.md) — 15 ADRs + extension points
 - [37-glossary.md](37-glossary.md) — every term defined
 - [38-for-ai-agents.md](38-for-ai-agents.md) — verification rules and pitfalls for AI sessions working on this repo
-- [39-load-test-findings.md](39-load-test-findings.md) — measured numbers, architectural trade-offs, production-planning guidance from the 2026-05-10 load test (1,000 rules, mixed-workload soak)
+- [39-load-test-findings.md](39-load-test-findings.md) — measured numbers, architectural trade-offs, production-planning guidance from the 2026-05-10 single-container load test (1,000 rules, mixed-workload soak) + 2026-05-24 Phase 9.4 addendum (3-replica + pub/sub convergence + Redis-kill failure mode)
 
 ### Reference assets
 - [api-reference/openapi.yml](api-reference/openapi.yml) — OpenAPI 3.0 spec
@@ -232,7 +233,7 @@ If you take only one thing from this overview:
 1. **Sample rules stack multiplicatively**. VIP $100 → $72 (not $80), because both `pricing.discount.vip` and `pricing.discount.simple` fire and the discounts compound. **Production rules need `salience` or `activation-group`** — the samples deliberately don't, to demonstrate the unmanaged behavior. See [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md).
 2. **`ADMIN_API_KEY` empty = admin endpoints are open**. Default behavior. Critical to set in production. WARN log at startup is the tripwire. See [15-admin-authentication.md](15-admin-authentication.md).
 3. **`eval()` is BANNED in DRL** — and the sample rules don't need it. See [16-drl-sandboxing.md](16-drl-sandboxing.md).
-4. **`LocalLRUCache.get()` uses a WRITE lock** (because `LinkedHashMap` mutates internally on get). See [ADR-004](36-architecture-decision-records.md#adr-004-locallrucache-uses-write-lock-on-get).
+4. **Redis is a real cache when `REDIS_ENABLED=true`** — `RedisCachedRuleStorage` decorates the base storage with read-through caching; `RuleRefreshPublisher`/`Subscriber` provide cross-task fan-out via `drools:rule:events` channel. Replaced the old dead `LocalLRUCache`/`RedisRuleCache` layer on 2026-05-20. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20).
 5. **`X-Forwarded-For` is explicitly ignored** by the rate limiter (anti-spoofing). Use `X-API-Key` or `X-Client-Id` for stable identity behind a load balancer. See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md).
 6. **Rule refresh doesn't block readers** — single long-lived `KieContainer` updated in place via `KieContainer.updateToVersion(ReleaseId)` (compile happens outside the write lock). See [ADR-003](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal) and [39-load-test-findings.md](39-load-test-findings.md).
 7. **JSON uses snake_case (`rule_id`)** — not camelCase. The Java field is `ruleId` but mapped via `@JsonProperty`. See [ADR-008](36-architecture-decision-records.md#adr-008-snake_case-json-via-jsonproperty).

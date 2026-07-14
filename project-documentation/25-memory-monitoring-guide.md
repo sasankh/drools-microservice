@@ -1,7 +1,7 @@
 # Memory Monitoring Guide
 
-**Version**: 1.0.0
-**Last Updated**: 2026-02-19
+**Version**: 1.2.0
+**Last Updated**: 2026-05-24
 **Status**: Production Ready
 
 ---
@@ -31,13 +31,15 @@ The Drools Rule Engine Microservice includes comprehensive memory monitoring cap
 - **Optimize Performance**: Fine-tune JVM settings based on actual usage
 - **Production Readiness**: Monitor memory health in real-time
 
-### Critical Fix (2026-02-19)
+### Critical Fix history
 
-A critical memory leak was fixed where KieContainer instances were not being disposed. This fix prevents exit code 137 (OOM) crashes that occurred after ~6 hours of runtime.
+**2026-02-19** — initial fix: original `KieContainer` instances were not being disposed during the two-container atomic-swap, leading to exit-code-137 OOM after ~6h. Added explicit `KieContainer.dispose()` on the swapped-out container.
 
-**What was fixed**:
-- Old KieContainer instances are now properly disposed
-- Memory no longer grows by 10-100MB per rule refresh
+**2026-05-10** — Drools 10 re-engineering: the service now holds a **single long-lived `KieContainer`** updated in place via `KieContainer.updateToVersion(ReleaseId)`. Old `KieModule`s are explicitly removed from the `KieRepository` after each swap (Drools 10 does **not** auto-clean — verified by 1000-rule load test). The 2026-02-19 `dispose()` pattern was superseded. See [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal) and [`DroolsEngineService.loadOrReplaceRule`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java).
+
+**Net result**:
+- No `KieModule` / `ProjectClassLoader` leak across refreshes
+- Memory does not grow by 10-100MB per rule refresh
 - Application can run indefinitely without OOM errors
 
 ---
@@ -500,8 +502,8 @@ done
 # Check loaded rules
 curl -s http://localhost:8080/admin/rules | jq '.total_rules'
 
-# Check cache size
-curl -s http://localhost:8080/admin/health | jq '.cache.size'
+# Check cache statistics (Redis decorator only — LocalLRU was removed 2026-05-20)
+curl -s http://localhost:8080/admin/health | jq '.components.cache.details.statistics'
 
 # Check memory pools
 curl -s http://localhost:8080/admin/memory/info | jq '.memoryPools'
@@ -512,8 +514,9 @@ curl -s http://localhost:8080/admin/memory/info | jq '.memoryPools'
 # Increase heap size in docker-compose.yml
 JAVA_OPTS=-Xms512m -Xmx4096m  # Increase from 2048 to 4096
 
-# Or reduce cache size in .env
-LRU_CACHE_MAX_SIZE=50  # Reduce from 100
+# Memory pressure typically comes from compiled rules (kieContainer) — not from
+# the Redis decorator (DRL JSON lives in Redis, not the JVM heap). Reduce
+# pressure by sharding rules across more instances or trimming rule complexity.
 ```
 
 ---
@@ -563,9 +566,9 @@ tail -100 gc-logs/gc.log
 ```
 
 **Solution**:
-1. Fix memory leak (ensure latest code with KieContainer disposal)
+1. Ensure latest code (Drools 10 `updateToVersion` + `KieRepository.removeKieModule` pattern, post-2026-05-10 — the older `dispose()` approach is superseded; see [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal))
 2. Increase heap size
-3. Reduce memory usage (fewer rules, smaller cache)
+3. Reduce memory usage (fewer rules)
 
 ---
 
@@ -735,6 +738,6 @@ done
 
 ---
 
-**Last Updated**: 2026-02-19
+**Last Updated**: 2026-05-24
 **Status**: Production Ready
 **Related Docs**: troubleshooting.md, configuration.md, deployment.md
