@@ -176,19 +176,35 @@ multi_stack::redis_container_name() {
 }
 
 # Hard-kills the Redis container (SIGKILL). Exit 0 even if already gone.
+#
+# IMPORTANT: the loadtest compose file has `restart: unless-stopped` on redis
+# (and on the apps) so the stack stays up during normal operation. That policy
+# makes `docker kill` a no-op for failure-mode testing — the Docker daemon
+# respawns the container within milliseconds, so the apps' Lettuce client
+# reconnects before any failure can register on the CB sliding window. We have
+# to temporarily disable the restart policy around the kill window, then restore
+# it after `docker start`.
+#
+# Phase 9.4 ran for a long time reporting "CB never opens during 60s Redis kill"
+# until this was diagnosed: the kill was effectively a no-op.
 multi_stack::kill_redis() {
   local name
   name=$(multi_stack::redis_container_name)
+  echo "  [info] docker update --restart=no ${name} (so the kill actually keeps Redis down)"
+  docker update --restart=no "${name}" > /dev/null 2>&1 || true
   echo "  [info] docker kill ${name}"
   docker kill "${name}" > /dev/null 2>&1 || true
 }
 
 # Restarts a previously-killed Redis container. Exit 0 on success.
+# Restores the `unless-stopped` restart policy that kill_redis disabled.
 multi_stack::start_redis() {
   local name
   name=$(multi_stack::redis_container_name)
   echo "  [info] docker start ${name}"
   docker start "${name}" > /dev/null 2>&1
+  echo "  [info] docker update --restart=unless-stopped ${name} (restore policy)"
+  docker update --restart=unless-stopped "${name}" > /dev/null 2>&1 || true
   # Give the daemon a beat to wire up the network alias.
   sleep 1
 }

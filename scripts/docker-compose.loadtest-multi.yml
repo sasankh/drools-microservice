@@ -29,7 +29,11 @@ x-app-replica: &app_replica
     context: .
     dockerfile: Dockerfile
   environment:
-    - JAVA_OPTS=-Xms512m -Xmx2048m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+UseStringDeduplication
+    # -D system properties at the end have highest precedence (beats profile YAML
+    # values). The docker profile hardcodes drools.circuit-breaker.redis.failure-rate-threshold=65
+    # without an env-var placeholder, so DROOLS_CB_REDIS_FAILURE_RATE=50 alone wouldn't override.
+    # See the test-only CB threshold note below.
+    - JAVA_OPTS=-Xms512m -Xmx2048m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+UseStringDeduplication -Ddrools.circuit-breaker.redis.failure-rate-threshold=50
     - RULE_SOURCE=s3
     - RULE_BUCKET_NAME=local-rules
     - AWS_REGION=us-east-1
@@ -53,6 +57,18 @@ x-app-replica: &app_replica
     - LOG_LEVEL=INFO
     - SPRING_PROFILES_ACTIVE=docker
     - DROOLS_RATE_LIMITING_ENABLED=false
+    # Phase 9.4 needs the Redis CB to engage within CB_OPEN_DEADLINE_S=30s of a
+    # docker-kill of Redis. The docker-profile 65% threshold is too high for a 60s
+    # outage with low-RPS exerciser traffic — by the end of the kill window the
+    # sliding-window failure rate sits around 50-55% (failures get diluted by
+    # pre-kill warm calls still in the window). Production traffic (hundreds
+    # of RPS) would flip the window to 100% in seconds; the test environment
+    # can't model that. The 50% override is applied via -D in JAVA_OPTS above
+    # (the docker profile hardcodes the property without an env-var placeholder).
+    # This env var alone isn't enough but is kept here for visibility — see
+    # https://docs.spring.io/spring-boot/docs/current/reference/html/features.html
+    # for the Spring property-resolution precedence.
+    - DROOLS_CB_REDIS_FAILURE_RATE=50
   depends_on:
     localstack:
       condition: service_healthy

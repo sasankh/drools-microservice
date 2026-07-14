@@ -79,7 +79,7 @@ REDIS_KILL_AT_S="${REDIS_KILL_AT_S:-120}"                  # 9.4 wallclock offse
 REDIS_DOWN_DURATION_S="${REDIS_DOWN_DURATION_S:-120}"      # 9.4 stay-down duration before restart
 CB_OPEN_DEADLINE_S="${CB_OPEN_DEADLINE_S:-30}"             # 9.4 must-open-by deadline
 CB_CLOSE_DEADLINE_S="${CB_CLOSE_DEADLINE_S:-90}"           # 9.4 must-close-by deadline (after restart)
-PHASE9_4_RECOVERY_SETTLE_S="${PHASE9_4_RECOVERY_SETTLE_S:-3}"  # 9.4 sleep after CB-closed before firing post-restart convergence round, so the listener's 2s FixedBackOff retry cycle completes re-subscription before the publish lands
+PHASE9_4_RECOVERY_SETTLE_S="${PHASE9_4_RECOVERY_SETTLE_S:-10}"  # 9.4 sleep after CB-closed before firing post-restart convergence round, so the listener's 2s FixedBackOff retry cycle completes re-subscription before the publish lands. Default 10s based on observed Spring Data Redis recovery time; tune down if your Redis stack reconnects faster.
 
 # Run-mode flags
 PHASE_FILTER=""
@@ -142,7 +142,12 @@ Env-var knobs:
   CB_OPEN_DEADLINE_S            9.4 must-open-by deadline (default 30)
   CB_CLOSE_DEADLINE_S           9.4 must-close-by deadline (default 90)
   PHASE9_4_RECOVERY_SETTLE_S    9.4 sleep after CB-closed before convergence round
-                                 (default 3 — covers 2s FixedBackOff + 1s margin)
+                                 (default 10 — Spring Data Redis listener recovery
+                                  can take longer than the FixedBackOff interval alone)
+  PHASE9_4_EXERCISER_INTERVAL_S 9.4 CB-exerciser per-iteration sleep (default 1 —
+                                 lower cadence accumulates failures fast enough to
+                                 flip the 50-call CB sliding window within
+                                 CB_OPEN_DEADLINE_S)
   ... (see top of script)
 
 Output:
@@ -1276,9 +1281,17 @@ phase_9_4_failure_mode() {
 
   # Start background CB-exerciser. /execute-rule traffic doesn't touch Redis (kieContainer
   # is in-memory), so without admin refreshes the CB would never see any failure and never
-  # open. Every 3s, fire wget POST /admin/refresh-rules/<id> on each replica — the decorator
-  # wraps the Redis DEL in the redisCircuitBreaker; once slidingWindowSize calls accumulate
+  # open. Every PHASE9_4_EXERCISER_INTERVAL_S seconds, fire wget POST
+  # /admin/refresh-rules/<id> on each replica — the decorator wraps the Redis
+  # DEL in the redisCircuitBreaker; once slidingWindowSize calls accumulate
   # failures (Redis down), the CB opens.
+  #
+  # Cadence note (Phase 9.4 follow-up): with the prior 3s cadence the exerciser
+  # generated ~20 CB ops in the 30s `CB_OPEN_DEADLINE_S` window — not enough to
+  # flip the 50-call sliding window past the 60% failure-rate threshold, even
+  # when every kill-window call failed. Real production traffic is much denser;
+  # the 1s default here is closer to that pattern. Tune via env var if needed.
+  local exerciser_interval_s="${PHASE9_4_EXERCISER_INTERVAL_S:-1}"
   local exerciser_rid
   exerciser_rid=$(awk -F, 'NR==2 {print $1; exit}' "${RULE_IDS_CSV}")
   local exerciser_pid_file="${pdir}/.cb-exerciser.pid"
@@ -1289,11 +1302,11 @@ phase_9_4_failure_mode() {
         multi_stack::exec_admin_post "drools-app-${ei}" \
           "/admin/refresh-rules/${exerciser_rid}" > /dev/null 2>&1 || true
       done
-      sleep 3
+      sleep "${exerciser_interval_s}"
     done
   ) &
   echo "$!" > "${exerciser_pid_file}"
-  echo "  [info] CB-exerciser started (PID $(cat "${exerciser_pid_file}"), every 3s × 3 replicas)"
+  echo "  [info] CB-exerciser started (PID $(cat "${exerciser_pid_file}"), every ${exerciser_interval_s}s × 3 replicas)"
 
   # Pre-kill snapshot: baseline counter values for resilience4j.circuitbreaker.calls
   # (kind=successful/failed/not_permitted/ignored). Used post-hoc to diagnose whether
@@ -1304,6 +1317,24 @@ phase_9_4_failure_mode() {
       "$(multi_stack::actuator_url ${i})" \
       "${pdir}/metric-snapshot-app-${i}-pre-kill.json"
   done
+
+  # Also capture per-tag CB call breakdown to a single CSV so the failure-rate
+  # math (failed / (failed+successful)) is easy to compute post-hoc. The bulk
+  # JSON snapshot above only returns aggregates across tag dimensions.
+  local cb_calls_csv="${pdir}/cb-calls-per-replica.csv"
+  echo "phase,replica,name,kind,count" > "${cb_calls_csv}"
+  phase9_4::record_cb_calls() {
+    local phase_label="${1}"
+    for i in 1 2 3; do
+      local url; url=$(multi_stack::actuator_url ${i})
+      for kind in successful failed not_permitted ignored; do
+        local c; c=$(actuator::counter_at "${url}" \
+          "resilience4j.circuitbreaker.calls" "name:redis,kind:${kind}")
+        echo "${phase_label},drools-app-${i},redis,${kind},${c:-0}" >> "${cb_calls_csv}"
+      done
+    done
+  }
+  phase9_4::record_cb_calls "pre-kill"
 
   local t_kill
   t_kill=$(date +%s)
@@ -1352,6 +1383,7 @@ phase_9_4_failure_mode() {
       "$(multi_stack::actuator_url ${i})" \
       "${pdir}/metric-snapshot-app-${i}-pre-restart.json"
   done
+  phase9_4::record_cb_calls "pre-restart"
 
   local t_restart
   t_restart=$(date +%s)
@@ -1392,6 +1424,7 @@ phase_9_4_failure_mode() {
       "$(multi_stack::actuator_url ${i})" \
       "${pdir}/metric-snapshot-app-${i}-post-restart.json"
   done
+  phase9_4::record_cb_calls "post-restart"
 
   # Stop the CB-exerciser before the convergence-recovery round; otherwise its concurrent
   # refresh fire could confuse the per-rule counter baseline used by convergence::measure_single.
@@ -1448,6 +1481,17 @@ phase_9_4_failure_mode() {
     done
     echo "convergence_recovery_delta_ms,${recovery_delta}"
   } > "${events_csv}"
+
+  # Capture app-container logs while the stack is still up. Critical for diagnosing
+  # whether Redis calls during the kill window were genuinely failing inside the app
+  # or being silently swallowed (e.g., Lettuce queueing them across reconnect).
+  # Filter to Redis/CB-relevant lines to keep file size manageable.
+  echo "  [info] capturing per-replica app logs (filtered to Redis/CB-relevant lines)"
+  for i in 1 2 3; do
+    docker logs "drools-app-${i}" 2>&1 \
+      | grep -iE 'redis|circuit|lettuce|cachedrulestorage|refresh|connect|timeout|exception' \
+      > "${pdir}/app-${i}-redis-relevant.log" 2>/dev/null || true
+  done
 
   # Assertions.
   local stats err_pct
