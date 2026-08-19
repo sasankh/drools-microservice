@@ -100,6 +100,20 @@ public class GlobalExceptionHandler {
     return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
   }
 
+  @ExceptionHandler(ServiceUnavailableException.class)
+  public ResponseEntity<RuleExecutionResponse> handleServiceUnavailableException(
+      ServiceUnavailableException ex) {
+    log.warn("Service temporarily unavailable: {}", LogSanitizer.sanitizeMessage(ex.getMessage()));
+
+    RuleExecutionResponse response =
+        RuleExecutionResponse.failure(
+            null,
+            "SERVICE_UNAVAILABLE",
+            "Service is temporarily unavailable. Please try again later.");
+
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
+  }
+
   @ExceptionHandler(IllegalArgumentException.class)
   public ResponseEntity<RuleExecutionResponse> handleIllegalArgumentException(
       IllegalArgumentException ex) {

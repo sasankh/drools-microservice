@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
+import com.company.drools.api.exception.ServiceUnavailableException;
 import com.company.drools.api.exception.TimeoutException;
 import com.company.drools.core.model.Rule;
 import com.company.drools.testutil.RuleTestUtils;
@@ -227,6 +228,54 @@ class RuleExecutorTest {
       }
 
       executor.shutdownNow();
+    }
+
+    @Test
+    @SuppressWarnings("java:S2925")
+    @DisplayName("halts the running session when execution times out (P3)")
+    void testExecuteRule_Timeout_HaltsSession() {
+      KieContainer mockContainer = mock(KieContainer.class);
+      KieSession mockSession = mock(KieSession.class);
+      when(mockContainer.newKieSession()).thenReturn(mockSession);
+      when(mockSession.fireAllRules(anyInt()))
+          .thenAnswer(
+              invocation -> {
+                Thread.sleep(10_000);
+                return 1;
+              });
+
+      ExecutorService executor = Executors.newSingleThreadExecutor();
+      RuleExecutor ruleExecutor = new RuleExecutor(executor);
+
+      assertThatThrownBy(
+              () -> ruleExecutor.executeRule(mockContainer, "runaway.rule", new HashMap<>(), 1))
+          .isInstanceOf(TimeoutException.class);
+
+      // The timeout path must call halt() so the runaway firing is stopped, not leaked.
+      verify(mockSession, timeout(3000)).halt();
+
+      executor.shutdownNow();
+    }
+  }
+
+  @Nested
+  @DisplayName("Load Shedding")
+  class LoadShedding {
+
+    @Test
+    @DisplayName("throws ServiceUnavailableException when the pool rejects the task (P3)")
+    void testExecuteRule_PoolSaturated_ThrowsServiceUnavailable() {
+      KieContainer mockContainer = mock(KieContainer.class);
+      // Executor that always rejects — simulates a saturated pool under AbortPolicy.
+      Executor rejecting =
+          command -> {
+            throw new RejectedExecutionException("pool saturated");
+          };
+      RuleExecutor ruleExecutor = new RuleExecutor(rejecting);
+
+      assertThatThrownBy(
+              () -> ruleExecutor.executeRule(mockContainer, "rejected.rule", new HashMap<>(), 5))
+          .isInstanceOf(ServiceUnavailableException.class);
     }
   }
 

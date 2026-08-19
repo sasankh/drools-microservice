@@ -58,7 +58,7 @@ class RedisCachedStorageIntegrationTest {
 
   @Container
   static GenericContainer<?> redis =
-      new GenericContainer<>(DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379);
+      new GenericContainer<>(DockerImageName.parse("redis:7.4-alpine")).withExposedPorts(6379);
 
   private static LettuceConnectionFactory connectionFactory;
   private static RedisTemplate<String, Rule> redisTemplate;

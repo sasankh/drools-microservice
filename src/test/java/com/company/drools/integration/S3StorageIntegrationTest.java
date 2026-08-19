@@ -42,7 +42,7 @@ class S3StorageIntegrationTest {
 
   @Container
   static LocalStackContainer localstack =
-      new LocalStackContainer(DockerImageName.parse("localstack/localstack:latest"))
+      new LocalStackContainer(DockerImageName.parse("localstack/localstack:2.3"))
           .withServices(LocalStackContainer.Service.S3);
 
   private static S3Client s3Client;

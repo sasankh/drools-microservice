@@ -1,7 +1,12 @@
 # Full Docker Integration Test Plan
 **Purpose**: Verify all application functionality works end-to-end in Docker.
 **Usage**: Tell Claude "run the full docker test plan from full-docker-test-plan.md"
-**Last Validated**: 2026-05-20 (Redis cache + pub/sub layer — see [`.ai-workspace/project-plans/redis-cache-layering-checklist.md`](.ai-workspace/project-plans/redis-cache-layering-checklist.md))
+**Last Validated**: 2026-08-19 (production-readiness fixes — see [`.ai-workspace/project-plans/production-readiness-fixes-checklist.md`](.ai-workspace/project-plans/production-readiness-fixes-checklist.md))
+
+> ⚠️ **Admin auth is now enforced.** As of the 2026-08-19 hardening, **all `/admin/*` endpoints
+> require the `X-Admin-API-Key` header** (default `admin-secret`, set in `docker-compose.yml`). Add
+> `-H "X-Admin-API-Key: admin-secret"` to every `/admin/*` curl below — without it they return `401`.
+> In the `docker`/`prod` profiles the app **fails to start** if `ADMIN_API_KEY` is blank.
 
 ---
 
@@ -509,6 +514,51 @@ docker-compose down
 
 ---
 
+## Step 12: Security & Robustness Hardening (2026-08-19)
+
+Verifies the production-readiness fixes. Assumes the default compose stack (`ADMIN_API_KEY=admin-secret`).
+
+### 12.1 Admin auth enforced (P1)
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:8080/admin/refresh-rules            # expect 401
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:8080/admin/refresh-rules -H "X-Admin-API-Key: admin-secret"  # expect 200
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:8080/admin/refresh-rules -H "X-Admin-API-Key: wrong"         # expect 401
+```
+**Expected**: 401 / 200 / 401. (Fail-closed: booting the `docker` profile with a blank `ADMIN_API_KEY` makes the container restart-loop — `IllegalStateException` at startup.)
+
+### 12.2 Rate limiting keyed on IP, not spoofable headers (P2)
+Rotating `X-Client-Id`/`X-API-Key` per request no longer resets the bucket — the per-IP limit still applies (covered by `RateLimitingFilterTest`; observable via repeated `/execute-rule` from one host).
+
+### 12.3 Actuator port is loopback-only (P5)
+```bash
+docker compose port app 8081     # expect 127.0.0.1:8081  (not 0.0.0.0)
+```
+
+### 12.4 Actuator health survives Redis-disabled (P4)
+```bash
+# with REDIS_ENABLED=false (e.g. a docker-compose.override.yml), after the app is healthy:
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8081/actuator/health   # expect 200 (redis health indicator gated off)
+```
+
+### 12.5 Rule-execution timeout returns 408, service stays responsive (P3/P7)
+Upload a rule whose consequence never returns (`then while(true){} end`, guarded on a sentinel field), refresh it, then:
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:8080/execute-rule \
+  -H 'Content-Type: application/json' -d '{"rule_id":"test.runaway.loop","data":{"__runaway__":true}}'   # expect 408 (~timeout), NOT a hang
+```
+A normal rule still returns 200 before and after. (Pool saturation returns 503 — `RuleExecutorTest`.)
+
+### 12.6 RULE_DELETED propagates to the compiled corpus (S5)
+```bash
+docker exec drools-microservice-redis-1 redis-cli PUBLISH drools:rule:events \
+  '{"event":"RULE_DELETED","rule_id":"pricing.discount.simple","source_instance_id":"foreign","timestamp":"2026-08-19T00:00:00Z"}'
+sleep 2
+curl -s http://localhost:8080/admin/rules -H "X-Admin-API-Key: admin-secret" | jq '.total_rules'   # expect 16 (rule removed)
+curl -s -X POST http://localhost:8080/admin/refresh-rules -H "X-Admin-API-Key: admin-secret" > /dev/null  # restore → 17
+```
+
+---
+
 ## Pass/Fail Summary
 
 | Step | Test | Pass Criteria | Result |
@@ -555,6 +605,12 @@ docker-compose down
 | 9.4 | Compose restored | `REDIS_ENABLED=true` back in `docker-compose.yml` | |
 | 10 | No errors in logs | 0 ERROR lines in last 100 log lines | |
 | 11 | Clean shutdown | `docker-compose down` exits cleanly | |
+| 12.1 | Admin auth (P1) | no-key→401, key→200, wrong→401; blank-key docker profile fails to start | |
+| 12.2 | Rate limit by IP (P2) | rotating headers don't reset the bucket | |
+| 12.3 | Actuator loopback (P5) | `8081` bound to `127.0.0.1` | |
+| 12.4 | Actuator w/ Redis off (P4) | `/actuator/health` = 200 when `REDIS_ENABLED=false` | |
+| 12.5 | Exec timeout (P3/P7) | runaway rule → 408, service responsive; saturation → 503 | |
+| 12.6 | RULE_DELETED (S5) | pub/sub delete removes rule (17→16), refresh restores 17 | |
 
 ---
 

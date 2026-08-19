@@ -83,9 +83,11 @@ public class RedisCachedRuleStorage implements RuleStorage {
 
   /**
    * Underlying storage; set by {@link StorageFactory} immediately after construction. Not final
-   * because the bean is constructed before the factory knows which base storage to wrap.
+   * because the bean is constructed before the factory knows which base storage to wrap. {@code
+   * volatile} so the {@link #setDelegate} write is visible to threads that obtained the decorator
+   * via a different path (finding S10).
    */
-  private RuleStorage delegate;
+  private volatile RuleStorage delegate;
 
   public RedisCachedRuleStorage(
       RedisTemplate<String, Rule> redisTemplate,
@@ -148,6 +150,10 @@ public class RedisCachedRuleStorage implements RuleStorage {
 
     List<String> expectedIds = delegate.getRuleIds();
     Map<String, Rule> existing = collectFromRedis();
+
+    // Drop cached entries no longer authoritative (deleted at the delegate but still within their
+    // Redis TTL) so a deleted rule is never resurrected into the compiled corpus. (S1)
+    existing.keySet().retainAll(new HashSet<>(expectedIds));
 
     Set<String> missing = new HashSet<>(expectedIds);
     missing.removeAll(existing.keySet());
@@ -226,6 +232,11 @@ public class RedisCachedRuleStorage implements RuleStorage {
     meterRegistry.counter(METRIC_INVALIDATION, TAG_SCOPE, "single").increment();
     safeDelete(ruleId);
     delegate.refreshRule(ruleId);
+    // Re-populate authoritatively from the base storage (write-through). If the best-effort DEL
+    // above was dropped (Redis blip / circuit open), this SET overwrites any stale entry so
+    // siblings
+    // don't keep serving old DRL text after a "successful" refresh. (S2)
+    delegate.getRule(ruleId).ifPresent(this::cachePut);
   }
 
   // ─── RuleStorage: authoritative pass-through ─────────────────────────────────

@@ -99,7 +99,7 @@ This is a Drools Rule Engine Microservice designed for high-performance business
 
 **Tech Stack**: Java 25 (enforced), Spring Boot 3.5.3, Drools 10.2.0, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
 
-**Health Status**: 9/10 - 548 unit tests + 14 Testcontainers integration tests (CI-only, surefire-excluded on macOS-DinD), 96%/90% coverage (pre-modernization baseline), 39/42 security fixes complete, load-tested at 1000 rules (single-container 2026-05-10) + 3-replica multi-container + Redis-kill failure mode (Phase 9.4 2026-05-24), Sonar QG OK (0 maintainability / 0 reliability / 0 security issues)
+**Health Status**: 9/10 - 548 unit tests + 14 Testcontainers integration tests (CI-only, surefire-excluded on macOS-DinD), 90.1%/78.4% coverage (measured 2026-08-19, Java 25), 39/42 security fixes complete, load-tested at 1000 rules (single-container 2026-05-10) + 3-replica multi-container + Redis-kill failure mode (Phase 9.4 2026-05-24), Sonar QG OK (0 maintainability / 0 reliability / 0 security issues)
 
 ## Common Commands
 
@@ -283,7 +283,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 ## Development Workflow
 
-1. **Current Status**: 39/42 security findings addressed (Phases 1–9 complete, 2026-02-26); stack modernized 2026-05-09 (Java 25, Spring Boot 3.5.3, Drools 10.2.0); Drools 10 rule-loading rework + sample-rules expansion + 1000-rule load test 2026-05-10; Sonar Wave 4 (maintainability 178→0, reliability 5→0, 2 security hotspots resolved) 2026-05-11; Redis cache + pub/sub layer + Phase 9 load-test harness + Phase 9.4 hardening (SCAN-CB-wrap, REDIS_TIMEOUT, pub/sub recovery backoff) 2026-05-20 → 2026-05-24; **548 unit tests + 14 integration**; 96% / 90% coverage (pre-modernization baseline); documentation rebuild 2026-05-08 with refreshes through 2026-05-24 (40 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
+1. **Current Status**: 39/42 security findings addressed (Phases 1–9 complete, 2026-02-26); stack modernized 2026-05-09 (Java 25, Spring Boot 3.5.3, Drools 10.2.0); Drools 10 rule-loading rework + sample-rules expansion + 1000-rule load test 2026-05-10; Sonar Wave 4 (maintainability 178→0, reliability 5→0, 2 security hotspots resolved) 2026-05-11; Redis cache + pub/sub layer + Phase 9 load-test harness + Phase 9.4 hardening (SCAN-CB-wrap, REDIS_TIMEOUT, pub/sub recovery backoff) 2026-05-20 → 2026-05-24; **548 unit tests + 14 integration**; 90.1% / 78.4% coverage (measured 2026-08-19); documentation rebuild 2026-05-08 with refreshes through 2026-05-24 (40 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
 
 2. **One-Command Development Environment**: Complete automated setup with validation
    ```bash
@@ -376,7 +376,7 @@ All phases shipped:
 
 Current snapshot:
 - **Health Score**: 9/10
-- **Test Coverage**: 96.2% instruction / 89.7% branch (548 unit + 14 integration tests; coverage is the pre-modernization JaCoCo baseline — roughly preserved through the 2026-05-20 dead-cache deletion and 2026-05-24 Phase 9.4 hardening, not yet re-run)
+- **Test Coverage**: 90.1% instruction / 78.4% branch (measured 2026-08-19 on Java 25 via `mvn test jacoco:report`, unit tests only; enforced by a `jacoco:check` floor of 88% / 74% bound to `verify`). Supersedes the earlier unverified 96.2% / 89.7% pre-modernization baseline.
 - **Security**: 39/42 findings addressed
 - **Performance**: 100–1000 RPS target, P99 < 100ms cached / < 500ms cache miss (load-tested at 1000 rules — see [`39-load-test-findings.md`](project-documentation/39-load-test-findings.md))
 

@@ -5,11 +5,7 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -56,27 +52,6 @@ public class CorsConfig implements WebMvcConfigurer {
         .allowedHeaders(headers.toArray(new String[0]))
         .allowCredentials(allowCredentials)
         .maxAge(maxAge);
-  }
-
-  @Bean
-  public CorsConfigurationSource corsConfigurationSource() {
-    CorsConfiguration configuration = new CorsConfiguration();
-
-    List<String> origins = parseCommaSeparatedValues(allowedOrigins);
-    List<String> methods = parseCommaSeparatedValues(allowedMethods);
-    List<String> headers = parseCommaSeparatedValues(allowedHeaders);
-
-    if (!origins.isEmpty()) {
-      configuration.setAllowedOriginPatterns(origins);
-    }
-    configuration.setAllowedMethods(methods);
-    configuration.setAllowedHeaders(headers);
-    configuration.setAllowCredentials(allowCredentials);
-    configuration.setMaxAge(maxAge);
-
-    UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-    source.registerCorsConfiguration("/**", configuration);
-    return source;
   }
 
   private List<String> parseCommaSeparatedValues(String value) {

@@ -122,7 +122,7 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 | Total Java source files | 59 |
 | Total test files | 46 |
 | Total tests (`@Test` + `@ParameterizedTest`) | **548** unit + 14 Testcontainers integration (surefire-excluded; CI-only) |
-| Test coverage (instruction / branch) | 96.2% / 89.7% |
+| Test coverage (instruction / branch) | 90.1% / 78.4% (measured 2026-08-19, Java 25) |
 | Sample rules in `sample-rules/` | 17 |
 | Environment variables actually read | 67 |
 | Distinct error codes | 10 |

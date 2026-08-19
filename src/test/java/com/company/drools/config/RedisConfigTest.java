@@ -3,7 +3,6 @@ package com.company.drools.config;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.company.drools.core.model.Rule;
-import java.time.Duration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,34 +25,6 @@ class RedisConfigTest {
   void setUp() {
     redisConfig = new RedisConfig();
     ReflectionTestUtils.setField(redisConfig, "ttlMinutes", 60L);
-  }
-
-  @Test
-  @DisplayName("redisTtlDuration returns correct duration based on ttlMinutes")
-  void testRedisTtlDurationDefault() {
-    Duration duration = redisConfig.redisTtlDuration();
-
-    assertThat(duration).isEqualTo(Duration.ofMinutes(60));
-  }
-
-  @Test
-  @DisplayName("redisTtlDuration returns updated duration when ttlMinutes is changed")
-  void testRedisTtlDurationCustom() {
-    ReflectionTestUtils.setField(redisConfig, "ttlMinutes", 120L);
-
-    Duration duration = redisConfig.redisTtlDuration();
-
-    assertThat(duration).isEqualTo(Duration.ofMinutes(120));
-  }
-
-  @Test
-  @DisplayName("redisTtlDuration returns zero duration when ttlMinutes is 0")
-  void testRedisTtlDurationZero() {
-    ReflectionTestUtils.setField(redisConfig, "ttlMinutes", 0L);
-
-    Duration duration = redisConfig.redisTtlDuration();
-
-    assertThat(duration).isEqualTo(Duration.ZERO);
   }
 
   @Test

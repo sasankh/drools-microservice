@@ -115,7 +115,7 @@ docker-compose ps
 curl http://localhost:8080/admin/health
 ```
 
-### 3. Set Environment Variables
+### 4. Set Environment Variables
 
 ```bash
 # Copy environment template
@@ -128,7 +128,7 @@ cp .env.example .env
 # You can also set environment variables directly if preferred
 ```
 
-### 4. Build and Run
+### 5. Build and Run
 
 #### Option A: Using Docker Compose (Recommended for Development)
 ```bash
@@ -165,7 +165,7 @@ docker run -p 8080:8080 -p 8081:8081 \
   drools-rule-engine:latest
 ```
 
-### 5. Verify Installation
+### 6. Verify Installation
 
 ```bash
 # Check application health (with comprehensive component status)
@@ -644,13 +644,16 @@ end
 
 ### Security Features
 
-The API includes comprehensive security features (39/42 security findings addressed):
+The API includes multiple layers of security. Most hardening findings are addressed, with two
+tracked as open: the **DRL sandbox is not a sound boundary** (treat rule-store write access as code
+execution — see [`SECURITY.md`](SECURITY.md)) and Redis auth/TLS is enforced only on the `prod`
+profile. Key controls:
 
 - **Admin Authentication**: API key protection for `/admin/*` endpoints via `X-Admin-API-Key` header
 - **DRL Sandboxing**: Blocklist-based rule content scanning prevents arbitrary code execution
 - **Security Headers**: 7 security headers on all responses (CSP, HSTS, X-Frame-Options, etc.)
 - **Input Validation**: All requests are validated for proper format, size limits, and security patterns
-- **Rate Limiting**: Configurable per-client rate limits with standard HTTP headers (per remote IP)
+- **Rate Limiting**: Configurable rate limits keyed on the caller's network address (`getRemoteAddr()`; `X-Forwarded-For` is ignored as spoofable), with standard `X-RateLimit-*` response headers
 - **CORS Protection**: Configurable cross-origin request policies (empty default, restrictive in production)
 - **Request Size Limits**: Multi-layer protection against large payloads (including chunked transfer)
 - **Path Traversal Protection**: Defense-in-depth in storage layers
