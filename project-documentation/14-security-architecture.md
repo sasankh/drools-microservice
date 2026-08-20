@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Architects, security reviewers, operators, developers |
 | **Purpose** | Complete picture of how the service is defended in depth — eight layers, with code citations and threat-model rationale |
-| **Last verified against** | All `api/filter/`, `core/engine/DrlSanitizer.java`, `common/LogSanitizer.java`, `config/CorsConfig.java`, `config/S3Config.java` on 2026-05-24 |
+| **Last verified against** | All `api/filter/`, `core/engine/DrlSanitizer.java`, `core/engine/RuleExecutor.java`, `common/LogSanitizer.java`, `common/RuleIds.java`, `config/CorsConfig.java`, `config/S3Config.java`, `config/RedisSecurityValidator.java` on 2026-08-20 |
 | **Related docs** | [15-admin-authentication.md](15-admin-authentication.md), [16-drl-sandboxing.md](16-drl-sandboxing.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) |
 
 ---
@@ -17,7 +17,7 @@ The service runs as one tier inside a larger system. Threats it considers:
 2. **Compromised or malicious rule authors** — DRL is user-supplied content that becomes Java at runtime. Goal: prevent the rule engine from becoming an arbitrary-code-execution surface.
 3. **Compromised internal actors with `/admin/*` access** — if someone gets past the API gateway, they shouldn't immediately have unfettered admin access.
 4. **Sensitive data accidentally logged** — input data may contain credit cards, SSNs, tokens. Goal: never let those land in plaintext logs.
-5. **Spoofed identity for rate limit bypass** — attacker manipulates `X-Forwarded-For` or other headers to consume someone else's rate-limit quota.
+5. **Spoofed identity for rate limit bypass** — attacker manipulates `X-Forwarded-For` or other headers to consume someone else's rate-limit quota, or rotates unauthenticated headers to fill the client map. The rate limiter keys on `request.getRemoteAddr()` only for this reason.
 6. **SSRF via configurable S3 endpoint** — operator misconfiguration could point S3 client at an internal service. Goal: validate the endpoint.
 7. **Path traversal via rule ID** — `..` segments could read files outside the rules directory.
 
@@ -41,7 +41,7 @@ HTTP request arrives
 ├─────────────────────────────────────────────┤
 │ LAYER 2  AdminAuthFilter         @Order(0)  │   /admin/* requires X-Admin-API-Key
 ├─────────────────────────────────────────────┤
-│ LAYER 3  RateLimitingFilter      @Order(1)  │   per-client multi-tier identification
+│ LAYER 3  RateLimitingFilter      @Order(1)  │   per-client buckets keyed on remote IP
 ├─────────────────────────────────────────────┤
 │ LAYER 4  RequestSizeValidationFilter        │   body size + chunked-stream limit
 ├─────────────────────────────────────────────┤
@@ -110,9 +110,11 @@ DROOLS_CORS_ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com
 **File**: [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java) at `@Order(0)`. See **[15-admin-authentication.md](15-admin-authentication.md)** for the full guide.
 
 Summary:
-- `/admin/*` paths require `X-Admin-API-Key` header when `ADMIN_API_KEY` env var is set.
-- Empty/unset `ADMIN_API_KEY` = open admin endpoints + WARN log at startup.
-- Mismatch → HTTP 401 with `UNAUTHORIZED` error code.
+- **All** `/admin/*` paths (including `/admin/health`) require the `X-Admin-API-Key` header when `ADMIN_API_KEY` is set.
+- **Fail-closed in deployable profiles**: with `prod` or `docker` active, a blank/unset `ADMIN_API_KEY` is a hard startup error — the app refuses to start rather than serve `/admin/*` unprotected.
+- `local`/`dev` keep the open-with-WARN behavior for developer convenience only.
+- Key comparison is **constant-time** (`MessageDigest.isEqual`), not `String.equals`.
+- Mismatch or missing header → HTTP 401 with `UNAUTHORIZED` error code.
 
 Defense in depth, behind upstream API gateway. Not a primary auth mechanism.
 
@@ -123,11 +125,11 @@ Defense in depth, behind upstream API gateway. Not a primary auth mechanism.
 **File**: [`RateLimitingFilter.java`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java) at `@Order(1)`. See **[13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md)** for the full guide.
 
 Summary:
-- Per-client buckets, multi-tier identification: `X-API-Key` → `Authorization: Bearer` → `X-Client-Id` → IP fallback.
-- `X-Forwarded-For` is **explicitly ignored** (spoofable).
+- Per-client buckets keyed on **`request.getRemoteAddr()` only**. Application-level headers (`X-API-Key`, `Authorization`, `X-Client-Id`) are **not** read — they are unauthenticated on the public `/execute-rule` API, so keying on them would let any caller pick a fresh bucket per request (unlimited throughput) or rotate headers to fill the client map and lock out real users (finding P2).
+- `X-Forwarded-For` is ignored **by default**. Only when `drools.rate-limiting.trust-proxy=true` (env `DROOLS_RATE_LIMITING_TRUST_PROXY`, default `false`) is the left-most `X-Forwarded-For` entry used — enable ONLY behind a trusted proxy that overwrites inbound `X-Forwarded-For`.
 - Default 1000 req/min, 10000 req/hour, burst 100.
 - Admin endpoints (`/admin/*`) **exempt** from rate limiting.
-- `max-clients=10000` cap prevents memory exhaustion via spoofed identities — at capacity, NEW clients are rejected outright.
+- `max-clients` cap prevents memory exhaustion — at capacity, the **oldest bucket is LRU-evicted** to admit the new client (not a reject-new-client policy).
 
 ---
 
@@ -151,8 +153,9 @@ Response on rejection: HTTP 413 with `REQUEST_TOO_LARGE` error code (see [12-err
 
 | Limit | Where | Default |
 |---|---|---|
-| Rule execution timeout | [`RuleExecutor`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java) | 30s; configurable. On timeout: `future.cancel(true)` |
-| `maxRuleFirings` cap | [`RuleExecutor.java:22`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java#L22) | 10,000 firings per execution |
+| Rule execution timeout | [`RuleExecutor`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java) | 30s; configurable. On timeout: `KieSession.halt()` (cooperatively stops `fireAllRules` at the next rule boundary) + `future.cancel(true)`, then HTTP 408. The rule no longer necessarily runs the full 30s — it halts at the next rule boundary. Caveat: a single non-yielding consequence (`then while(true){} end`) can't be interrupted; the request still returns 408 promptly (finding B1, deferred). |
+| Pool-saturation load-shed | [`RuleExecutor`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java) | Rule-execution thread pool uses `AbortPolicy`. When the queue is full and all threads are busy, submission throws `RejectedExecutionException` → `ServiceUnavailableException` → HTTP 503 (a distinct 503 path from breaker-open). Prevents the rule body running on the Tomcat request thread and silently bypassing the timeout. |
+| `maxRuleFirings` cap | [`RuleExecutor.java`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java) | 10,000 firings per execution |
 | Data field count | `@ValidRuleData` | 100 keys |
 | String value length | `@ValidRuleData` | 10,000 chars |
 | Number magnitude | `@ValidRuleData` | 1 billion (absolute) |
@@ -198,12 +201,13 @@ Validation failures bubble up as `MethodArgumentNotValidException` → `INVALID_
 
 ### Storage-layer path traversal (defense in depth)
 
-Even though `@ValidRuleId` rejects `..`, `/`, `\` in rule IDs, the storage backends **also** validate paths:
+Even though `@ValidRuleId` rejects `..`, `/`, `\` in rule IDs, other entry points **also** validate paths — the checks are centralized in [`common/RuleIds.java`](../src/main/java/com/company/drools/common/RuleIds.java) (`isPathSafe` / `requirePathSafe`), which validates the **raw** rule ID before any `.`→`/` transformation:
 
-- [`S3RuleStorage.java:323`](../src/main/java/com/company/drools/storage/S3RuleStorage.java#L323): rejects S3 keys containing `../` or starting with `/`.
-- [`LocalFileStorage.java:158-160`](../src/main/java/com/company/drools/storage/LocalFileStorage.java#L158-L160): `path.normalize().startsWith(rulesRoot)` check.
+- [`S3RuleStorage.ruleIdToS3Key`](../src/main/java/com/company/drools/storage/S3RuleStorage.java): calls `RuleIds.requirePathSafe(rawRuleId)`. (The old inline `s3Key.contains("../")` guard checked *after* the `.`→`/` replacement — by which point any `..` had already become `//`, so it never fired for dotted input. It was dead code and has been removed, finding S11.)
+- [`LocalFileStorage`](../src/main/java/com/company/drools/storage/LocalFileStorage.java): `path.normalize().startsWith(rulesRoot)` check.
+- [`RuleRefreshSubscriber`](../src/main/java/com/company/drools/cache/RuleRefreshSubscriber.java): the pub/sub refresh path (`RULE_REFRESHED`, `RULE_DELETED`) bypasses HTTP-layer validation, so it re-validates the raw `ruleId` via `RuleIds.isPathSafe` before touching storage — a 4th validation entry point (S11).
 
-Two layers of path traversal defense.
+Multiple independent layers of path-traversal defense, all sharing the `RuleIds` primitive.
 
 ---
 
@@ -222,7 +226,9 @@ Summary:
 
 Verified by [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) — 8 test methods (4 `@Test` + 4 `@ParameterizedTest` over `@MethodSource` streams that expand to ~40+ effective cases covering every blocked import, class, and method).
 
-This is the single most important security control in the service. Without it, DRL is a Turing-complete code-execution surface inside the JVM.
+> **Not a sound boundary (finding B1, tracked-open, deferred)**: the sandbox is a text-scan blocklist, not a real security boundary. A **fully-qualified class name needs no `import`**, so a malicious rule can reference any dangerous class that is not in the finite 12-name blocklist and bypass the scan entirely. JEP 486 removed the `SecurityManager`, so an in-JVM permission sandbox is no longer available to backstop it. This is documented and accepted in [`SECURITY.md`](../SECURITY.md); do not treat the `DrlSanitizer` text scan as a real code-execution boundary. Sound isolation would require running rule compilation/execution in a separate constrained process or JVM.
+
+Because of B1, DRL remains a Turing-complete code-execution surface inside the JVM. The sandbox raises the bar against casual/accidental misuse and known dangerous patterns, but the operational control that matters is trusting who can publish rules to the S3 bucket.
 
 ---
 
@@ -284,7 +290,7 @@ To debug, server-side: use the correlation ID (in `X-Correlation-ID` response he
 
 Before deploying to production:
 
-- [ ] `ADMIN_API_KEY` is set to a long random string (32+ chars). Verified in startup log: `Admin endpoint authentication enabled`.
+- [ ] `ADMIN_API_KEY` is set to a long random string (32+ chars). Verified in startup log: `Admin endpoint authentication enabled`. Note: with the `prod`/`docker` profile the app **fails to start** if this is blank — a blank key is a hard error, not a WARN.
 - [ ] `DROOLS_CORS_ALLOWED_ORIGINS` is set to your real origins (not `*`). If multi-origin, comma-separated.
 - [ ] `DROOLS_CORS_ALLOW_CREDENTIALS` is `true` only if needed and explicitly required.
 - [ ] `RULE_SOURCE=s3` and `RULE_BUCKET_NAME` is set to your production bucket.
@@ -300,7 +306,7 @@ Before deploying to production:
 - [ ] All sample DRL rules pass the sandbox (run `mvn test -Dtest=DrlSanitizerTest`).
 - [ ] Production deploy includes restart-on-OOM (`-XX:+ExitOnOutOfMemoryError` is set in the Dockerfile JAVA_OPTS).
 - [ ] Heap dumps and GC logs are not exposed via mounted volumes in production (only useful for debugging — and could leak data).
-- [ ] Redis (when used) has authentication enabled. **Currently this project ships Redis without auth in dev** — production must add `requirepass` and TLS.
+- [ ] Redis (when used) has authentication + TLS enabled. This is **enforced, not advisory**: [`RedisSecurityValidator`](../src/main/java/com/company/drools/config/RedisSecurityValidator.java) (`@Profile("prod")`) **fails startup** unless `REDIS_URL` uses the `rediss://` scheme (TLS) *and* includes credentials (`rediss://user:password@host:port`). Dev/docker/local keep loopback-bound plaintext Redis for convenience (finding P6 / #28).
 - [ ] Logs aggregated to centralized system (CloudWatch Logs / ELK). Don't rely on local stdout in prod.
 - [ ] CloudWatch metrics enabled (`CLOUDWATCH_METRICS_ENABLED=true` in `prod` profile).
 - [ ] Alerts configured for: WARN-level "Admin API key is not configured" log, breaker open events, 5xx error rate, P99 latency, heap usage > 80%, rate-limiter "client map at capacity" warning.

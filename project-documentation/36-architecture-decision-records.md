@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Architects, senior developers, future contributors trying to understand "why was this done this way?" |
 | **Purpose** | Capture the load-bearing design decisions and their rationale, so future changes don't re-litigate the same choices unaware |
-| **Last updated** | 2026-05-24 (ADR-016 Phase 9.4 hardening addendum — SCAN-CB-wrap + REDIS_TIMEOUT + listener FixedBackOff; index sanity-checked at 15 ADRs) |
+| **Last updated** | 2026-08-20 (re-review hardening — added ADR-017…023: admin fail-closed, rate-limiter IP-keying, exec timeout/load-shed, refreshLock split, Redis prod TLS + Jackson-typing removal, delegate AtomicReference, CI + verify-bound quality gates; ADR-006 and ADR-010 updated in place) |
 | **Related docs** | All — ADRs reference specific implementation files |
 
 ---
@@ -26,16 +26,23 @@ Format used here: each ADR has Status, Context, Decision, Alternatives Considere
 | [003](#adr-003-kiecontainer-atomic-swap-with-disposal) | KieContainer atomic-swap with explicit disposal | Accepted (2026-02-19 fix) |
 | [004](#adr-004-locallrucache-uses-write-lock-on-get) | LocalLRUCache uses WRITE lock on `get()` | Superseded by ADR-016 (2026-05-20) |
 | [005](#adr-005-redis-bean-exists-but-is-dormant-by-default) | Redis bean exists but is dormant by default | Superseded by ADR-016 (2026-05-20) |
-| [006](#adr-006-adminauthfilter-instead-of-spring-security) | AdminAuthFilter (lightweight) instead of Spring Security | Accepted |
+| [006](#adr-006-adminauthfilter-instead-of-spring-security) | AdminAuthFilter (lightweight) instead of Spring Security | Accepted (fail-closed + constant-time addendum 2026-08-20) |
 | [007](#adr-007-no-terraform-aws-deployment-documented-as-reference-only) | No Terraform — AWS deployment documented as reference only | Accepted |
 | [008](#adr-008-snake_case-json-via-jsonproperty) | snake_case JSON via `@JsonProperty` | Accepted |
 | [009](#adr-009-eval-banned-in-drl) | `eval()` banned in DRL via `DrlSanitizer` | Accepted |
-| [010](#adr-010-rate-limiting-in-memory-not-redis-backed) | Rate limiting in-memory (not Redis-backed) | Accepted (consider revisiting at scale) |
+| [010](#adr-010-rate-limiting-in-memory-not-redis-backed) | Rate limiting in-memory (not Redis-backed) | Accepted (IP-keying + trust-proxy addendum 2026-08-20) |
 | [011](#adr-011-custom-validation-annotations-vs-jakarta-only) | Custom validation annotations alongside Jakarta | Accepted |
 | [012](#adr-012-drools-8440-not-latest-8x-or-9x) | Drools 8.44.0.Final (not latest 8.x or 9.x) | Superseded by ADR-014 |
 | [013](#adr-013-java-17--25--spring-boot-modernization-2026-05-09) | Java 17 → 25 + Spring Boot modernization | Accepted (2026-05-09) |
 | [014](#adr-014-drools-8--10-migration-2026-05-09) | Drools 8 → 10 migration | Accepted (2026-05-09) |
 | [016](#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20) | Redis decorator + pub/sub for multi-instance DRL cache | Accepted (2026-05-20) |
+| [017](#adr-017-admin-auth-fail-closed-on-proddocker-profiles-2026-08-20) | Admin auth fail-closed on prod/docker profiles | Accepted (2026-08-20) |
+| [018](#adr-018-rate-limiter-keys-on-ip-only-optional-trust-proxy-2026-08-20) | Rate limiter keys on IP only; optional trust-proxy | Accepted (2026-08-20) |
+| [019](#adr-019-rule-execution-timeout-halt--thread-pool-load-shed-503-2026-08-20) | Rule-execution timeout halt + thread-pool load-shed 503 | Accepted (2026-08-20) |
+| [020](#adr-020-refreshlock-separated-from-the-rule-read-write-lock-2026-08-20) | refreshLock separated from the rule read-write lock | Accepted (2026-08-20) |
+| [021](#adr-021-redis-prod-tlsauth-enforcement--removal-of-jackson-default-typing-2026-08-20) | Redis prod TLS/auth enforcement + removal of Jackson default typing | Accepted (2026-08-20) |
+| [022](#adr-022-storage-delegate-held-in-an-atomicreference-2026-08-20) | Storage delegate held in an `AtomicReference` | Accepted (2026-08-20) |
+| [023](#adr-023-ci-workflow--verify-bound-quality-gates-2026-08-20) | CI workflow + verify-bound quality gates | Accepted (2026-08-20) |
 
 ---
 
@@ -329,11 +336,18 @@ Implement a custom ~90-line filter ([`AdminAuthFilter`](../src/main/java/com/com
 - **Positive**: Filter uses `@Order(0)` to slot cleanly into the filter chain alongside SecurityHeadersFilter, RateLimitingFilter.
 - **Positive**: dev-mode bypass (empty `ADMIN_API_KEY` = no auth) is one line in the filter; would be annoying with Spring Security.
 - **Negative**: if we ever need OAuth, JWT, or per-user roles, we'd need to add Spring Security. Refactor cost is moderate (replace one filter, keep the rest).
-- **Negative**: timing-attack-vulnerable string compare (`String.equals`). Not constant-time. Acceptable for a defense-in-depth check; would be replaced if used as primary auth.
+
+### 2026-08-20 addendum — fail-closed on deployable profiles + constant-time compare
+
+Two hardening changes superseded the original "empty key = open, and `String.equals` compare" behavior (see also [ADR-017](#adr-017-admin-auth-fail-closed-on-proddocker-profiles-2026-08-20)):
+
+- **Fail-closed startup.** `AdminAuthFilter` now defines `KEY_REQUIRED_PROFILES = {prod, docker}`. If `ADMIN_API_KEY` is blank while one of those profiles is active, the filter **throws `IllegalStateException` at construction** and the context fails to start. Only `local`/`dev` retain the open-with-WARN dev bypass. A running-but-unauthenticated production instance is therefore no longer possible.
+- **Constant-time compare.** The key check is now `MessageDigest.isEqual(...)` (constant-time) rather than `String.equals`, closing the timing-attack note in the original Consequences.
 
 ### References
-- [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java) — full implementation
+- [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java) — full implementation (`KEY_REQUIRED_PROFILES`, `MessageDigest.isEqual`)
 - [15-admin-authentication.md](15-admin-authentication.md) — the user-facing flow
+- [ADR-017](#adr-017-admin-auth-fail-closed-on-proddocker-profiles-2026-08-20) — the fail-closed decision in full
 
 ---
 
@@ -479,9 +493,15 @@ In-memory. Per-replica buckets. A client's effective limit is `configured_limit 
 - Specific contractual obligation to enforce a hard ceiling.
 - Spoofed-client-ID attack fills `max-clients` cap on multiple replicas.
 
+### 2026-08-20 addendum — client keying is IP-only, with an opt-in trust-proxy toggle
+
+The original doc described a multi-tier client identity (`X-API-Key` → `Authorization` → `X-Client-Id` → IP fallback). That has been simplified and hardened (see [ADR-018](#adr-018-rate-limiter-keys-on-ip-only-optional-trust-proxy-2026-08-20)): `RateLimitingFilter` now keys **only** on `ip:{request.getRemoteAddr()}`. The application-level headers are unauthenticated on the public `/execute-rule` API and are no longer read for keying (trusting them let any caller forge a bucket). `X-Forwarded-For` is ignored by default and honored (left-most entry) only when `drools.rate-limiting.trust-proxy=true`. LRU eviction still bounds the client map at `max-clients`.
+
 ### References
 - [`RateLimitingConfig.java`](../src/main/java/com/company/drools/config/RateLimitingConfig.java) — in-memory implementation
+- [`RateLimitingFilter.java`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java) — IP-only keying + `trust-proxy`
 - [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md)
+- [ADR-018](#adr-018-rate-limiter-keys-on-ip-only-optional-trust-proxy-2026-08-20)
 
 ---
 
@@ -780,6 +800,229 @@ Phase 9.4 results (`--quick`): graceful-degradation acceptance PASS (0% JMeter e
 
 ---
 
+## ADR-017: Admin auth fail-closed on prod/docker profiles (2026-08-20)
+
+**Status**: Accepted
+**Date**: 2026-08-20
+
+### Context
+
+[ADR-006](#adr-006-adminauthfilter-instead-of-spring-security) shipped a dev-friendly bypass: a blank `ADMIN_API_KEY` left `/admin/*` open (with a WARN log) on every profile. That is convenient for local work but means a production deploy that simply forgot to set the variable would boot happily with an unauthenticated admin surface (refresh-rules, thread-pools, memory endpoints). A re-review flagged this as the top-severity issue.
+
+### Decision
+
+`AdminAuthFilter` distinguishes **deployable profiles** (`KEY_REQUIRED_PROFILES = {prod, docker}`) from developer profiles. When `ADMIN_API_KEY` is blank **and** a deployable profile is active, the filter throws `IllegalStateException` at construction — the Spring context fails to start (fail-closed). On `local`/`dev`, a blank key still starts open with a WARN. The key comparison also moved to `MessageDigest.isEqual` (constant-time). The `docker` profile's compose file supplies `ADMIN_API_KEY=admin-secret` so the local docker stack starts cleanly.
+
+### Alternatives considered
+
+- **Keep open-with-WARN everywhere**: rejected — a missed env var is a silent, high-impact misconfiguration; a WARN in a log nobody reads is not a control.
+- **Fail-closed on all profiles including local/dev**: rejected — would break the zero-config local developer loop for no security gain (localhost admin surface is not the threat model).
+- **Default to a generated key**: rejected — a per-boot random key breaks scripted admin calls and hides the requirement rather than surfacing it.
+
+### Consequences
+
+- **Positive**: production cannot boot with an open admin surface; the failure is loud and at startup, not latent.
+- **Positive**: constant-time compare removes the timing-attack paper cut from ADR-006.
+- **Negative**: a `prod`/`docker` deploy now hard-requires the env var — an intentional trade (fail fast over fail open). Documented in the runbook and getting-started guides.
+
+### References
+- [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java) — `KEY_REQUIRED_PROFILES`, startup guard, `MessageDigest.isEqual`
+- [15-admin-authentication.md](15-admin-authentication.md), [30-runbooks-and-monitoring.md](30-runbooks-and-monitoring.md)
+- [ADR-006](#adr-006-adminauthfilter-instead-of-spring-security)
+
+---
+
+## ADR-018: Rate limiter keys on IP only; optional trust-proxy (2026-08-20)
+
+**Status**: Accepted
+**Date**: 2026-08-20
+
+### Context
+
+An earlier design keyed the rate limiter on a multi-tier client identity: `X-API-Key` → `Authorization: Bearer` → `X-Client-Id` → IP fallback. On the public, unauthenticated `/execute-rule` API those headers are attacker-controlled: any caller could set a unique `X-API-Key` per request and mint a fresh bucket, defeating the limiter entirely. Similarly, honoring `X-Forwarded-For` unconditionally lets a caller spoof arbitrary source IPs.
+
+### Decision
+
+Key **only** on the transport source address: `ip:{request.getRemoteAddr()}`. The application-level headers are never consulted for keying. `X-Forwarded-For` is ignored by default and trusted (left-most entry becomes the key) only when `drools.rate-limiting.trust-proxy=true` — an opt-in for deployments sitting behind a proxy/LB that overwrites the header. The client map keeps LRU eviction bounded by `max-clients`.
+
+### Alternatives considered
+
+- **Keep the multi-tier header identity**: rejected — trivially bypassable on an unauthenticated endpoint.
+- **Always trust `X-Forwarded-For`**: rejected — spoofable; would let a caller impersonate many source IPs. The `trust-proxy` toggle makes trusting it a deliberate, environment-scoped decision.
+- **Authenticate `/execute-rule` and key on identity**: out of scope — auth is delegated to the gateway per ADR-006's threat model; can be revisited if the service takes on first-party auth.
+
+### Consequences
+
+- **Positive**: the limiter can no longer be trivially bypassed by header forgery.
+- **Positive**: `trust-proxy` gives correct per-client limiting behind a trusted LB without opening a spoofing hole elsewhere.
+- **Negative**: without `trust-proxy`, everyone behind a shared NAT/LB shares one bucket (documented in the FAQ and rate-limiting doc).
+
+### References
+- [`RateLimitingFilter.java`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java) — `getClientIdentifier`, `trust-proxy`
+- [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md), [35-faq.md](35-faq.md)
+- [ADR-010](#adr-010-rate-limiting-in-memory-not-redis-backed)
+
+---
+
+## ADR-019: Rule-execution timeout halt + thread-pool load-shed 503 (2026-08-20)
+
+**Status**: Accepted
+**Date**: 2026-08-20
+
+### Context
+
+Two failure modes needed bounded, well-defined behavior: (1) a rule (or fact set) that runs far longer than expected, and (2) inbound execute load that exceeds the rule-execution pool's capacity. Left unhandled, the first ties up a worker thread indefinitely and the second either queues unboundedly (latency blowup / OOM) or fails opaquely.
+
+### Decision
+
+- **Timeout → halt → 408.** Rule execution runs under a timeout; on expiry the engine calls `KieSession.halt()` to stop the firing session and the request is mapped to HTTP 408 (Request Timeout). Halting releases the worker rather than letting a runaway session hold it.
+- **Pool saturation → load-shed → 503.** The rule-execution `ThreadPoolExecutor` uses `AbortPolicy`. When the pool and its queue are full, submissions are rejected; the rejection is translated to `ServiceUnavailableException` → HTTP 503. This is a distinct 503 source from the circuit breakers and from graceful-shutdown request refusal.
+
+### Alternatives considered
+
+- **`CallerRunsPolicy` for the exec pool**: rejected — running rule execution on the servlet/acceptor thread under overload couples request intake to execution latency and can stall the container. Explicit shed (503) gives callers a clear, retryable signal.
+- **Interrupt the thread instead of `KieSession.halt()`**: rejected — Drools' supported cooperative stop is `halt()`; thread interruption doesn't reliably unwind a firing session.
+- **Unbounded queue**: rejected — converts overload into latency and heap growth instead of a fast, honest 503.
+
+### Consequences
+
+- **Positive**: both runaway rules and overload have deterministic, documented outcomes (408 / 503) instead of hung threads.
+- **Positive**: 503 is a retryable backpressure signal; operators scale `DROOLS_THREAD_POOL_MAX_SIZE` / queue depth in response.
+- **Negative**: a 408 means the partial session is discarded; the caller must retry idempotently. Two separate 503 paths (breaker-open and pool-shed) exist — the troubleshooting guide distinguishes them.
+
+### References
+- [`DroolsEngineService.java`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java) — timeout + `KieSession.halt()`
+- [`ServiceUnavailableException.java`](../src/main/java/com/company/drools/api/exception/ServiceUnavailableException.java), [`GlobalExceptionHandler.java`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java)
+- [30-runbooks-and-monitoring.md](30-runbooks-and-monitoring.md) — "Diagnose 503 errors"
+
+---
+
+## ADR-020: refreshLock separated from the rule read-write lock (2026-08-20)
+
+**Status**: Accepted
+**Date**: 2026-08-20
+
+### Context
+
+ADR-003 established "compile outside the lock, take the write lock only for the swap." But refresh operations also need to **serialize with each other** — two concurrent single-rule merges, or a bulk refresh racing a single-rule refresh, must not interleave and lose updates. Reusing the rule read-write lock to serialize refreshes would either re-introduce lock-held-through-compile latency or make the locking discipline hard to reason about.
+
+### Decision
+
+Introduce a dedicated `ReentrantLock refreshLock` in `DroolsEngineService`, separate from the `ReentrantReadWriteLock` that guards the compiled rule state. Every refresh path (`loadRules`, `loadOrReplaceRule`) takes `refreshLock` for the whole compile-then-swap sequence, so refreshes are strictly serialized; the compile still runs **outside** the read-write write lock, which is acquired only for the brief metadata/state swap. Pub/sub-driven refreshes from siblings run on a dedicated single-thread `ruleRefreshListenerExecutor`, so listener callbacks never block the Redis message thread and are naturally serialized before contending on `refreshLock`.
+
+### Alternatives considered
+
+- **Serialize refreshes on the write lock**: rejected — either holds the write lock through compilation (blocks all readers, the exact latency problem ADR-003 solved) or requires fragile lock upgrade/downgrade.
+- **Allow concurrent refreshes (no refresh serialization)**: rejected — concurrent merges can lose each other's rule updates (the Finding #1 class of bug).
+- **Run pub/sub refreshes inline on the listener thread**: rejected — a slow compile would stall the Redis message container and delay/redeliver subsequent events.
+
+### Consequences
+
+- **Positive**: refreshes are serialized and correct without ever holding the read-write write lock during compilation; reader latency stays flat.
+- **Positive**: the single-thread listener executor decouples sibling-refresh compilation from the Redis transport.
+- **Negative**: two lock primitives to keep straight — `refreshLock` (serialize refreshes) vs `rulesLock` (guard the swap). Documented in the engine's Javadoc.
+
+### References
+- [`DroolsEngineService.java`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java) — `refreshLock`, `rulesLock`, `ruleRefreshListenerExecutor`
+- [ADR-003](#adr-003-kiecontainer-atomic-swap-with-disposal)
+
+---
+
+## ADR-021: Redis prod TLS/auth enforcement + removal of Jackson default typing (2026-08-20)
+
+**Status**: Accepted
+**Date**: 2026-08-20
+
+### Context
+
+Two Redis-related exposures remained after ADR-016. (1) Nothing forced production Redis connections to be encrypted or authenticated — a misconfigured deploy could talk to Redis over plaintext `redis://` with no credentials (this is deferred security finding **#28**). (2) `RedisConfig`'s value serializer previously configured Jackson with default typing (polymorphic type info embedded in the cached JSON) — a known deserialization-gadget (RCE) risk if an attacker can influence cached bytes.
+
+### Decision
+
+- **`RedisSecurityValidator` (`@Profile("prod")`).** On the `prod` profile with Redis enabled, a startup validator throws `IllegalStateException` unless `REDIS_URL` uses the `rediss://` (TLS) scheme **and** includes credentials (`rediss://user:password@host:port`). Non-prod profiles are unaffected. This makes finding #28 enforced-on-prod rather than merely documented.
+- **No Jackson default typing in `RedisConfig`.** The Redis value serializer uses a plain `ObjectMapper` with default typing removed, so cached payloads carry no polymorphic `@class` metadata to exploit.
+
+### Alternatives considered
+
+- **Document the TLS/auth requirement without enforcing it**: rejected — the whole point of finding #28 was that documentation alone hadn't prevented insecure configs; a startup guard fails closed.
+- **Enforce TLS on all profiles**: rejected — local/dev and the docker stack use a plaintext LocalStack/Redis; enforcing `rediss://` there would break the zero-config loop.
+- **Keep default typing but add an allow-list `PolymorphicTypeValidator`**: rejected for this cache — the cached values are simple DRL-text/rule payloads that don't need polymorphism, so removing typing entirely is simpler and strictly safer.
+
+### Consequences
+
+- **Positive**: production Redis is guaranteed encrypted and authenticated, or the app refuses to start.
+- **Positive**: the Redis cache path is no longer a polymorphic-deserialization gadget surface.
+- **Negative**: prod operators must provision a TLS Redis endpoint with credentials (ElastiCache in-transit encryption + AUTH). Documented in the deployment/runbook docs.
+
+### References
+- [`RedisSecurityValidator.java`](../src/main/java/com/company/drools/config/RedisSecurityValidator.java) — prod-profile startup guard
+- [`RedisConfig.java`](../src/main/java/com/company/drools/config/RedisConfig.java) — serializer without default typing
+- `SECURITY.md` — finding #28 status
+
+---
+
+## ADR-022: Storage delegate held in an `AtomicReference` (2026-08-20)
+
+**Status**: Accepted
+**Date**: 2026-08-20
+
+### Context
+
+`RedisCachedRuleStorage` is a decorator whose underlying `delegate` (`RuleStorage`) is set once by `StorageFactory` during wiring, after construction (`setDelegate(...)`), and then read on every request thread. A plain `volatile` field published the reference safely but expressed "set-once, read-many" only by convention.
+
+### Decision
+
+Hold the delegate in an `AtomicReference<RuleStorage>` (replacing the previous `volatile` field). `setDelegate` does `delegate.set(Objects.requireNonNull(...))`; read paths call `delegate.get()`. This gives safe cross-thread publication of the set-once reference and a clear home for the null-guard, and leaves room for atomic swap semantics if the delegate ever needs to be replaced at runtime.
+
+### Alternatives considered
+
+- **Keep `volatile RuleStorage delegate`**: works for safe publication but doesn't express the set-once/atomic intent and scatters null-handling.
+- **`final` delegate via constructor injection**: rejected — the decorator must be constructed before `StorageFactory` decides and injects the concrete base storage; the reference genuinely isn't known at construction time.
+
+### Consequences
+
+- **Positive**: safe publication is explicit; the reference has one guarded setter and a single read accessor.
+- **Negative**: negligible — an `AtomicReference` indirection on a per-request read (immeasurable next to Redis/S3 I/O).
+
+### References
+- [`RedisCachedRuleStorage.java`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java) — `AtomicReference<RuleStorage> delegate`, `setDelegate`
+- [`StorageFactory.java`](../src/main/java/com/company/drools/storage/StorageFactory.java) — wiring
+
+---
+
+## ADR-023: CI workflow + verify-bound quality gates (2026-08-20)
+
+**Status**: Accepted
+**Date**: 2026-08-20
+
+### Context
+
+Quality tooling (Spotless, SpotBugs, JaCoCo, OWASP dependency-check) existed in the pom but several checks weren't enforced automatically, and there was no CI pipeline running the Testcontainers integration tests (which need a real Docker daemon and are surefire-excluded on the macOS dev loop). Gates that aren't bound to a phase and run in CI are advisory at best.
+
+### Decision
+
+- **Bind the checks to `verify`.** `spotless:check`, `spotbugs:check`, and `jacoco:check` execute in the `verify` phase, so `mvn verify` fails on formatting drift, static-analysis findings, or coverage below floor. The JaCoCo floor is **0.88 instruction / 0.74 branch**. OWASP dependency-check runs in CI.
+- **Add `.github/workflows/ci.yml`.** On Linux (`ubuntu-latest`, which has a Docker daemon) it runs `mvn -B clean verify` (unit suite + the verify-bound gates) and then the three Testcontainers integration test classes (`S3StorageIntegrationTest`, `RedisCachedStorageIntegrationTest`, `RedisPubSubIntegrationTest`) that are excluded from the default local run.
+
+### Alternatives considered
+
+- **Leave checks unbound / manual**: rejected — advisory gates drift; binding to `verify` makes them non-optional.
+- **Run integration tests on every developer machine by default**: rejected — the Testcontainers ITs need Docker-in-Docker that isn't reliable on the macOS dev loop; CI (Linux) is the right place, with a surefire exclusion locally.
+- **Set the JaCoCo floor at the measured coverage**: rejected — a small margin (floor below the measured 90.1/78.4) avoids flaky failures on incidental line moves while still preventing regressions.
+
+### Consequences
+
+- **Positive**: formatting, static analysis, coverage, dependency CVEs, and the integration suite are all enforced on every push.
+- **Positive**: the coverage floor is a real gate, not documentation.
+- **Negative**: `mvn verify` is slower and stricter than `mvn test`; contributors run `spotless:apply` before pushing (documented in CONTRIBUTING.md).
+
+### References
+- [`pom.xml`](../pom.xml) — `spotless-check` / `spotbugs-check` / `jacoco-check` bound to `verify`; dependency-check
+- [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) — verify + Testcontainers ITs on Linux
+- [28-testing-guide.md](28-testing-guide.md), `CONTRIBUTING.md`
+
+---
+
 ## Extension points
 
 These are the documented seams for extending the service without forking it.
@@ -865,12 +1108,12 @@ The current cache layer is `RedisCachedRuleStorage`, a decorator on `RuleStorage
 
 ## Future ADRs to write (placeholders)
 
-These decisions are anticipated but not yet documented as ADRs. Numbering picks up where the index leaves off (the last written ADR is 016; the next free number is 017 — ADR-015 was reserved for the structured-logging decision and is the lone gap in the index).
+These decisions are anticipated but not yet documented as ADRs. The last written ADR is 023; the next free number is 024 (ADR-015 was reserved for the structured-logging decision and remains the lone gap in the index).
 
 - **ADR-015**: Logback + logstash-logback-encoder for structured logs (over alternatives) — number reserved, write-up still pending
-- **ADR-017**: Choice of Apache HTTP client for AWS SDK v2 (over Netty)
-- **ADR-018**: Maven over Gradle
-- **ADR-019**: Container Java distribution: Amazon Corretto (over Temurin / Liberica)
+- **ADR-024**: Choice of Apache HTTP client for AWS SDK v2 (over Netty)
+- **ADR-025**: Maven over Gradle
+- **ADR-026**: Container Java distribution: Amazon Corretto (over Temurin / Liberica)
 
 If anyone is making a major change to the corresponding component, write the ADR before changing the code.
 
@@ -878,7 +1121,7 @@ If anyone is making a major change to the corresponding component, write the ADR
 
 ## How to write a new ADR
 
-1. Pick the next number (017, 018, ... — ADR-015 is reserved but not yet written; ADR-016 is the last written).
+1. Pick the next number (024, 025, ... — ADR-015 is reserved but not yet written; ADR-023 is the last written).
 2. Add an entry to the index above.
 3. Add the section below.
 4. Cite specific code lines.

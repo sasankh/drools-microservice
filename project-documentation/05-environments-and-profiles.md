@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, operators |
 | **Purpose** | The 4 Spring profiles (`local`, `dev`, `prod`, `docker`): what each one overrides, when to use which, and the full diff table |
-| **Last verified against** | [`application.yml`](../src/main/resources/application.yml) on 2026-05-24 |
+| **Last verified against** | [`application.yml`](../src/main/resources/application.yml), [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java), [`RedisSecurityValidator.java`](../src/main/java/com/company/drools/config/RedisSecurityValidator.java) on 2026-08-20 |
 | **Related docs** | [06-deployment.md](06-deployment.md), [09-environment-variables-reference.md](09-environment-variables-reference.md), [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md) |
 
 ---
@@ -196,6 +196,10 @@ logging:
 
 **Auto-refresh enabled**: in prod, `AUTO_REFRESH_ENABLED=true` lets the service periodically reload rules from S3 without manual `/admin/refresh-rules` calls. Interval default 5 min (`AUTO_REFRESH_INTERVAL_MINUTES`).
 
+**Fail-closed startup guards (prod only)** — the app refuses to start if either is violated:
+- **Admin key required**: `AdminAuthFilter` throws at startup if `ADMIN_API_KEY` is blank/unset under the `prod` (or `docker`) profile. Admin endpoints must never be served unprotected in a deployable profile.
+- **TLS + authenticated Redis required**: `RedisSecurityValidator` (`@Profile("prod")`) throws at startup unless `REDIS_URL` is a `rediss://` URL (TLS) carrying credentials — e.g. `rediss://user:pass@redis.internal:6379`. A plaintext `redis://` URL or a URL without auth is rejected.
+
 ---
 
 ### `docker` — running inside docker-compose
@@ -230,6 +234,8 @@ aws:
 **Why connection-pool: 25 (not prod's 100)**: same reasoning — proportional to expected concurrency in a single dev container, and LocalStack typically can't sustain 100 concurrent S3 connections anyway.
 
 **`aws.endpoint` is set per-service in [docker-compose.yml:33](../docker-compose.yml#L33)**: `AWS_ENDPOINT=http://localstack:4566`. The `localstack` hostname resolves via the `drools-network` bridge.
+
+**Admin key required (fail-closed)**: like `prod`, the `docker` profile is a deployable profile — `AdminAuthFilter` refuses to start if `ADMIN_API_KEY` is blank. The compose file supplies `ADMIN_API_KEY=admin-secret` for the `app` service so the container boots and its healthcheck can send the `X-Admin-API-Key` header. (Unlike `prod`, `docker` runs a loopback-bound plaintext Redis, so the `rediss://` guard does **not** apply here.)
 
 ---
 

@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, operators, partners, AI agents |
 | **Purpose** | Single-page reference for every error code the service emits — what triggers it, what the response looks like, how to fix it |
-| **Last verified against** | [`GlobalExceptionHandler.java`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java), [`RateLimitingFilter.java`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java), [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java), [`RequestSizeValidationFilter.java`](../src/main/java/com/company/drools/api/filter/RequestSizeValidationFilter.java) on 2026-05-24 |
+| **Last verified against** | [`GlobalExceptionHandler.java`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java), [`RateLimitingFilter.java`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java), [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java), [`RequestSizeValidationFilter.java`](../src/main/java/com/company/drools/api/filter/RequestSizeValidationFilter.java) on 2026-08-20 |
 | **Related docs** | [10-api-reference.md](10-api-reference.md), [11-integration-guide.md](11-integration-guide.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md), [31-troubleshooting.md](31-troubleshooting.md) |
 
 ---
@@ -45,7 +45,7 @@ The exact field set depends on which layer emits the error:
 | 413 | `REQUEST_TOO_LARGE` | Request body exceeds size cap |
 | 429 | `RATE_LIMIT_EXCEEDED` | Per-client rate limit hit |
 | 500 | `INTERNAL_ERROR` | Anything not caught by a more specific handler |
-| 503 | `SERVICE_UNAVAILABLE` | Circuit breaker open (S3 or Redis) |
+| 503 | `SERVICE_UNAVAILABLE` | Circuit breaker open (S3 or Redis), OR rule-execution thread pool saturated |
 
 ---
 
@@ -171,20 +171,29 @@ curl -X POST http://localhost:8080/execute-rule \
 
 ## UNAUTHORIZED (401)
 
-**When**: A request to `/admin/*` was made and the `X-Admin-API-Key` header is missing or wrong, *and* `ADMIN_API_KEY` env var is set.
+**When**: A request to `/admin/*` (including `/admin/health`) was made and the `X-Admin-API-Key` header is missing or wrong, *and* an admin key is configured. The key is compared in constant time (`MessageDigest.isEqual`) to avoid timing side channels.
 
-> If `ADMIN_API_KEY` is empty/unset, admin endpoints are open and this error never fires. A warning is logged at startup. See [15-admin-authentication.md](15-admin-authentication.md).
+> **Profile-dependent behavior when `ADMIN_API_KEY` is blank/unset:**
+> - `prod` and `docker` profiles **fail to start** — a blank admin key is a hard error, so admin endpoints are never served unprotected.
+> - `local` and `dev` profiles leave admin endpoints **open** (this error never fires) and log a startup WARN.
+>
+> See [15-admin-authentication.md](15-admin-authentication.md).
 
 **Response**:
 ```json
 {
-  "code": "UNAUTHORIZED",
-  "message": "Missing or invalid admin API key",
-  "timestamp": "..."
+  "rule_id": null,
+  "result": null,
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Admin API key required",
+    "details": "Provide a valid API key via the X-Admin-API-Key header",
+    "timestamp": "..."
+  }
 }
 ```
 
-**Code path**: [`AdminAuthFilter.java:74-93`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java#L74-L93). Filter intercepts requests where `uri.startsWith("/admin/")` and compares the `X-Admin-API-Key` header to the configured value.
+**Code path**: [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java) `doFilterInternal`. Filter intercepts requests where `uri.startsWith("/admin/")` and compares the `X-Admin-API-Key` header to the configured value.
 
 **Fix**:
 - Include the header on every admin request:
@@ -192,7 +201,7 @@ curl -X POST http://localhost:8080/execute-rule \
   curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/health
   ```
 - If you don't know the configured key, ask whoever deployed the service. Never log the key.
-- For local dev: leave `ADMIN_API_KEY` unset to disable auth (do NOT do this in production).
+- For local dev only (`local`/`dev` profiles): leave `ADMIN_API_KEY` unset to disable auth. In `prod`/`docker` the app refuses to start without it.
 
 ---
 
@@ -297,7 +306,7 @@ Two code paths emit this:
 
 ## RATE_LIMIT_EXCEEDED (429)
 
-**When**: A client identified by the multi-tier ID exceeds the configured per-minute or per-hour rate limit on `/execute-rule` (or other non-admin endpoints).
+**When**: A client — identified by source IP only (`request.getRemoteAddr()`, or the left-most `X-Forwarded-For` entry when `trust-proxy=true`) — exceeds the configured per-minute or per-hour rate limit on `/execute-rule` (or other non-admin endpoints).
 
 > Admin endpoints (`/admin/*`) are **exempt** from rate limiting.
 
@@ -319,7 +328,7 @@ Two code paths emit this:
 
 **Fix**:
 - Slow down. Read `X-RateLimit-Reset` and back off until then.
-- If your client is being identified incorrectly (e.g., everyone shares the same IP behind a NAT), set an `X-API-Key` or `X-Client-Id` header — this gives each client an independent bucket. See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md).
+- Buckets are keyed on source IP only — sending `X-API-Key` / `X-Client-Id` / `Authorization` does **not** create a separate bucket. If many clients share one egress IP (NAT) they share a bucket. Behind a trusted proxy that overwrites `X-Forwarded-For`, set `DROOLS_RATE_LIMITING_TRUST_PROXY=true` so each real client IP gets its own bucket. See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md).
 - Raise the limit if your traffic profile justifies it:
   ```bash
   DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE=5000
@@ -330,9 +339,11 @@ Two code paths emit this:
 
 ## SERVICE_UNAVAILABLE (503)
 
-**When**: The Resilience4j circuit breaker for S3 or Redis is OPEN — too many recent failures to that backend.
+**When**: One of two independent triggers:
+1. **Circuit breaker OPEN** — the Resilience4j breaker for S3 or Redis has seen too many recent failures to that backend.
+2. **Rule-execution thread pool saturated** — the execution pool's queue is full and all threads are busy, so the pool's `AbortPolicy` throws `RejectedExecutionException`, which `RuleExecutor` maps to a `ServiceUnavailableException` → 503. This sheds load rather than running the rule body on the Tomcat request thread (which would bypass the execution timeout).
 
-**Response**:
+**Response (circuit breaker)**:
 ```json
 {
   "rule_id": null,
@@ -344,16 +355,31 @@ Two code paths emit this:
   }
 }
 ```
-
 The breaker name (`s3` or `redis`) is in the message. The state is in lowercase (`open`, `half-open`).
 
-**Code path**: [`GlobalExceptionHandler.java:82-101`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L82-L101). Triggered by [`CircuitBreakerException`](../src/main/java/com/company/drools/api/exception/CircuitBreakerException.java) when `S3RuleStorage` is rejected by the S3 breaker. Note: `RedisCachedRuleStorage` Redis-op failures do NOT surface to clients — the decorator falls through to base storage silently when the Redis breaker is open.
+**Response (pool saturation)**:
+```json
+{
+  "rule_id": null,
+  "result": null,
+  "error": {
+    "code": "SERVICE_UNAVAILABLE",
+    "message": "Service is temporarily unavailable. Please try again later.",
+    "timestamp": "..."
+  }
+}
+```
+
+**Code path**:
+- Circuit breaker: [`GlobalExceptionHandler`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java) `handleCircuitBreakerException`, triggered by [`CircuitBreakerException`](../src/main/java/com/company/drools/api/exception/CircuitBreakerException.java) when `S3RuleStorage` is rejected by the S3 breaker. Note: `RedisCachedRuleStorage` Redis-op failures do NOT surface to clients — the decorator falls through to base storage silently when the Redis breaker is open.
+- Pool saturation: [`RuleExecutor`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java) catches `RejectedExecutionException` and throws [`ServiceUnavailableException`](../src/main/java/com/company/drools/api/exception/ServiceUnavailableException.java), handled by `GlobalExceptionHandler.handleServiceUnavailableException`. The pool uses `ThreadPoolExecutor.AbortPolicy` (see [`ThreadPoolConfig.java`](../src/main/java/com/company/drools/config/ThreadPoolConfig.java)).
 
 **Common causes**:
 - S3 rate-limited or throttling the client.
 - Network partition between the service and S3 / Redis.
 - Misconfigured AWS credentials (every call fails → breaker opens).
 - Redis container down and `REDIS_ENABLED=true` with traffic actually using it.
+- **Transient overload**: sustained request rate exceeds the execution pool's throughput (all threads busy + queue full). This is expected back-pressure — retry with backoff, and consider raising `DROOLS_THREAD_POOL_MAX_SIZE` / `DROOLS_THREAD_POOL_QUEUE_CAPACITY`.
 
 **Fix**:
 1. Check the breaker state directly:

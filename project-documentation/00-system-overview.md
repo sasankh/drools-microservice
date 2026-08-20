@@ -48,7 +48,7 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 2. [27-development-setup.md](27-development-setup.md) — local Java + Maven setup, conventions
 3. [02-project-structure.md](02-project-structure.md) — annotated directory tree (clickable)
 4. [04-architecture.md](04-architecture.md) — system design
-5. [28-testing-guide.md](28-testing-guide.md) — test suite map (46 files, 548 unit + 14 integration tests)
+5. [28-testing-guide.md](28-testing-guide.md) — test suite map (48 files, 536 unit + 14 integration tests)
 
 ### 🏛️ Architect / design reviewer
 
@@ -71,7 +71,7 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 1. [10-api-reference.md](10-api-reference.md) — every endpoint, request/response shape
 2. [11-integration-guide.md](11-integration-guide.md) — code examples in 4 languages
 3. [12-error-code-catalog.md](12-error-code-catalog.md) — every error code + HTTP status
-4. [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) — multi-tier client identification
+4. [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) — IP-based client identification
 5. [api-reference/openapi.yml](api-reference/openapi.yml) — machine-readable spec
 
 ### ✍️ Rule author
@@ -119,12 +119,12 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 | Stat | Value |
 |---|---|
 | Total documentation files | **40** (including this one) |
-| Total Java source files | 59 |
-| Total test files | 46 |
-| Total tests (`@Test` + `@ParameterizedTest`) | **548** unit + 14 Testcontainers integration (surefire-excluded; CI-only) |
+| Total Java source files | 61 |
+| Total test files | 48 |
+| Total tests (`@Test` + `@ParameterizedTest`) | **536** unit + 14 Testcontainers integration (surefire-excluded; CI-only) |
 | Test coverage (instruction / branch) | 90.1% / 78.4% (measured 2026-08-19, Java 25) |
 | Sample rules in `sample-rules/` | 17 |
-| Environment variables actually read | 67 |
+| Environment variables actually read | 68 |
 | Distinct error codes | 10 |
 | Spring profiles | 4 (`local`, `dev`, `prod`, `docker`) |
 | Filter chain order | 4 filters (-1, 0, 1, none) |
@@ -133,7 +133,7 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 | Sustained throughput target / measured | 100-1000 RPS / 45+ RPS sustained |
 | P99 latency target / measured (cached) | < 100ms / 1-40ms |
 | Docker image size | ~347 MB (Corretto 25 Alpine multi-stage) |
-| Production-ready security findings | 39 of 42 closed |
+| Security posture | Most findings addressed; 2 tracked-open (B1 DRL-sandbox RCE — deferred; #28 Redis TLS/auth — enforced on prod) |
 
 ---
 
@@ -157,7 +157,7 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 - [10-api-reference.md](10-api-reference.md) — every endpoint
 - [11-integration-guide.md](11-integration-guide.md) — code examples in curl/Python/Java/Node.js
 - [12-error-code-catalog.md](12-error-code-catalog.md) — every error code
-- [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) — multi-tier client ID
+- [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) — IP-based client ID
 
 ### Security (14-16)
 - [14-security-architecture.md](14-security-architecture.md) — 8-layer model
@@ -212,7 +212,7 @@ This is the elevator-pitch version. Full detail in [04-architecture.md](04-archi
 1. POST /execute-rule {rule_id, data}
 2. SecurityHeadersFilter (Order -1) — adds 7 response headers
 3. AdminAuthFilter (Order 0) — skipped for /execute-rule
-4. RateLimitingFilter (Order 1) — checks per-client multi-tier identity
+4. RateLimitingFilter (Order 1) — checks per-client limit, keyed on source IP
 5. RequestSizeValidationFilter (no Order) — 1 MiB body cap
 6. RuleExecutionController — @ValidRuleId / @ValidRuleData via Jakarta Validation
 7. DroolsEngineService.executeRule() — atomic, lock-free read of compiled KieBase
@@ -231,10 +231,10 @@ Typical cached-hit latency: 1-40ms.
 If you take only one thing from this overview:
 
 1. **Sample rules stack multiplicatively**. VIP $100 → $72 (not $80), because both `pricing.discount.vip` and `pricing.discount.simple` fire and the discounts compound. **Production rules need `salience` or `activation-group`** — the samples deliberately don't, to demonstrate the unmanaged behavior. See [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md).
-2. **`ADMIN_API_KEY` empty = admin endpoints are open**. Default behavior. Critical to set in production. WARN log at startup is the tripwire. See [15-admin-authentication.md](15-admin-authentication.md).
+2. **`ADMIN_API_KEY` empty = admin endpoints are open — but only in `local`/`dev`**. In those profiles a blank key leaves `/admin/*` open with a startup WARN. In `prod`/`docker` a blank key is a hard error: the app **fails to start**. See [15-admin-authentication.md](15-admin-authentication.md).
 3. **`eval()` is BANNED in DRL** — and the sample rules don't need it. See [16-drl-sandboxing.md](16-drl-sandboxing.md).
 4. **Redis is a real cache when `REDIS_ENABLED=true`** — `RedisCachedRuleStorage` decorates the base storage with read-through caching; `RuleRefreshPublisher`/`Subscriber` provide cross-task fan-out via `drools:rule:events` channel. Replaced the old dead `LocalLRUCache`/`RedisRuleCache` layer on 2026-05-20. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20).
-5. **`X-Forwarded-For` is explicitly ignored** by the rate limiter (anti-spoofing). Use `X-API-Key` or `X-Client-Id` for stable identity behind a load balancer. See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md).
+5. **Rate-limit buckets are keyed on source IP only**. `X-API-Key` / `Authorization` / `X-Client-Id` do **not** create separate buckets (keying on unauthenticated headers would let callers defeat the limiter). `X-Forwarded-For` is ignored by default; set `DROOLS_RATE_LIMITING_TRUST_PROXY=true` only behind a trusted proxy that overwrites it. See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md).
 6. **Rule refresh doesn't block readers** — single long-lived `KieContainer` updated in place via `KieContainer.updateToVersion(ReleaseId)` (compile happens outside the write lock). See [ADR-003](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal) and [39-load-test-findings.md](39-load-test-findings.md).
 7. **JSON uses snake_case (`rule_id`)** — not camelCase. The Java field is `ruleId` but mapped via `@JsonProperty`. See [ADR-008](36-architecture-decision-records.md#adr-008-snake_case-json-via-jsonproperty).
 

@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Operators, on-call engineers, performance engineers |
 | **Purpose** | Decision-tree runbook for diagnosing and tuning performance issues. Each branch leads to a concrete tuning action. |
-| **Last verified against** | Running stack on 2026-05-24 (load-tested at 1000 rules + 3-replica Phase 9 multi-instance harness — see [39-load-test-findings.md](39-load-test-findings.md) for measured numbers) |
+| **Last verified against** | Running stack on 2026-08-20 (load-tested at 1000 rules + 3-replica Phase 9 multi-instance harness — see [39-load-test-findings.md](39-load-test-findings.md) for measured numbers) |
 | **Related docs** | [09-environment-variables-reference.md](09-environment-variables-reference.md), [24-jvm-optimization.md](24-jvm-optimization.md), [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md), [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md), [30-runbooks-and-monitoring.md](30-runbooks-and-monitoring.md), [39-load-test-findings.md](39-load-test-findings.md) |
 
 ---
@@ -107,7 +107,7 @@ If a single rule takes > 1 second consistently:
 
 #### A6: All of the above are fine but latency is still high
 
-Check `RULE_EXECUTION_TIMEOUT_SECONDS`. If it's set to 30 (default) and you're seeing P99 of 30s, you have rules that are timing out — they're being canceled but consuming the full timeout budget on the way. See [Branch E](#branch-e-rule-execution-timeouts).
+Check `RULE_EXECUTION_TIMEOUT_SECONDS`. If it's set to 30 (default) and you're seeing P99 near 30s, you have rules hitting the timeout. On timeout the executor now `halt()`s the session at the next rule boundary, so a well-behaved (frequently-refiring) rule is cut short before the full budget — but a rule stuck in a single non-yielding consequence can still ride the timeout to ~30s. See [Branch E](#branch-e-rule-execution-timeouts).
 
 ---
 
@@ -158,10 +158,11 @@ Rare but possible if response payloads are huge. Check container `network` metri
 docker compose logs app | grep -E 'Rate limit|client map'
 
 # Check if client identity is what you expect
-# Send a probe and inspect the bucket key being used
+# Send a probe and inspect the bucket key being used. NOTE: application headers like
+# X-Client-Id / X-API-Key are NOT read — the client key is always the remote IP
+# (ip:<addr>), or the left-most X-Forwarded-For entry ONLY if trust-proxy=true.
 curl -sI -X POST http://localhost:8080/execute-rule \
   -H 'Content-Type: application/json' \
-  -H 'X-Client-Id: my-client' \
   -d '{"rule_id":"pricing.discount.simple","data":{"amount":100}}' \
   | grep -i RateLimit
 ```
@@ -178,26 +179,28 @@ DROOLS_RATE_LIMITING_BURST_SIZE=500
 
 #### C2: All clients share one bucket (you're behind a load balancer)
 
-The default IP-based identification means everyone behind the LB shares one bucket. **Inject a per-client header at the LB or API gateway**:
+The rate limiter keys **only on `request.getRemoteAddr()`** — application headers (`X-API-Key`, `Authorization`, `X-Client-Id`) are deliberately **not** read (they're unauthenticated on the public `/execute-rule` API; keying on them would let any caller mint unlimited buckets or fill the client map). So behind an LB that terminates the connection, every client shares the LB's IP and therefore one bucket. Injecting a per-client header at the gateway will **not** split them — the filter ignores those headers.
 
-- `X-API-Key: <per-client-key>`
-- `X-Client-Id: <per-client-id>`
+The supported fix is to make the **remote IP** carry the real client identity:
 
-See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) for the multi-tier identification flow.
+- Set `DROOLS_RATE_LIMITING_TRUST_PROXY=true` **only** behind a proxy/LB that overwrites inbound `X-Forwarded-For`. The filter then keys on the left-most `X-Forwarded-For` entry (the originating client IP). Never enable this if `X-Forwarded-For` can reach the service unfiltered — it becomes spoofable.
+- Or preserve the client source IP at L4 (e.g. proxy protocol / `X-Forwarded-For` preservation) so `getRemoteAddr()` already differs per client.
 
-#### C3: Spoofed `X-Client-Id` filling memory → max-clients hit
+See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) for the identification flow.
 
-Log line: `Rate limiter client map at capacity (10000), rejecting new client`.
+#### C3: Client map fills up → max-clients LRU eviction / churn
 
-This means an attacker is generating distinct fake `X-Client-Id` values to fill the map. New legit clients are now rejected.
+Log line: rate-limiter client-map-at-capacity warning.
+
+Because buckets are keyed on IP, a distinct-IP flood (or a spoofable `X-Forwarded-For` when `trust-proxy=true` is misconfigured) can churn the client map. At the `max-clients` cap the limiter **LRU-evicts the oldest bucket** to admit the new client (it does not reject the new client outright), so a flood can evict legitimate clients' buckets and effectively reset their counters.
 
 Two responses:
-- **Trust your gateway**: Strip `X-Client-Id` from incoming requests at the gateway and inject your own. Then you control the identifier values.
+- **Don't trust spoofable headers**: leave `DROOLS_RATE_LIMITING_TRUST_PROXY=false` unless a trusted proxy overwrites `X-Forwarded-For`. With it false the key is the true TCP peer and can't be rotated per request.
 - **Increase capacity**:
   ```bash
   DROOLS_RATE_LIMITING_MAX_CLIENTS=50000
   ```
-  But this just delays the problem. The real fix is upstream.
+  But this just delays churn. The real fix is upstream (WAF / gateway L4 filtering).
 
 ---
 
@@ -207,9 +210,15 @@ Two responses:
 
 ```bash
 curl -fsS http://localhost:8080/admin/health | jq '.components."circuit-breakers"'
+
+# 503s with all breakers CLOSED? Check for rule-execution pool saturation:
+curl -fsS http://localhost:8080/admin/thread-pools | jq
+docker compose logs app | grep -i 'Rule execution pool saturated'
 ```
 
 If `s3_state == "OPEN"` or `redis_state == "OPEN"`: a breaker has tripped. See [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md) for the full diagnostic flow.
+
+> **Two distinct 503 sources.** A 503 (`SERVICE_UNAVAILABLE`) is emitted both when a circuit breaker is open **and** when the rule-execution thread pool is saturated. The rule-execution pool uses an **`AbortPolicy`**: when its queue is full and all threads are busy, task submission throws `RejectedExecutionException`, which `RuleExecutor` maps to `ServiceUnavailableException` → HTTP 503. This deliberately sheds load rather than running the rule body on the Tomcat request thread (which would silently bypass the execution timeout). If you see 503s with every breaker CLOSED, look at pool saturation ([Branch H](#branch-h-thread-pool-exhaustion)), not the breakers.
 
 ### Decision tree (summary)
 
@@ -249,8 +258,8 @@ Look at the count — is it consistently the same rule(s) timing out, or random?
 #### E1: One specific rule keeps timing out
 
 That rule has a runtime issue. Likely causes:
-- **Missing `no-loop true`** — rule modifies its own match condition and re-fires indefinitely. The `maxRuleFirings = 10000` cap eventually stops it but only after 30s.
-- **Heavy computation in `then` block** — log timing inside the rule, identify the hot loop, optimize.
+- **Missing `no-loop true`** — rule modifies its own match condition and re-fires indefinitely. On timeout the executor now calls `KieSession.halt()`, which stops `fireAllRules` at the **next rule boundary** — so a rapidly-refiring rule is interrupted promptly and the request returns 408 without necessarily burning the full 30s. (The `maxRuleFirings = 10000` cap is a separate backstop.)
+- **Heavy computation in `then` block** — log timing inside the rule, identify the hot loop, optimize. **Caveat**: `halt()` only interrupts *between* firings, so a single consequence that never yields (`then while(true){} end`) can't be interrupted — that worker thread stays busy until recycled even though the request already returned 408 (finding B1, deferred).
 - **Unbounded recursion** through other rule activations.
 
 #### E2: Many rules timeout simultaneously → external dependency slow
@@ -403,11 +412,13 @@ DROOLS_THREAD_POOL_MAX_SIZE=100
 DROOLS_THREAD_POOL_QUEUE_CAPACITY=200
 ```
 
-Rule execution rejects (when both pool and queue are full) get the `CallerRunsPolicy` — the request is executed on the calling thread (Tomcat). This degrades but doesn't lose requests. **However, it can saturate Tomcat threads** (a documented `[ThreadPoolConfig.java]` warning).
+Rule execution rejects (when both pool and queue are full) hit the **`AbortPolicy`**: submission throws `RejectedExecutionException`, which `RuleExecutor` turns into `ServiceUnavailableException` → **HTTP 503**. The service **sheds** the excess request rather than running the rule body on the Tomcat request thread — deliberately, because a caller-runs execution would silently bypass the per-request execution timeout. So under sustained saturation you'll see 503s (see [Branch D](#branch-d-503--circuit-breaker)); the fix is to add capacity (below) or scale out.
+
+> This is a change from the older `CallerRunsPolicy` on this pool. The **storage** thread pool still uses `CallerRunsPolicy` (see [H2](#h2-storage-pool-exhausted)) — only the rule-execution pool switched to `AbortPolicy`/503 load-shedding.
 
 #### H2: Storage pool exhausted
 
-Storage pool handles S3/file lookups. Defaults are smaller because rule storage is only consulted on cache miss:
+Storage pool handles S3/file lookups. It still uses `CallerRunsPolicy` (rejected tasks run on the caller thread). Defaults are smaller because rule storage is only consulted on cache miss:
 
 ```bash
 DROOLS_STORAGE_THREAD_POOL_MAX_SIZE=50

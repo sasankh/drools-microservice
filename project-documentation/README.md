@@ -91,7 +91,7 @@ If answers come back accurate and cite the right docs, NotebookLM is ready for e
 | File | Lines | Purpose |
 |---|---:|---|
 | [27-development-setup.md](27-development-setup.md) | ~385 | New-contributor onboarding + conventions |
-| [28-testing-guide.md](28-testing-guide.md) | ~480 | Test suite map (46 files, 548+ unit + 15 integration tests, 96.2% coverage pre-modernization) |
+| [28-testing-guide.md](28-testing-guide.md) | ~480 | Test suite map (48 files, 536 unit + 14 integration tests, 90.1%/78.4% coverage remeasured 2026-08-20) |
 | [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md) | ~420 | Resilience4j wiring + state machine |
 
 ### Operations (30-31)

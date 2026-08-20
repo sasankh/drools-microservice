@@ -17,6 +17,18 @@ The legacy consolidated context file at `.ai-workspace/ai-initial-context/ai-ini
 
 ## ⚠️ Important: Recent change log (most recent first)
 
+### Re-review production/public-readiness hardening (2026-08-20)
+- **Admin auth fail-closed on prod/docker.** [`AdminAuthFilter`](src/main/java/com/company/drools/api/filter/AdminAuthFilter.java) now hard-fails startup (`IllegalStateException`) when `ADMIN_API_KEY` is blank on the `prod`/`docker` profiles (`KEY_REQUIRED_PROFILES`); only `local`/`dev` retain the open-with-WARN dev bypass. Key compare moved to constant-time `MessageDigest.isEqual`. 401 body is the nested `error.code`/`error.message` shape. docker-compose sets `ADMIN_API_KEY=admin-secret` and its healthcheck sends the header; actuator `8081` bound to `127.0.0.1`. (ADR-006 addendum + ADR-017)
+- **Rate limiter keys on IP only.** [`RateLimitingFilter`](src/main/java/com/company/drools/api/filter/RateLimitingFilter.java) keys on `request.getRemoteAddr()` only; `X-API-Key`/`Authorization`/`X-Client-Id` are no longer read (forgeable on the public API). `X-Forwarded-For` honored (left-most) only when `drools.rate-limiting.trust-proxy=true` (default false). (ADR-010 addendum + ADR-018)
+- **Rule-execution timeout + load-shed.** Timeout path calls `KieSession.halt()` → HTTP 408; the rule-exec pool uses `AbortPolicy` → saturation surfaces as new `ServiceUnavailableException` → HTTP 503 (a 2nd, distinct 503 source). (ADR-019)
+- **refreshLock split from the write lock.** Refreshes serialize on a dedicated `ReentrantLock refreshLock`; compile runs off the read-write write lock; sibling pub/sub refreshes run on a dedicated single-thread `ruleRefreshListenerExecutor`. (ADR-020)
+- **Redis prod TLS/auth enforced.** New [`RedisSecurityValidator`](src/main/java/com/company/drools/config/RedisSecurityValidator.java) (`@Profile("prod")`) fails startup unless `REDIS_URL` is `rediss://` with credentials. Jackson default typing removed from [`RedisConfig`](src/main/java/com/company/drools/config/RedisConfig.java) (deserialization-gadget surface). (ADR-021)
+- **Storage delegate → `AtomicReference`** (was `volatile`) in `RedisCachedRuleStorage`. (ADR-022)
+- **CI + verify-bound quality gates.** New [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `mvn verify` + the 3 Testcontainers IT classes on Linux. pom binds `spotless:check` + `spotbugs:check` + `jacoco:check` to `verify`; JaCoCo floor **0.88 instruction / 0.74 branch**; OWASP dependency-check in CI. (ADR-023)
+- **New files**: `LICENSE` (MIT), `SECURITY.md`, `CONTRIBUTING.md`, [`common/RuleIds.java`](src/main/java/com/company/drools/common/RuleIds.java), [`api/exception/ServiceUnavailableException.java`](src/main/java/com/company/drools/api/exception/ServiceUnavailableException.java), `RedisSecurityValidator.java`. IT container images pinned (`localstack:2.3`, `redis:7.4-alpine`); Dockerfile base images pinned by `@sha256`. LocalStack init checksum fix.
+- **Security posture reframed — DROP "39/42".** Honest statement: most findings addressed; **two tracked-open** — **B1** (the DRL sandbox is NOT a sound boundary: a fully-qualified class name needs no import, sidestepping the finite blocklist; JEP 486 removed the SecurityManager — treat rule-store write access as code execution; deferred, documented in `SECURITY.md`) and **#28** (Redis auth/TLS, now enforced on prod). The `cache/` package now holds pub/sub only (`RefreshEvent`, `RuleRefreshPublisher`, `RuleRefreshSubscriber`); the old LRU cache is gone.
+- **Counts**: Java source files **61**; test files **48**; **536** unit tests + **14** Testcontainers ITs; coverage remeasured **90.1% instruction / 78.4% branch**. Sonar QG OK (0/0/0). ADR index extended to 023.
+
 ### Redis CB + pub/sub hardening — Phase 9.4 follow-ups (2026-05-24)
 - **SCAN now wrapped in `redisCircuitBreaker`** — closes coverage gap in [`RedisCachedRuleStorage.scanKeys()`](src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java) so bulk-path failures (used by `invalidateAll`, `collectFromRedis`) contribute to the CB sliding window during a Redis outage. Previously SCAN bypassed the CB entirely — Phase 9.4 surfaced this by observing CB never opened during a 60s Redis kill.
 - **Lettuce timeout 2000ms → 500ms** via new env var `REDIS_TIMEOUT` (default `500ms`). The prior 2s value was an exact match for the CB's `slowCallDurationThreshold=2s`, putting Lettuce timeouts in an ambiguous classification window. 500ms sits cleanly below the slow-call threshold so timeouts unambiguously count as failures. Externalized for per-environment tuning.
@@ -65,7 +77,7 @@ Docker must be running; the MCP launches `mcp/sonarqube` per session. See [`.env
 - **LOADING-marker bug fix**: latent at 10-rule scale (sub-ms compile); surfaced at 1000 rules (~46s compile) as a 1.5% error rate during refresh windows. Fixed in [`DroolsEngineService.loadOrReplaceRule`](src/main/java/com/company/drools/core/engine/DroolsEngineService.java).
 - **Sample-rules cookbook 10 → 17**: added 7 rules covering `accumulate`, `exists`, `not`, `salience`, regex, temporal, and accumulate-with-collect patterns. All under [`sample-rules/`](sample-rules/); cookbook in [`19-sample-rules-cookbook.md`](project-documentation/19-sample-rules-cookbook.md).
 - **Load test orchestrator**: `scripts/run-load-test.sh` runs the full Phase 0–8 suite end-to-end (1000 rules, JMeter, mixed-workload soak). Findings in [`project-documentation/39-load-test-findings.md`](project-documentation/39-load-test-findings.md).
-- **Test count**: 589 → 598 (load test session) → 597 (Sonar Wave 4B parameterized consolidation); **test files**: 45.
+- **Test count**: 589 → 598 (load test session) → 597 (Sonar Wave 4B parameterized consolidation); **test files**: 45 at the time (48 as of 2026-08-20).
 
 ### Stack modernization (2026-05-09)
 - **Java 17 → 25 LTS** (Maven Enforcer Plugin range `[25,26)`).
@@ -75,13 +87,13 @@ Docker must be running; the MCP launches `mcp/sonarqube` per session. See [`.env
 
 ### Security Hardening Complete (2026-02-26)
 
-**39/42 security findings addressed** across 9 phases. Key changes:
+**Most security findings addressed** across 9 phases (the old "39/42" tally is retired — see the 2026-08-20 entry for the honest two-tracked-open posture: B1 DRL-sandbox-is-not-a-boundary and #28 Redis TLS/auth). Key changes:
 
-1. **Admin Authentication** — `/admin/*` endpoints protected by `X-Admin-API-Key` header (env: `ADMIN_API_KEY`)
-2. **DRL Sandboxing** — `DrlSanitizer` blocks dangerous imports/classes/methods before compilation
+1. **Admin Authentication** — `/admin/*` protected by `X-Admin-API-Key` (env: `ADMIN_API_KEY`); now fail-closed on prod/docker (2026-08-20)
+2. **DRL Sandboxing** — `DrlSanitizer` blocks dangerous imports/classes/methods before compilation (**note**: a blocklist, NOT a sound boundary — see B1 in the 2026-08-20 entry)
 3. **Security Headers** — 7 headers on all responses (CSP, HSTS, X-Frame-Options, etc.)
 4. **CORS Default Changed** — Default is now empty (no CORS); wildcard only in local/dev/docker profiles
-5. **Rate Limiting Hardened** — X-Forwarded-For ignored, uses `request.getRemoteAddr()` only; maxClients cap
+5. **Rate Limiting Hardened** — keyed on `request.getRemoteAddr()` only; `X-Forwarded-For` ignored unless `drools.rate-limiting.trust-proxy=true` (2026-08-20); maxClients cap
 6. **Jackson RCE Fixed** — `activateDefaultTyping()` with strict `BasicPolymorphicTypeValidator`
 7. **Path Traversal Protection** — Defense-in-depth in LocalFileStorage and S3RuleStorage
 8. **Non-blocking Compilation** — Rule compilation outside write lock in DroolsEngineService
@@ -99,7 +111,7 @@ This is a Drools Rule Engine Microservice designed for high-performance business
 
 **Tech Stack**: Java 25 (enforced), Spring Boot 3.5.3, Drools 10.2.0, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
 
-**Health Status**: 9/10 - 548 unit tests + 14 Testcontainers integration tests (CI-only, surefire-excluded on macOS-DinD), 90.1%/78.4% coverage (measured 2026-08-19, Java 25), 39/42 security fixes complete, load-tested at 1000 rules (single-container 2026-05-10) + 3-replica multi-container + Redis-kill failure mode (Phase 9.4 2026-05-24), Sonar QG OK (0 maintainability / 0 reliability / 0 security issues)
+**Health Status**: 9/10 - 536 unit tests + 14 Testcontainers integration tests (CI-only, surefire-excluded on macOS-DinD), 90.1%/78.4% coverage (measured 2026-08-19, Java 25), most security findings addressed with two tracked-open (B1 DRL-sandbox-is-not-a-boundary RCE, deferred; #28 Redis TLS/auth, enforced on prod), load-tested at 1000 rules (single-container 2026-05-10) + 3-replica multi-container + Redis-kill failure mode (Phase 9.4 2026-05-24), Sonar QG OK (0 maintainability / 0 reliability / 0 security issues)
 
 ## Common Commands
 
@@ -195,7 +207,7 @@ com.company.drools/
 │   └── filter/       # Security and request filters
 ├── core/              # Business logic and rule engine
 ├── storage/           # S3 and file storage implementations  
-├── cache/             # LRU and Redis caching
+├── cache/             # Redis pub/sub fan-out only (RefreshEvent, RuleRefreshPublisher/Subscriber) — LRU cache deleted 2026-05-20
 ├── common/            # Shared utilities (log sanitization)
 └── config/            # Spring configuration classes
 ```
@@ -283,7 +295,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 ## Development Workflow
 
-1. **Current Status**: 39/42 security findings addressed (Phases 1–9 complete, 2026-02-26); stack modernized 2026-05-09 (Java 25, Spring Boot 3.5.3, Drools 10.2.0); Drools 10 rule-loading rework + sample-rules expansion + 1000-rule load test 2026-05-10; Sonar Wave 4 (maintainability 178→0, reliability 5→0, 2 security hotspots resolved) 2026-05-11; Redis cache + pub/sub layer + Phase 9 load-test harness + Phase 9.4 hardening (SCAN-CB-wrap, REDIS_TIMEOUT, pub/sub recovery backoff) 2026-05-20 → 2026-05-24; **548 unit tests + 14 integration**; 90.1% / 78.4% coverage (measured 2026-08-19); documentation rebuild 2026-05-08 with refreshes through 2026-05-24 (40 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
+1. **Current Status**: most security findings addressed, two tracked-open (B1 DRL-sandbox-is-not-a-boundary RCE deferred + documented in `SECURITY.md`; #28 Redis TLS/auth enforced on prod via `RedisSecurityValidator`) (Phases 1–9 2026-02-26 + 2026-08-20 re-review hardening); stack modernized 2026-05-09 (Java 25, Spring Boot 3.5.3, Drools 10.2.0); Drools 10 rule-loading rework + sample-rules expansion + 1000-rule load test 2026-05-10; Sonar Wave 4 (maintainability 178→0, reliability 5→0, 2 security hotspots resolved) 2026-05-11; Redis cache + pub/sub layer + Phase 9 load-test harness + Phase 9.4 hardening (SCAN-CB-wrap, REDIS_TIMEOUT, pub/sub recovery backoff) 2026-05-20 → 2026-05-24; 2026-08-20 re-review hardening (admin fail-closed, IP-only rate limiting + trust-proxy, Redis prod TLS, timeout-halt + load-shed 503, refreshLock split, CI + verify-bound gates, LICENSE/SECURITY.md/CONTRIBUTING.md); **536 unit tests + 14 integration**; 90.1% / 78.4% coverage (measured 2026-08-19); documentation rebuild 2026-05-08 with refreshes through 2026-08-20 (40 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
 
 2. **One-Command Development Environment**: Complete automated setup with validation
    ```bash
@@ -367,17 +379,18 @@ All phases shipped:
 4. ✅ Testing & Documentation
 5. ✅ Deployment & Infrastructure
 6. ✅ Critical Fixes — original Java 17 enforcement, memory-leak hardening, memory monitoring (2026-02-19)
-7. ✅ Security Hardening — 39/42 findings, Phases 1–9 (2026-02-26)
+7. ✅ Security Hardening — most findings addressed, Phases 1–9 (2026-02-26); two items remain tracked-open (see item 13)
 8. ✅ Stack Modernization — Java 17→25, Spring Boot 3.2.5→3.5.3, Drools 8.44.0→10.2.0 (2026-05-09)
 9. ✅ Drools 10 rule-loading rework + sample-rules expansion (10→17) + 1000-rule load test (2026-05-10)
 10. ✅ Sonar quality gates — Maintainability 178→0, Reliability 5→0, Security hotspots 2→0 (2026-05-11)
 11. ✅ Redis cache + pub/sub layer — `RedisCachedRuleStorage` decorator + `RuleRefreshPublisher`/`Subscriber`; dead `RuleCache`/`LocalLRUCache`/`RedisRuleCache` deleted (~600 LOC); env-var migration (ADR-016, 2026-05-20)
 12. ✅ Phase 9 load-test harness (3-replica + nginx + Redis-kill failure mode) + Phase 9.4 production hardening (SCAN-CB-wrap, `REDIS_TIMEOUT` env var lowering Lettuce timeout 2000ms→500ms, `RedisMessageListenerContainer.setRecoveryBackoff(FixedBackOff(2s, ∞))`) (2026-05-24)
+13. ✅ Re-review production/public-readiness hardening (2026-08-20) — admin fail-closed on prod/docker + constant-time compare (ADR-017), IP-only rate limiting + trust-proxy (ADR-018), exec timeout-halt/408 + pool load-shed 503 (ADR-019), refreshLock split from the write lock (ADR-020), Redis prod TLS/auth via `RedisSecurityValidator` + Jackson-typing removal (ADR-021), storage delegate `AtomicReference` (ADR-022), CI + verify-bound quality gates (ADR-023); added LICENSE/SECURITY.md/CONTRIBUTING.md; **security posture reframed** — "39/42" retired, two tracked-open (B1 DRL-sandbox RCE deferred, #28 Redis TLS/auth enforced on prod)
 
 Current snapshot:
 - **Health Score**: 9/10
 - **Test Coverage**: 90.1% instruction / 78.4% branch (measured 2026-08-19 on Java 25 via `mvn test jacoco:report`, unit tests only; enforced by a `jacoco:check` floor of 88% / 74% bound to `verify`). Supersedes the earlier unverified 96.2% / 89.7% pre-modernization baseline.
-- **Security**: 39/42 findings addressed
+- **Security**: most findings addressed; two tracked-open — B1 (DRL sandbox is not a sound boundary → rule-store write access ≈ RCE; deferred, documented in `SECURITY.md`) and #28 (Redis TLS/auth, enforced on the prod profile via `RedisSecurityValidator`)
 - **Performance**: 100–1000 RPS target, P99 < 100ms cached / < 500ms cache miss (load-tested at 1000 rules — see [`39-load-test-findings.md`](project-documentation/39-load-test-findings.md))
 
 For the canonical narrative — phase history, ADRs, performance targets, testing strategy, runbooks — see [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md) and the 40 numbered docs it indexes.

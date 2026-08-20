@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Rule authors (humans), AI rule-generation tools, security reviewers |
 | **Purpose** | Definitive reference for what `DrlSanitizer` blocks and what's allowed. The doc AI rule-generation tools must consume to produce sandbox-passing rules. |
-| **Last verified against** | [`DrlSanitizer.java`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java), [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) on 2026-05-24 |
+| **Last verified against** | [`DrlSanitizer.java`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java), [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) on 2026-08-20 |
 | **Related docs** | [17-rule-development.md](17-rule-development.md), [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
@@ -378,7 +378,7 @@ If your rule is in `errors[]`, read the violation message.
 mvn test -Dtest=DrlSanitizerTest
 ```
 
-The test class has 8 test methods (4 `@Test` + 4 `@ParameterizedTest`) that expand to ~50+ effective cases covering every rejection path. Looking at the test methods shows you exactly what's rejected. See [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java).
+The test class has 8 test methods (4 `@Test` + 4 `@ParameterizedTest`) organized across 6 `@Nested` classes — `AllowedRules`, `BlockedImports`, `BlockedClassReferences`, `BlockedMethodCalls`, `EvalBlocking`, and `MultipleViolations` — with the parameterized methods driven by `@MethodSource` streams that cover every blocked import, class, and method. Looking at the test methods shows you exactly what's rejected. See [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java).
 
 ### Option 3: Write a tiny test in your rule's own test file
 
@@ -399,6 +399,8 @@ This is the highest-confidence local check.
 ---
 
 ## What the sandbox does NOT do
+
+> **⚠️ It is NOT a sound security boundary — the primary open bypass (finding B1, tracked-open, deferred).** The blocked-class check (Check 2) matches **simple class names** against a finite 12-name blocklist. But **a fully-qualified class name needs no `import`**, and referencing a class by its fully-qualified name (e.g. `java.io.File`, or any dangerous class whose *simple* name is not one of the 12 blocked names) sidesteps both the import allowlist (Check 1 only inspects `import` lines) and the class blocklist. Since any class outside the finite blocklist is reachable this way, the text scan cannot enclose the code-execution surface. `SecurityManager` — which could have backstopped this at runtime — was removed by JEP 486, so no in-JVM permission sandbox is available. This is documented and accepted in [`SECURITY.md`](../SECURITY.md); treat the `DrlSanitizer` scan as defense-in-depth that raises the bar against casual/accidental misuse, **not** as a real isolation boundary. Sound isolation would require compiling/executing rules in a separate constrained process or JVM. The operational control that actually matters is trusting who can publish DRL to the rule bucket.
 
 - **It does NOT validate Drools syntax.** A rule can pass sanitization and still fail Drools compilation. (Example: `rule "x" then end` is sandbox-clean but malformed Drools.)
 - **It does NOT prevent infinite loops at runtime.** Use `no-loop true` and the `maxRuleFirings = 10000` cap (in [`RuleExecutor`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java)) for that.
@@ -430,6 +432,6 @@ To prove the sandbox is what this doc says it is, run:
 mvn test -Dtest=DrlSanitizerTest 2>&1 | grep -E 'Tests run|FAIL'
 ```
 
-Expected: 8 test methods expanding to ~50+ parameterized invocations, all pass.
+Expected: 8 test methods (across 6 `@Nested` classes) expanding to their parameterized invocations, all pass.
 
 Or read [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) directly — every claim in this doc has a corresponding test case.

@@ -359,7 +359,7 @@ Three production-code changes in [`feature/redis-cache-pubsub`](../.ai-workspace
 2. **Lettuce timeout `2000ms → 500ms`** — externalized as `REDIS_TIMEOUT` env var. Sits cleanly below the CB's `slowCallDurationThreshold=2s` so command timeouts are unambiguously classified as failures (not slow calls). Operators raise to 1000–1500ms for distant/high-latency Redis.
 3. **`RedisMessageListenerContainer.setRecoveryBackoff(FixedBackOff(2s, ∞))`** — explicit pub/sub reconnect policy. Bounds worst-case re-subscribe latency to ≤2s after Redis is reachable. Replaces Spring's implicit default.
 
-Plus: 3 new unit tests in [`RedisCachedRuleStorageTest`](../src/test/java/com/company/drools/storage/RedisCachedRuleStorageTest.java) (545 → **548**); 1 new integration test in [`RedisCachedStorageIntegrationTest`](../src/test/java/com/company/drools/integration/RedisCachedStorageIntegrationTest.java) (13 → 14, surefire-excluded — runs on Linux CI). 4 doc files updated.
+Plus: 3 new unit tests in [`RedisCachedRuleStorageTest`](../src/test/java/com/company/drools/storage/RedisCachedRuleStorageTest.java) (the suite was 545 → 548 at the time; after the 2026-08-20 re-review refactors the unit-test total is now **536**); 1 new integration test in [`RedisCachedStorageIntegrationTest`](../src/test/java/com/company/drools/integration/RedisCachedStorageIntegrationTest.java) (13 → 14 Testcontainers ITs, surefire-excluded — runs on Linux CI). 4 doc files updated.
 
 ### Remaining follow-ups (deferred — not blocking Phase 10 rollout)
 
