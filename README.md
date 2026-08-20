@@ -799,6 +799,33 @@ mvn compile spotbugs:check
 mvn dependency-check:check
 ```
 
+#### Full quality gate + SonarQube (Docker, Java 25)
+
+Java 25 is required (and may not be installed locally), so run the full `verify` + SonarQube analysis
+inside the Maven 25 container:
+
+```bash
+docker run --rm \
+  -v "$PWD":/app -w /app \
+  -v drools-m2:/root/.m2 \
+  maven:3.9-eclipse-temurin-25 \
+  mvn clean verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+    -Dsonar.projectKey=drools-microservice \
+    -Dsonar.projectName='drools-microservice' \
+    -Dsonar.host.url=http://host.docker.internal:9000 \
+    -Dsonar.token=<your-sonarqube-token>
+```
+
+- `mvn clean verify` runs the unit suite plus the gates bound to `verify` (`spotless:check`,
+  `spotbugs:check`, `jacoco:check`); the SonarQube scanner then uploads the results.
+- **`host.docker.internal:9000`** reaches a SonarQube running on the host from inside the container
+  (macOS Docker Desktop). Use `localhost:9000` only if SonarQube shares the container's network.
+- **`-v drools-m2:/root/.m2`** caches Maven dependencies between runs (the first run is slow).
+- **Do NOT add `-Dtest=...`** — a command-line `-Dtest` overrides the pom's surefire exclusions and
+  pulls the Testcontainers integration tests into the run; they need a real Docker daemon and fail
+  inside the container. The pom already excludes them.
+- Treat `-Dsonar.token` as a secret — never commit it.
+
 ### Hot Reloading Rules
 
 Rules can be updated without restarting the application:
