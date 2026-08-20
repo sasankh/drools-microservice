@@ -185,8 +185,9 @@ class AdminAuthFilterTest extends BaseUnitTest {
     @Test
     @DisplayName("throws when key is blank in the prod profile")
     void testFailsClosedProd() {
+      MockEnvironment env = envWithProfile("prod");
       org.assertj.core.api.Assertions.assertThatThrownBy(
-              () -> new AdminAuthFilter(objectMapper, "", envWithProfile("prod")))
+              () -> new AdminAuthFilter(objectMapper, "", env))
           .isInstanceOf(IllegalStateException.class)
           .hasMessageContaining("ADMIN_API_KEY");
     }
@@ -194,22 +195,29 @@ class AdminAuthFilterTest extends BaseUnitTest {
     @Test
     @DisplayName("throws when key is null in the docker profile")
     void testFailsClosedDocker() {
+      MockEnvironment env = envWithProfile("docker");
       org.assertj.core.api.Assertions.assertThatThrownBy(
-              () -> new AdminAuthFilter(objectMapper, null, envWithProfile("docker")))
+              () -> new AdminAuthFilter(objectMapper, null, env))
           .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
     @DisplayName("does not throw when key is blank in the local profile")
     void testOpenInLocal() {
-      // No exception expected — local/dev keep the open-with-WARN behavior.
-      new AdminAuthFilter(objectMapper, "", envWithProfile("local"));
+      // local/dev keep the open-with-WARN behavior — construction must not throw.
+      MockEnvironment env = envWithProfile("local");
+      org.assertj.core.api.Assertions.assertThatCode(
+              () -> new AdminAuthFilter(objectMapper, "", env))
+          .doesNotThrowAnyException();
     }
 
     @Test
     @DisplayName("starts when a key is configured in a deployable profile")
     void testConfiguredKeyProdStarts() {
-      new AdminAuthFilter(objectMapper, "a-key", envWithProfile("prod"));
+      MockEnvironment env = envWithProfile("prod");
+      org.assertj.core.api.Assertions.assertThatCode(
+              () -> new AdminAuthFilter(objectMapper, "a-key", env))
+          .doesNotThrowAnyException();
     }
   }
 }

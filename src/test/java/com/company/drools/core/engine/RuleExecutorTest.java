@@ -247,8 +247,8 @@ class RuleExecutorTest {
       ExecutorService executor = Executors.newSingleThreadExecutor();
       RuleExecutor ruleExecutor = new RuleExecutor(executor);
 
-      assertThatThrownBy(
-              () -> ruleExecutor.executeRule(mockContainer, "runaway.rule", new HashMap<>(), 1))
+      Map<String, Object> data = new HashMap<>();
+      assertThatThrownBy(() -> ruleExecutor.executeRule(mockContainer, "runaway.rule", data, 1))
           .isInstanceOf(TimeoutException.class);
 
       // The timeout path must call halt() so the runaway firing is stopped, not leaked.
@@ -273,8 +273,8 @@ class RuleExecutorTest {
           };
       RuleExecutor ruleExecutor = new RuleExecutor(rejecting);
 
-      assertThatThrownBy(
-              () -> ruleExecutor.executeRule(mockContainer, "rejected.rule", new HashMap<>(), 5))
+      Map<String, Object> data = new HashMap<>();
+      assertThatThrownBy(() -> ruleExecutor.executeRule(mockContainer, "rejected.rule", data, 5))
           .isInstanceOf(ServiceUnavailableException.class);
     }
   }

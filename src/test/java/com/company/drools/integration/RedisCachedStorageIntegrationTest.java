@@ -230,7 +230,7 @@ class RedisCachedStorageIntegrationTest {
 
   @Test
   @DisplayName("Redis killed mid-test: reads fall through to delegate, service stays up")
-  void redisKillCircuitBreakerFallback() throws Exception {
+  void redisKillCircuitBreakerFallback() {
     Rule expected = rule("pricing.simple");
     when(delegate.getRule(any())).thenReturn(Optional.of(expected));
 

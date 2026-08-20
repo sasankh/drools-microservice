@@ -112,7 +112,7 @@ public class RuleExecutor {
     if (session != null) {
       try {
         session.halt();
-      } catch (RuntimeException ignored) {
+      } catch (RuntimeException _) {
         // Session already disposed/closed — nothing to halt.
       }
     }
