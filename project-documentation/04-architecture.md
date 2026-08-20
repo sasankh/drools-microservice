@@ -246,7 +246,7 @@ class RuleExecutionRequest {
 
 **Note on log sanitization**: `LogSanitizer` is a utility class in [`com.company.drools.common`](../src/main/java/com/company/drools/common/LogSanitizer.java), NOT a filter. It's called explicitly by controllers/services before logging request/response payloads.
 
-**Note on request timeout**: rule-execution timeout is enforced inside `RuleExecutor` via `CompletableFuture.get(30s)` + `future.cancel(true)`, not a separate filter.
+**Note on request timeout**: rule-execution timeout is enforced inside `RuleExecutor` via `CompletableFuture.get(30s)`; on timeout it calls `KieSession.halt()` (via a shared `AtomicReference<KieSession>`) to cooperatively stop the running `fireAllRules`, then `future.cancel(true)`, and throws `TimeoutException` → HTTP 408. It is not a separate filter. Separately, if the rule-execution pool is saturated the `AbortPolicy` raises `RejectedExecutionException` → `ServiceUnavailableException` → HTTP 503.
 
 ---
 
@@ -349,7 +349,7 @@ KieBase (Executable Rule Set)
 - Successful compilation: Returns KieContainer ready for execution
 
 **Caching**:
-- Compiled KieBase objects cached in DroolsEngineService
+- All compiled rules held in a single long-lived `KieContainer` in DroolsEngineService (updated in place via `KieContainer.updateToVersion(ReleaseId)`)
 - Avoids re-compilation on every request
 - Cache invalidation on rule refresh
 
@@ -539,8 +539,8 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
 **Purpose**: Cache expensive compiled rule objects (not rule text)
 
 **Storage**:
-- Stored in `DroolsEngineService` as `Map<String, KieBase>`
-- In-memory only (not serializable to Redis)
+- Held in `DroolsEngineService` as a single long-lived `KieContainer` (all rules compiled into one KieBase; no per-rule `Map`)
+- In-memory only (Redis caches raw DRL text, not compiled state)
 
 **Lifecycle**:
 - Created on first rule load
@@ -592,7 +592,7 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
    - kieSession.fireAllRules(maxRuleFirings = 10000)  // cap prevents runaway loops
    - Extract results from modified data Map
    - Dispose session
-   - future.get(timeoutSeconds, SECONDS); on timeout: future.cancel(true)
+   - future.get(timeoutSeconds, SECONDS); on timeout: KieSession.halt() + future.cancel(true) → HTTP 408
         ↓
 6. METRICS & LOGGING
    - Record execution time on RuleMetadata (incremental averaging)
@@ -726,9 +726,9 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
 └─────────────────────────────────────────────────────────────┘
                           ↓ Caching
 ┌─────────────────────────────────────────────────────────────┐
-│                    COMPILED CACHE                            │
-│  Map<String, KieBase> compiledRules                          │
-│  - In-memory only                                            │
+│                 COMPILED RULE STATE                          │
+│  Single long-lived KieContainer (updateToVersion swap)       │
+│  - All rules in one KieBase; in-memory only                  │
 │  - Fast execution (1-10ms)                                   │
 └─────────────────────────────────────────────────────────────┘
                           ↓ Request arrives
@@ -1100,7 +1100,7 @@ Internal dependencies. **What breaks if X fails?**
 │    DROOLS_VALIDATION_REQUEST_MAX_SIZE_BYTES                  │
 │  - Wraps chunked-transfer streams with SizeLimitedInputStream│
 │    to prevent bypass via chunked encoding                    │
-│  - 30s rule execution timeout; future.cancel(true) on fire   │
+│  - 30s exec timeout: halt() + cancel(true) -> HTTP 408       │
 │  - maxRuleFirings = 10000 cap (RuleExecutor.java:22)         │
 │  Source: RequestSizeValidationFilter.java                    │
 └─────────────────────────────────────────────────────────────┘

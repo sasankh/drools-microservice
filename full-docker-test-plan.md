@@ -52,7 +52,7 @@ docker-compose ps
 
 ### 2.1 Health Check
 ```bash
-curl -s http://localhost:8080/admin/health | jq .
+curl -s http://localhost:8080/admin/health -H "X-Admin-API-Key: admin-secret" | jq .
 ```
 **Expected**: JSON with keys `status`, `components`, `timestamp`. Status should be `"UP"`.
 ```json
@@ -65,25 +65,25 @@ curl -s http://localhost:8080/admin/health | jq .
 
 ### 2.2 Admin Info
 ```bash
-curl -s http://localhost:8080/admin/info | jq .
+curl -s http://localhost:8080/admin/info -H "X-Admin-API-Key: admin-secret" | jq .
 ```
 **Expected**: JSON with keys `application`, `java_version`, `version`, `timestamp`.
 
 ### 2.3 Thread Pool Status
 ```bash
-curl -s http://localhost:8080/admin/thread-pools | jq .
+curl -s http://localhost:8080/admin/thread-pools -H "X-Admin-API-Key: admin-secret" | jq .
 ```
 **Expected**: JSON with keys `rule_execution_pool`, `storage_pool`, `timestamp`.
 
 ### 2.4 Memory Info
 ```bash
-curl -s http://localhost:8080/admin/memory/info | jq .
+curl -s http://localhost:8080/admin/memory/info -H "X-Admin-API-Key: admin-secret" | jq .
 ```
 **Expected**: JSON with `heap` object containing `usedMB`, `maxMB`, `usagePercent`.
 
 ### 2.5 Memory Snapshot
 ```bash
-curl -s http://localhost:8080/admin/memory/snapshot | jq .
+curl -s http://localhost:8080/admin/memory/snapshot -H "X-Admin-API-Key: admin-secret" | jq .
 ```
 **Expected**: JSON with keys `heapUsedMB`, `heapMaxMB`, `heapUsagePercent`, `timestamp`.
 
@@ -105,8 +105,8 @@ curl -s http://localhost:8081/actuator/metrics | jq '.names | length'
 
 ### 3.1 List All Loaded Rules
 ```bash
-curl -s http://localhost:8080/admin/rules | jq '.total_rules'
-curl -s http://localhost:8080/admin/rules | jq '.rules[].rule_id'
+curl -s http://localhost:8080/admin/rules -H "X-Admin-API-Key: admin-secret" | jq '.total_rules'
+curl -s http://localhost:8080/admin/rules -H "X-Admin-API-Key: admin-secret" | jq '.rules[].rule_id'
 ```
 **Expected**: `total_rules` = 17. Response is an object with keys `rules` (array), `total_rules`, `timestamp`. Each rule has:
 ```json
@@ -164,7 +164,7 @@ curl -s -X POST http://localhost:8080/admin/refresh-rules/pricing.discount.simpl
 
 ### 3.4 Verify Rules Still Loaded After Refresh
 ```bash
-curl -s http://localhost:8080/admin/rules | jq '.total_rules'
+curl -s http://localhost:8080/admin/rules -H "X-Admin-API-Key: admin-secret" | jq '.total_rules'
 ```
 **Expected**: `17` rules still present.
 
@@ -325,15 +325,15 @@ curl -s -X POST http://localhost:8080/execute-rule \
 ## Step 6: Memory Stability (Quick Smoke Test)
 
 ```bash
-HEAP_BEFORE=$(curl -s http://localhost:8080/admin/memory/info | jq '.heap.usedMB')
+HEAP_BEFORE=$(curl -s http://localhost:8080/admin/memory/info -H "X-Admin-API-Key: admin-secret" | jq '.heap.usedMB')
 echo "Heap before: ${HEAP_BEFORE}MB"
 
 for i in 1 2 3; do
-  curl -s -X POST http://localhost:8080/admin/refresh-rules > /dev/null
+  curl -s -X POST http://localhost:8080/admin/refresh-rules -H "X-Admin-API-Key: admin-secret" > /dev/null
   sleep 2
 done
 
-HEAP_AFTER=$(curl -s http://localhost:8080/admin/memory/info | jq '.heap.usedMB')
+HEAP_AFTER=$(curl -s http://localhost:8080/admin/memory/info -H "X-Admin-API-Key: admin-secret" | jq '.heap.usedMB')
 echo "Heap after 3 refreshes: ${HEAP_AFTER}MB"
 ```
 **Expected**: Heap usage is stable and under 500MB. Should not grow by more than ~100MB per refresh cycle (temporary allocation is normal; KieContainer disposal prevents leaks).
@@ -343,7 +343,7 @@ echo "Heap after 3 refreshes: ${HEAP_AFTER}MB"
 ## Step 7: GC Trigger
 
 ```bash
-curl -s -X POST http://localhost:8080/admin/memory/gc | jq .
+curl -s -X POST http://localhost:8080/admin/memory/gc -H "X-Admin-API-Key: admin-secret" | jq .
 ```
 **Expected**: JSON with `"message": "Garbage collection triggered"`, plus `usedBeforeMB`, `usedAfterMB`, `freedMemoryMB`.
 ```json
@@ -367,7 +367,7 @@ cache actually populates / invalidates.
 ### 8.1 Health: cache + redis components reflect Redis mode
 
 ```bash
-curl -s http://localhost:8080/admin/health | jq '.components.cache, .components.redis'
+curl -s http://localhost:8080/admin/health -H "X-Admin-API-Key: admin-secret" | jq '.components.cache, .components.redis'
 ```
 **Expected**: cache section shows `mode: "redis"` and `enabled: true`; redis section shows
 `connected: true` and `cache_decorator: "RedisCachedRuleStorage"`.
@@ -436,7 +436,7 @@ populates it (miss), the second populates again (miss). The bulk refresh endpoin
 ```bash
 curl -s -X POST "http://localhost:8080/admin/refresh-rules/pricing.discount.simple" -H "X-Admin-API-Key: admin-secret" > /dev/null
 curl -s -X POST "http://localhost:8080/admin/refresh-rules/pricing.discount.bulk" -H "X-Admin-API-Key: admin-secret" > /dev/null
-curl -s http://localhost:8080/admin/health | jq '.components.cache.details.statistics'
+curl -s http://localhost:8080/admin/health -H "X-Admin-API-Key: admin-secret" | jq '.components.cache.details.statistics'
 ```
 **Expected**: `statistics` object with `hits`, `misses`, `hit_rate` keys. In a single-instance
 setup, `hits` typically stays at 0 because execution reads from in-process `loadedRules` (not
@@ -472,7 +472,7 @@ docker-compose logs --tail=200 app 2>&1 | grep -cE "RedisCachedRuleStorage initi
 
 ### 9.2 Health cache section shows mode=off
 ```bash
-curl -s http://localhost:8080/admin/health | jq '.components.cache, .components.redis'
+curl -s http://localhost:8080/admin/health -H "X-Admin-API-Key: admin-secret" | jq '.components.cache, .components.redis'
 ```
 **Expected**: cache section shows `mode: "off"`, `enabled: false`. redis section is `null`.
 
