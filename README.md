@@ -794,6 +794,9 @@ mvn spotless:check
 
 # Static analysis
 mvn compile spotbugs:check
+# or
+docker run --rm -v "$PWD":/app -w /app -v drools-m2:/root/.m2 \
+  maven:3.9-eclipse-temurin-25 mvn -B compile spotbugs:check
 
 # Dependency vulnerabilities
 mvn dependency-check:check
