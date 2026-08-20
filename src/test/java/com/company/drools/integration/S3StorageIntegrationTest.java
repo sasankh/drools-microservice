@@ -27,6 +27,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.core.checksums.RequestChecksumCalculation;
+import software.amazon.awssdk.core.checksums.ResponseChecksumValidation;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.Delete;
@@ -59,6 +61,10 @@ class S3StorageIntegrationTest {
                         localstack.getAccessKey(), localstack.getSecretKey())))
             .region(Region.of(localstack.getRegion()))
             .forcePathStyle(true)
+            // LocalStack 2.3 rejects the SDK's default CRC32 request checksum
+            // (x-amz-checksum-crc32). Only send checksums when an operation requires them.
+            .requestChecksumCalculation(RequestChecksumCalculation.WHEN_REQUIRED)
+            .responseChecksumValidation(ResponseChecksumValidation.WHEN_REQUIRED)
             .build();
 
     s3Client.createBucket(b -> b.bucket(BUCKET_NAME));
