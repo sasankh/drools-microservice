@@ -58,7 +58,7 @@ class RedisCachedStorageIntegrationTest {
 
   @Container
   static GenericContainer<?> redis =
-      new GenericContainer<>(DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379);
+      new GenericContainer<>(DockerImageName.parse("redis:7.4-alpine")).withExposedPorts(6379);
 
   private static LettuceConnectionFactory connectionFactory;
   private static RedisTemplate<String, Rule> redisTemplate;
@@ -230,7 +230,7 @@ class RedisCachedStorageIntegrationTest {
 
   @Test
   @DisplayName("Redis killed mid-test: reads fall through to delegate, service stays up")
-  void redisKillCircuitBreakerFallback() throws Exception {
+  void redisKillCircuitBreakerFallback() {
     Rule expected = rule("pricing.simple");
     when(delegate.getRule(any())).thenReturn(Optional.of(expected));
 

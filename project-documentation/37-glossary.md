@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | All readers, especially AI agents looking up unfamiliar terms |
 | **Purpose** | Definitions of every Drools term, project-specific concept, and infrastructure word used in this corpus |
-| **Last updated** | 2026-05-24 |
+| **Last updated** | 2026-08-20 |
 | **Related docs** | All — this is the lookup reference |
 
 ---
@@ -108,6 +108,18 @@ Spring `MessageListener` that receives `RefreshEvent`s and refreshes this task's
 ### `RefreshEvent`
 JSON event published on `drools:rule:events`. Fields: `event` (enum: `RULE_REFRESHED` / `RULE_REFRESHED_BULK` / `RULE_DELETED`), `rule_id`, `source_instance_id` (UUID), `timestamp`. Schema is part of the cross-service contract — see [04-architecture.md](04-architecture.md).
 
+### `RedisSecurityValidator`
+Startup guard active only on the `prod` profile ([`@Profile("prod")`](../src/main/java/com/company/drools/config/RedisSecurityValidator.java)). When Redis is enabled on `prod`, it throws `IllegalStateException` (refusing to start) unless `REDIS_URL` uses the `rediss://` TLS scheme **and** carries credentials (`rediss://user:password@host:port`). Enforces security finding #28 on production. Non-prod profiles (local/dev/docker with LocalStack Redis) are unaffected. See [ADR-021](36-architecture-decision-records.md#adr-021-redis-prod-tlsauth-enforcement--removal-of-jackson-default-typing-2026-08-20).
+
+### `refreshLock`
+A dedicated `ReentrantLock` in `DroolsEngineService`, **separate** from the `rulesLock` read-write lock that guards the compiled state. All refresh paths (`loadRules`, `loadOrReplaceRule`) take `refreshLock` to serialize refreshes with each other, while the actual rule compile still happens **outside** the read-write write lock (which is held only for the brief state swap). Pub/sub-driven sibling refreshes run on a dedicated single-thread `ruleRefreshListenerExecutor`. See [ADR-020](36-architecture-decision-records.md#adr-020-refreshlock-separated-from-the-rule-read-write-lock-2026-08-20).
+
+### `ServiceUnavailableException`
+Exception ([`api/exception/ServiceUnavailableException.java`](../src/main/java/com/company/drools/api/exception/ServiceUnavailableException.java)) mapped to HTTP **503**. Raised when the rule-execution thread pool sheds load: the pool uses an `AbortPolicy`, so once the pool and queue are full, new submissions are rejected and surfaced as this exception. A distinct 503 source from circuit-breaker-open and graceful-shutdown refusal. See [ADR-019](36-architecture-decision-records.md#adr-019-rule-execution-timeout-halt--thread-pool-load-shed-503-2026-08-20).
+
+### `RuleIds`
+Shared utility ([`common/RuleIds.java`](../src/main/java/com/company/drools/common/RuleIds.java)) centralizing rule-ID handling (the `pricing.discount.x` ↔ `pricing/discount/x.drl` transformation and related helpers), so the logic lives in one place instead of being duplicated across storage and engine code.
+
 ### LRU cache (historical)
 Refers to the deleted `LocalLRUCache` class. Was the in-process `LinkedHashMap`-based cache of DRL source text. Removed on 2026-05-20 — see [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20). Mentioned in older ADRs (004) and historical changelog entries.
 
@@ -138,11 +150,14 @@ A race condition where state checked at one moment differs at the moment of use.
 ### Discount stacking
 The behavior where multiple sample rules fire on the same input, multiplicatively reducing the amount. Example: VIP $100 → $80 (VIP rule) → $72 (simple rule). **Not a bug** — happens because no rule sets `salience` or `activation-group`. See [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md).
 
-### Multi-tier client identification
-The rate limiter's algorithm for assigning a client identity: tries `X-API-Key` → `Authorization: Bearer` → `X-Client-Id` → `request.getRemoteAddr()` (fallback). `X-Forwarded-For` is **explicitly ignored**. See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md).
+### Rate-limit client identity
+How the rate limiter assigns a client identity: it keys **only** on `ip:{request.getRemoteAddr()}`. Application-level headers (`X-API-Key`, `Authorization: Bearer`, `X-Client-Id`) are unauthenticated on the public `/execute-rule` API and are **not** used for keying. `X-Forwarded-For` is ignored by default and honored (left-most entry) only when `trust-proxy` is enabled (see below). See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) and [ADR-018](36-architecture-decision-records.md#adr-018-rate-limiter-keys-on-ip-only-optional-trust-proxy-2026-08-20).
+
+### `trust-proxy` (rate limiting)
+The `drools.rate-limiting.trust-proxy` flag (default `false`). When `false`, the limiter ignores `X-Forwarded-For` and keys on the direct socket address. When `true`, it trusts the left-most `X-Forwarded-For` entry as the client IP — enable this only behind a proxy/LB that overwrites the header, since it is otherwise spoofable. Implemented in [`RateLimitingFilter`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java).
 
 ### `maxRuleFirings`
-The cap on rule activations per execution. Set to 10,000 in [`RuleExecutor.java:22`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java#L22). Prevents infinite-loop rules.
+The cap on rule activations per execution. Default 10,000 (`DEFAULT_MAX_RULE_FIRINGS`) in [`RuleExecutor.java`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java) and passed to `kieSession.fireAllRules(maxRuleFirings)`. Prevents infinite-loop rules.
 
 ### snake_case JSON
 The convention this service uses for JSON field names: `rule_id`, not `ruleId`. Java fields are camelCase; Jackson maps them via `@JsonProperty("rule_id")`.
@@ -176,13 +191,13 @@ A circuit breaker's separate threshold based on call duration, not just success/
 Java library that runs Docker containers in test fixtures. Used for `@Testcontainers` JUnit 5 integration tests with real LocalStack and Redis. See [28-testing-guide.md](28-testing-guide.md).
 
 ### Spotless
-Maven plugin that enforces code formatting. This project uses Google Java Format 1.17.0. Run `mvn spotless:apply` before committing. See [27-development-setup.md](27-development-setup.md).
+Maven plugin that enforces code formatting (Google Java Format). Run `mvn spotless:apply` before committing. `spotless:check` is bound to the `verify` phase, so `mvn verify` fails on formatting drift. See [27-development-setup.md](27-development-setup.md).
 
 ### JaCoCo
-Java code coverage tool. Generates `target/site/jacoco/index.html`. Currently no threshold gate is configured.
+Java code coverage tool. Generates `target/site/jacoco/index.html`. A coverage gate **is** enforced: `jacoco:check` is bound to the `verify` phase with a floor of **0.88 instruction / 0.74 branch**, so `mvn verify` fails below those minimums.
 
 ### SpotBugs
-Java static analysis tool. Detects common bug patterns. Run `mvn spotbugs:check`.
+Java static analysis tool. Detects common bug patterns. `spotbugs:check` is bound to the `verify` phase, so `mvn verify` fails on new findings.
 
 ### Maven Enforcer Plugin
 Maven plugin that enforces build-time invariants. This project uses it to require Java 25 (`[25,26)` range).

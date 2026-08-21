@@ -205,12 +205,18 @@ class RedisCachedRuleStorageTest {
   // ─── refreshRule (single invalidation) ──────────────────────────────────────
 
   @Test
-  @DisplayName("refreshRule DELs Redis key then delegates")
+  @DisplayName("refreshRule DELs key, delegates, then write-through re-populates from base (S2)")
   void refreshRuleSingleInvalidation() {
+    Rule fresh = rule("pricing.simple");
+    when(delegate.getRule("pricing.simple")).thenReturn(Optional.of(fresh));
+
     storage.refreshRule("pricing.simple");
 
     verify(redisTemplate).delete(KEY_PREFIX + "pricing.simple");
     verify(delegate).refreshRule("pricing.simple");
+    // Write-through: cache is re-populated with the fresh value so stale DRL isn't served even if
+    // the best-effort DEL was dropped. (S2)
+    verify(valueOps).set(KEY_PREFIX + "pricing.simple", fresh, Duration.ofMinutes(TTL_MINUTES));
     assertThat(meterRegistry.counter("drools.cache.invalidation", "scope", "single").count())
         .isEqualTo(1.0);
   }

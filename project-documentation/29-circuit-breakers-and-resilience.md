@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Operators, on-call engineers, developers debugging external-dependency failures |
 | **Purpose** | Complete behavior of the two Resilience4j circuit breakers (S3 and Redis) — how they trip, what they protect, what state transitions look like, how to recover |
-| **Last verified against** | [`CircuitBreakerConfig.java`](../src/main/java/com/company/drools/config/CircuitBreakerConfig.java), [`S3RuleStorage.java`](../src/main/java/com/company/drools/storage/S3RuleStorage.java), [`RedisCachedRuleStorage.java`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java), [`RuleRefreshPublisher.java`](../src/main/java/com/company/drools/cache/RuleRefreshPublisher.java) on 2026-05-24 |
+| **Last verified against** | [`CircuitBreakerConfig.java`](../src/main/java/com/company/drools/config/CircuitBreakerConfig.java), [`S3RuleStorage.java`](../src/main/java/com/company/drools/storage/S3RuleStorage.java), [`RedisCachedRuleStorage.java`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java), [`RuleRefreshPublisher.java`](../src/main/java/com/company/drools/cache/RuleRefreshPublisher.java), [`RuleExecutor.java`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java), [`DroolsEngineService.java`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java), [`RedisConfig.java`](../src/main/java/com/company/drools/config/RedisConfig.java) on 2026-08-20 |
 | **Related docs** | [09-environment-variables-reference.md](09-environment-variables-reference.md), [12-error-code-catalog.md](12-error-code-catalog.md), [26-performance-tuning-runbook.md](26-performance-tuning-runbook.md), [30-runbooks-and-monitoring.md](30-runbooks-and-monitoring.md) |
 
 ---
@@ -17,6 +17,12 @@ Two circuit breakers wrap calls to external dependencies:
 - **`redisCircuitBreaker`** wraps every Redis op in `RedisCachedRuleStorage` (get / set / DEL / SCAN / MGET / EXISTS) and in `RuleRefreshPublisher.publish()` (`convertAndSend`)
 
 They use the standard 3-state machine (CLOSED → OPEN → HALF_OPEN → CLOSED). When OPEN, calls return `CallNotPermittedException` immediately, which the service maps to **HTTP 503 `SERVICE_UNAVAILABLE`**.
+
+Beyond the two dependency breakers, the service has **in-process resilience mechanisms** that are not circuit breakers but belong in the same mental model — see [In-process load-shedding and refresh resilience](#in-process-load-shedding-and-refresh-resilience):
+- **Rule-execution pool load-shedding** — the rule-exec thread pool uses `AbortPolicy`; saturation throws `ServiceUnavailableException` → **HTTP 503** (a second, breaker-independent 503 source).
+- **Timeout halt** — on rule timeout the executor calls `KieSession.halt()` (stops `fireAllRules` at the next rule boundary) → **HTTP 408**.
+- **Dedicated pub/sub recompile executor** — refresh events are handled on a single-thread bounded executor, off the Lettuce dispatch thread (S6).
+- **`refreshLock`** — rule compilation happens off the write lock, so `/execute-rule` reads are never blocked during a refresh (P7).
 
 **Key trigger conditions** (defaults, configurable per-profile):
 - S3 trips at **50% failures** in a 100-call sliding window (40% in `prod`, 60% in `dev`).
@@ -401,8 +407,62 @@ The `prod` profile makes both stricter (40% / 50% threshold, larger windows) bec
 
 ---
 
+## In-process load-shedding and refresh resilience
+
+These are not Resilience4j circuit breakers, but they are the other mechanisms that keep the service responsive under load and during refreshes. Operators debugging 503s/408s or refresh latency need them alongside the breakers.
+
+### Rule-execution pool → 503 load-shedding (`AbortPolicy`)
+
+[`RuleExecutor`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java) submits each rule execution to a dedicated `ruleExecutionExecutor`. That pool is configured with a **`ThreadPoolExecutor.AbortPolicy`**: when its queue is full and all threads are busy, `CompletableFuture.supplyAsync(...)` throws `RejectedExecutionException`. `RuleExecutor` catches it and throws `ServiceUnavailableException` → **HTTP 503**:
+
+```java
+} catch (RejectedExecutionException e) {
+  // Pool saturated (queue full + all threads busy). Shed load with 503 instead of running the
+  // rule body on the Tomcat request thread (which would silently bypass the timeout).
+  throw new ServiceUnavailableException("Rule execution capacity exceeded; please retry shortly", e);
+}
+```
+
+This is a **second, breaker-independent 503 source**. If you see 503s with every circuit breaker CLOSED, this is why — check thread-pool saturation (`/admin/thread-pools`) and the `Rule execution pool saturated` WARN log. The design choice is deliberate: shedding the request is safer than running the rule body on the caller (Tomcat) thread, which would bypass the per-request execution timeout. Note the **storage** thread pool still uses `CallerRunsPolicy` — only the rule-execution pool sheds load with `AbortPolicy`.
+
+### Timeout → `KieSession.halt()` → 408
+
+When a rule execution exceeds `RULE_EXECUTION_TIMEOUT_SECONDS`, `RuleExecutor` now **cooperatively halts** the running session before cancelling the future:
+
+```java
+} catch (java.util.concurrent.TimeoutException e) {
+  haltQuietly(sessionRef);   // KieSession.halt() — stops fireAllRules at the next rule boundary
+  future.cancel(true);
+  throw new TimeoutException("Rule execution: " + ruleId, timeoutSeconds, e);   // → HTTP 408
+}
+```
+
+`halt()` is designed to be called from another thread and stops the agenda at the **next rule boundary**, so a timing-out execution no longer necessarily burns the full 30s and its worker thread is not leaked. **Limitation**: `halt()` only interrupts between firings — a single consequence that never yields (`then while(true){} end`) cannot be interrupted; that thread stays busy until recycled even though the request returns 408 promptly. Fully sandboxing rule bodies is tracked with finding B1 (deferred).
+
+### Dedicated single-thread pub/sub recompile executor (S6)
+
+[`RedisConfig`](../src/main/java/com/company/drools/config/RedisConfig.java) wires the `RedisMessageListenerContainer` to a dedicated `ruleRefreshListenerExecutor` rather than letting message handling run on the Lettuce subscription/dispatch thread:
+
+```java
+ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+executor.setCorePoolSize(1);
+executor.setMaxPoolSize(1);
+executor.setQueueCapacity(50);
+executor.setThreadNamePrefix("rule-refresh-");
+executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+```
+
+Because a refresh event triggers a (possibly long) rule recompile, running it on the Lettuce thread would block delivery of subsequent events. The single-thread + bounded-queue (50) design serializes recompiles off the dispatch thread and caps pile-up under bursts; `CallerRunsPolicy` means nothing is silently dropped if the queue fills. Spring manages init/shutdown. This is separate from the `FixedBackOff(2s, ∞)` re-subscribe recovery backoff documented above.
+
+### `refreshLock` — compile off the write lock (P7)
+
+[`DroolsEngineService`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java) uses a separate `refreshLock` (a `ReentrantLock`) to serialize refreshes, distinct from the `rulesLock` `ReentrantReadWriteLock` that guards the compiled `KieBase`. The (slow) rule compile runs **without** holding the write lock; only the brief `kieContainer.updateToVersion(...)` + metadata swap takes the write lock. So `/execute-rule` reads are not blocked during compilation — even a 46s 1000-rule recompile does not stall live traffic. `loadOrReplaceRule` (single-rule) and the new `removeRule` (used by the pub/sub `RULE_DELETED` handler) both follow this pattern: snapshot the current rule set under a short read lock, then compile + swap off the write lock.
+
+---
+
 ## What this layer does NOT protect
 
+- **Rule-execution timeouts / pool saturation**: handled in-process by `RuleExecutor` (408 on timeout via `halt()`; 503 on pool saturation via `AbortPolicy`), not by the S3/Redis breakers — see the section above.
 - **Compilation failures**: a bad `.drl` doesn't trip the breaker. It's reported in the refresh response under `errors[]`.
 - **Rule execution exceptions**: those happen after the rule is loaded; they don't go through S3/Redis breakers.
 - **Memory pressure / OOM**: not a circuit-breaker concern. See [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md).

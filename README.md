@@ -112,10 +112,11 @@ sleep 30
 
 # Verify all services are running and healthy
 docker-compose ps
-curl http://localhost:8080/admin/health
+# /admin/* requires the admin key (docker-compose sets ADMIN_API_KEY=admin-secret)
+curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/health
 ```
 
-### 3. Set Environment Variables
+### 4. Set Environment Variables
 
 ```bash
 # Copy environment template
@@ -128,7 +129,7 @@ cp .env.example .env
 # You can also set environment variables directly if preferred
 ```
 
-### 4. Build and Run
+### 5. Build and Run
 
 #### Option A: Using Docker Compose (Recommended for Development)
 ```bash
@@ -165,14 +166,15 @@ docker run -p 8080:8080 -p 8081:8081 \
   drools-rule-engine:latest
 ```
 
-### 5. Verify Installation
+### 6. Verify Installation
 
 ```bash
 # Check application health (with comprehensive component status)
-curl http://localhost:8080/admin/health
+# /admin/* requires the admin key (docker-compose sets ADMIN_API_KEY=admin-secret)
+curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/health
 
 # List available sample rules
-curl http://localhost:8080/admin/rules
+curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/rules
 
 # Test rule execution with sample rules
 curl -X POST http://localhost:8080/execute-rule \
@@ -188,15 +190,14 @@ curl -X POST http://localhost:8080/execute-rule \
 Expected response:
 ```json
 {
-  "success": true,
+  "rule_id": "pricing.discount.simple",
   "result": {
     "amount": 90.0,
     "discount": 10.0,
     "discountPercent": 10
   },
-  "executionTimeMs": 15,
-  "rule_id": "pricing.discount.simple",
-  "timestamp": "2025-07-22T18:45:00Z"
+  "error": null,
+  "execution_time_ms": 15
 }
 ```
 
@@ -384,15 +385,14 @@ Content-Type: application/json
 Response:
 ```json
 {
-  "success": true,
+  "rule_id": "pricing.discount.vip",
   "result": {
     "amount": 80,
     "discount": 20,
     "discountPercent": 20
   },
-  "executionTimeMs": 15,
-  "rule_id": "pricing.discount.vip",
-  "timestamp": "2025-07-21T17:30:00Z"
+  "error": null,
+  "execution_time_ms": 15
 }
 ```
 
@@ -401,29 +401,46 @@ Response:
 #### Health Check
 ```bash
 GET /admin/health
+# Requires the X-Admin-API-Key header when ADMIN_API_KEY is set
+# (mandatory on the prod/docker profiles):
+#   curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/health
 
 {
   "status": "UP",
   "timestamp": "2025-07-21T17:30:00Z",
-  "drools": {
-    "loaded_rules": 25,
-    "active_rules": 25
-  },
-  "cache": {
-    "status": "UP",
-    "details": {
-      "mode": "redis",
-      "enabled": true,
-      "statistics": {
-        "hits": 1250,
-        "misses": 45,
-        "hit_rate": "96.53%"
+  "components": {
+    "drools": {
+      "status": "UP",
+      "details": {
+        "loaded_rules": 25,
+        "active_rules": 25,
+        "cache_hit_rate": "96.53%"
       }
+    },
+    "storage": {
+      "status": "UP",
+      "details": {
+        "type": "S3RuleStorage",
+        "rule_source": "s3",
+        "total_rules": 25
+      }
+    },
+    "cache": {
+      "status": "UP",
+      "details": {
+        "mode": "redis",
+        "enabled": true,
+        "statistics": {
+          "hits": 1250,
+          "misses": 45,
+          "hit_rate": "96.53%"
+        }
+      }
+    },
+    "circuit-breakers": {
+      "status": "UP",
+      "details": {}
     }
-  },
-  "storage": {
-    "type": "S3RuleStorage",
-    "total_rules": 25
   }
 }
 ```
@@ -564,17 +581,20 @@ GET /admin/memory/snapshot
 
 **Usage Example**:
 ```bash
+# Admin endpoints require the key when ADMIN_API_KEY is set (always in prod/docker)
+export ADMIN_API_KEY=admin-secret
+
 # Monitor memory in real-time (every 5 seconds)
-watch -n 5 'curl -s http://localhost:8080/admin/memory/info | jq ".heap.usagePercent"'
+watch -n 5 'curl -s -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/memory/info | jq ".heap.usagePercent"'
 
 # Check for memory warnings
-curl -s http://localhost:8080/admin/memory/info | jq '.warnings'
+curl -s -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/memory/info | jq '.warnings'
 
 # Verify memory is stable after rule refreshes
 for i in {1..10}; do
-    curl -X POST http://localhost:8080/admin/refresh-rules
+    curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/refresh-rules
     sleep 3
-    curl -s http://localhost:8080/admin/memory/info | jq '.heap.usedMB'
+    curl -s -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/memory/info | jq '.heap.usedMB'
 done
 ```
 
@@ -644,13 +664,16 @@ end
 
 ### Security Features
 
-The API includes comprehensive security features (39/42 security findings addressed):
+The API includes multiple layers of security. Most hardening findings are addressed, with two
+tracked as open: the **DRL sandbox is not a sound boundary** (treat rule-store write access as code
+execution — see [`SECURITY.md`](SECURITY.md)) and Redis auth/TLS is enforced only on the `prod`
+profile. Key controls:
 
 - **Admin Authentication**: API key protection for `/admin/*` endpoints via `X-Admin-API-Key` header
 - **DRL Sandboxing**: Blocklist-based rule content scanning prevents arbitrary code execution
 - **Security Headers**: 7 security headers on all responses (CSP, HSTS, X-Frame-Options, etc.)
 - **Input Validation**: All requests are validated for proper format, size limits, and security patterns
-- **Rate Limiting**: Configurable per-client rate limits with standard HTTP headers (per remote IP)
+- **Rate Limiting**: Configurable rate limits keyed on the caller's network address (`getRemoteAddr()`). `X-Forwarded-For` is ignored by default (spoofable); it is trusted (left-most entry) only when `drools.rate-limiting.trust-proxy=true`, which you should enable only behind a trusted proxy/load balancer that overwrites the header. Standard `X-RateLimit-*` response headers are returned
 - **CORS Protection**: Configurable cross-origin request policies (empty default, restrictive in production)
 - **Request Size Limits**: Multi-layer protection against large payloads (including chunked transfer)
 - **Path Traversal Protection**: Defense-in-depth in storage layers
@@ -660,11 +683,15 @@ The API includes comprehensive security features (39/42 security findings addres
 
 ```json
 {
-  "success": false,
-  "error": "Rule not found",
-  "errorCode": "RULE_NOT_FOUND",
-  "timestamp": "2025-07-21T17:30:00Z",
-  "path": "/execute-rule"
+  "rule_id": "pricing.discount.missing",
+  "result": null,
+  "error": {
+    "code": "RULE_NOT_FOUND",
+    "message": "Rule not found",
+    "details": null,
+    "timestamp": "2025-07-21T17:30:00Z"
+  },
+  "execution_time_ms": null
 }
 ```
 
@@ -728,8 +755,8 @@ src/
 # View all services status
 docker-compose ps
 
-# Access application
-curl http://localhost:8080/admin/health
+# Access application (docker-compose sets ADMIN_API_KEY=admin-secret)
+curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/health
 ```
 
 #### Manual Docker Compose Setup
@@ -791,10 +818,40 @@ mvn spotless:check
 
 # Static analysis
 mvn compile spotbugs:check
+# or
+docker run --rm -v "$PWD":/app -w /app -v drools-m2:/root/.m2 \
+  maven:3.9-eclipse-temurin-25 mvn -B compile spotbugs:check
 
 # Dependency vulnerabilities
 mvn dependency-check:check
 ```
+
+#### Full quality gate + SonarQube (Docker, Java 25)
+
+Java 25 is required (and may not be installed locally), so run the full `verify` + SonarQube analysis
+inside the Maven 25 container:
+
+```bash
+docker run --rm \
+  -v "$PWD":/app -w /app \
+  -v drools-m2:/root/.m2 \
+  maven:3.9-eclipse-temurin-25 \
+  mvn clean verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+    -Dsonar.projectKey=drools-microservice \
+    -Dsonar.projectName='drools-microservice' \
+    -Dsonar.host.url=http://host.docker.internal:9000 \
+    -Dsonar.token=<your-sonarqube-token>
+```
+
+- `mvn clean verify` runs the unit suite plus the gates bound to `verify` (`spotless:check`,
+  `spotbugs:check`, `jacoco:check`); the SonarQube scanner then uploads the results.
+- **`host.docker.internal:9000`** reaches a SonarQube running on the host from inside the container
+  (macOS Docker Desktop). Use `localhost:9000` only if SonarQube shares the container's network.
+- **`-v drools-m2:/root/.m2`** caches Maven dependencies between runs (the first run is slow).
+- **Do NOT add `-Dtest=...`** — a command-line `-Dtest` overrides the pom's surefire exclusions and
+  pulls the Testcontainers integration tests into the run; they need a real Docker daemon and fail
+  inside the container. The pom already excludes them.
+- Treat `-Dsonar.token` as a secret — never commit it.
 
 ### Hot Reloading Rules
 
@@ -804,11 +861,11 @@ Rules can be updated without restarting the application:
 # Upload new rule to S3
 aws --endpoint-url=http://localhost:4566 s3 cp new-rule.drl s3://local-rules/pricing/discount/
 
-# Refresh specific rule
-curl -X POST http://localhost:8080/admin/refresh-rules/pricing.discount.new-rule
+# Refresh specific rule (all /admin/* need the admin key when ADMIN_API_KEY is set)
+curl -X POST -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/refresh-rules/pricing.discount.new-rule
 
 # Or refresh all rules
-curl -X POST http://localhost:8080/admin/refresh-rules
+curl -X POST -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/refresh-rules
 ```
 
 ## 🧪 Testing
@@ -856,6 +913,8 @@ The script [`scripts/e2e-load-test.sh`](scripts/e2e-load-test.sh) runs the entir
 The script patches `docker-compose.yml` to disable rate limiting for the load test and restores it automatically on exit (even on failure or Ctrl-C). Exits non-zero if any check fails — CI-friendly.
 
 **Baseline from 2026-05-11**: 157,754 requests, **0 errors (0%)**, ~518 RPS, heap stable 180–340 MB, hot reload at 2 min with 0 dropped requests.
+
+**Re-validated 2026-08-20** (post production-readiness hardening, Java 25): 151,741 requests, **0 errors (0%)**, ~499 RPS (peak ~518), heap sawtooth 60–331 MB (post-GC 46 MB), hot reload at 2 min with 0 dropped requests, 17/17 rules loaded after.
 
 ---
 
@@ -928,7 +987,7 @@ for i in 1 2 3 4 5; do
   curl -s -X POST http://localhost:8080/admin/refresh-rules \
     -H "X-Admin-API-Key: admin-secret" > /dev/null
   sleep 2
-  curl -s http://localhost:8080/admin/memory/info | \
+  curl -s -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/info | \
     python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Reload $i: heap={d[\"heap\"][\"usedMB\"]}MB ({d[\"heap\"][\"usagePercent\"]}%)')"
 done
 ```
@@ -938,7 +997,7 @@ Heap should oscillate (G1GC collecting between reloads) — not grow monotonical
 ```bash
 curl -s -X POST http://localhost:8080/admin/memory/gc -H "X-Admin-API-Key: admin-secret" > /dev/null
 sleep 3
-curl -s http://localhost:8080/admin/memory/info | \
+curl -s -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/info | \
   python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Post-GC: {d[\"heap\"][\"usedMB\"]}MB / {d[\"heap\"][\"maxMB\"]}MB ({d[\"heap\"][\"usagePercent\"]}%)')"
 # Expected: < 100MB after GC (no leak)
 ```
@@ -988,7 +1047,7 @@ while [ $(date +%s) -lt $END ]; do
     SUC=$(wc -l < $TMPDIR_LT/s 2>/dev/null | tr -d ' '); SUC=${SUC:-0}
     ERR=$(wc -l < $TMPDIR_LT/e 2>/dev/null | tr -d ' '); ERR=${ERR:-0}
     TOT=$((SUC + ERR)); RPS=$((TOT / ELAPSED))
-    MEM=$(curl -s http://localhost:8080/admin/memory/info 2>/dev/null | \
+    MEM=$(curl -s -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/info 2>/dev/null | \
       python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{d['heap']['usedMB']}MB ({d['heap']['usagePercent']}%)\")" 2>/dev/null || echo "?")
     echo "  [${ELAPSED}s] success=$SUC errors=$ERR rps~$RPS heap=$MEM"; LAST=$NOW
   fi
@@ -1001,7 +1060,7 @@ ERR=$(wc -l < $TMPDIR_LT/e 2>/dev/null | tr -d ' '); ERR=${ERR:-0}
 TOT=$((SUC + ERR))
 ERR_PCT=$(echo "scale=2; $ERR * 100 / $TOT" | bc 2>/dev/null || echo "0")
 echo ""; echo "=== RESULTS: ${ELAPSED}s | total=$TOT success=$SUC errors=$ERR ($ERR_PCT%) rps~$((TOT/ELAPSED)) ==="
-echo "Final heap: $(curl -s http://localhost:8080/admin/memory/info | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{d['heap']['usedMB']}MB ({d['heap']['usagePercent']}%)\")")"
+echo "Final heap: $(curl -s -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/info | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{d['heap']['usedMB']}MB ({d['heap']['usagePercent']}%)\")")"
 rm -rf $TMPDIR_LT
 ```
 
@@ -1125,20 +1184,21 @@ Configure your load balancer to use:
 ### Metrics Endpoints
 
 ```bash
+# All /admin/* calls require the admin key when ADMIN_API_KEY is set.
 # Application health with component status
-curl http://localhost:8080/admin/health
+curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/health
 
 # Thread pool statistics
-curl http://localhost:8080/admin/thread-pools
+curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/thread-pools
 
 # Cache statistics
-curl http://localhost:8080/admin/health | jq '.components.cache.details'
+curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/health | jq '.components.cache.details'
 
 # Circuit breaker status
-curl http://localhost:8080/admin/health | jq '.components."circuit-breakers"'
+curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/health | jq '.components."circuit-breakers"'
 
 # Rule performance metrics
-curl http://localhost:8080/admin/rules | jq '.rules[].avg_execution_time_ms'
+curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/rules | jq '.rules[].avg_execution_time_ms'
 ```
 
 ### Performance Targets
@@ -1166,7 +1226,7 @@ Two distinct rule state stores; only one occupies JVM heap.
 For complex rules (forall, accumulate, multi-join patterns) compiled size is higher — estimate 1–5 MB per complex rule based on pattern density. Measure with your actual rules using the memory endpoint:
 
 ```bash
-curl http://localhost:8080/admin/memory/info | jq '.heap.usedMB'
+curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/info | jq '.heap.usedMB'
 # Load N rules, take the difference — divide by N for per-rule cost
 ```
 
@@ -1310,13 +1370,13 @@ export REDIS_ENABLED=false
 #### 4. Rule compilation errors
 ```bash
 # Check rule syntax via Docker
-docker-compose exec app curl http://localhost:8080/admin/rules
+docker-compose exec app curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/rules
 
 # View detailed error logs
 docker-compose logs app | grep ERROR
 
 # Refresh specific problematic rule
-curl -X POST http://localhost:8080/admin/refresh-rules/problematic.rule.id
+curl -X POST -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/refresh-rules/problematic.rule.id
 ```
 
 #### 5. Image size or performance issues
@@ -1335,7 +1395,7 @@ docker-compose exec app jstat -gc 1
 
 - Check existing issues: [GitHub Issues](https://github.com/your-repo/issues)
 - Review logs: `tail -f logs/application.log`
-- Verify configuration: `curl http://localhost:8080/admin/health`
+- Verify configuration: `curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/health`
 - Test with in-memory built-in rules: `export RULE_SOURCE=local`
 
 ## 📞 Support

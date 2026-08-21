@@ -57,7 +57,7 @@ EOF
 ### 3. Upload to LocalStack S3
 ```bash
 # Make sure LocalStack is running
-docker-compose up -d localstack
+docker compose up -d localstack
 
 # Wait a few seconds for it to start
 sleep 5
@@ -75,7 +75,7 @@ aws --endpoint-url=http://localhost:4566 \
 ### 4. Start the Application
 ```bash
 # Start the full stack (if not already running)
-docker-compose up -d
+docker compose up -d
 
 # Or start just the application with S3 configuration
 RULE_SOURCE=s3 \
@@ -114,17 +114,17 @@ curl -X POST http://localhost:8080/execute-rule \
 
 ### 6. If Rules Don't Load Automatically
 ```bash
-# Refresh all rules
-curl -X POST http://localhost:8080/admin/refresh-rules
+# Refresh all rules (docker compose sets ADMIN_API_KEY=admin-secret)
+curl -X POST -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/refresh-rules
 
 # Or refresh just your specific rule
-curl -X POST http://localhost:8080/admin/refresh-rules/pricing.discount.loyalty-discount
+curl -X POST -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/refresh-rules/pricing.discount.loyalty-discount
 ```
 
 ## 🔍 Quick Testing Checklist
 
 1. **Rule file created in**: `sample-rules/{domain}/{category}/{name}.drl` ✓
-2. **LocalStack running**: `docker-compose ps` shows localstack UP ✓
+2. **LocalStack running**: `docker compose ps` shows localstack UP ✓
 3. **Rule uploaded to S3**: Check with `aws --endpoint-url=http://localhost:4566 s3 ls` ✓
 4. **Application running**: Main API and Admin on port 8080, Actuator on 8081 ✓
 5. **Test rule execution**: Use curl command with your rule ID ✓

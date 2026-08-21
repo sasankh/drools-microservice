@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Operators, on-call engineers, SREs |
 | **Purpose** | Operational procedures (start/stop/refresh/scale/incident response) plus monitoring setup (metrics, dashboards, alerts) |
-| **Last verified against** | Running stack on 2026-05-24 |
+| **Last verified against** | Running stack on 2026-08-20 |
 | **Related docs** | [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md), [26-performance-tuning-runbook.md](26-performance-tuning-runbook.md), [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md), [31-troubleshooting.md](31-troubleshooting.md) |
 
 ---
@@ -18,7 +18,8 @@
 ```bash
 docker compose up -d
 docker compose ps   # all 3 services should be (healthy) within ~60s
-curl -fsS http://localhost:8080/admin/health | jq '.status'   # → "UP"
+# docker-compose sets ADMIN_API_KEY=admin-secret, so /admin/* needs the header
+curl -fsS http://localhost:8080/admin/health -H "X-Admin-API-Key: admin-secret" | jq '.status'   # → "UP"
 ```
 
 #### Local (Maven, dev profile)
@@ -64,8 +65,8 @@ The service supports graceful shutdown (`server.shutdown: graceful`). On SIGTERM
 ### Check health
 
 ```bash
-# Quick — just status
-curl -fsS http://localhost:8080/admin/health | jq '.status'   # → "UP" / "DOWN"
+# Quick — just status (all /admin/* requires the admin key when ADMIN_API_KEY is set)
+curl -fsS http://localhost:8080/admin/health -H "X-Admin-API-Key: $ADMIN_API_KEY" | jq '.status'   # → "UP" / "DOWN"
 
 # Full — component breakdown
 curl -fsS http://localhost:8080/admin/health -H "X-Admin-API-Key: $ADMIN_API_KEY" | jq
@@ -141,6 +142,7 @@ curl -fsS http://localhost:8080/admin/health -H "X-Admin-API-Key: $ADMIN_API_KEY
 If `s3_state: "OPEN"` → S3 dependency is failing. See [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md).
 
 If both states are `CLOSED` and you still see 503s, look elsewhere:
+- **Rule-execution pool saturation** — the rule-execution thread pool uses an `AbortPolicy`, so once the pool and its queue are full the executor rejects new work and the request is mapped to `ServiceUnavailableException` → HTTP 503 (a distinct 503 source from the circuit breakers and from graceful-shutdown refusal). Check `/admin/thread-pools` for active/queue/rejected counts and raise `DROOLS_THREAD_POOL_MAX_SIZE` (and/or the queue capacity) or reduce inbound load.
 - Memory exhaustion (check `/admin/memory/info`)
 - Thread pool saturated (check `/admin/thread-pools`)
 - Specific endpoint failing (check Spring Actuator metrics)
@@ -387,7 +389,7 @@ fields @timestamp, message
 | Cache hit rate low | `drools.cache.hit{layer=redis}` hit rate < 70% for 30 min (when `REDIS_ENABLED=true`) | P3 | Check if refresh storms are evicting Redis keys; tune `REDIS_DRL_RULES_TTL_MINUTES` |
 | Rule execution errors | Per-rule error rate > 5% for 10 min | P2 | Validate rule logic |
 | Rate limit "client map at capacity" | Log line `Rate limiter client map at capacity` | P2 | Possible spoofing |
-| Admin auth disabled in production | Log line `Admin API key is not configured` AND env != local | P1 | Set `ADMIN_API_KEY` |
+| Startup fails: admin key blank on prod/docker | App exits at startup — `prod`/`docker` profiles hard-fail when `ADMIN_API_KEY` is blank (fail-closed); a running-but-unauthenticated production state is no longer possible. Only `local`/`dev` start open, logging a WARN | P1 | Set `ADMIN_API_KEY` before deploy |
 | Unexpected exception | Log entry `Unexpected error occurred` ERROR | P3 | Check stack trace |
 
 ### Correlation IDs

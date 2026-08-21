@@ -30,9 +30,10 @@ class RefreshEventTest {
             RefreshEvent.EventType.RULE_REFRESHED, "pricing.simple", "instance-abc", ts);
 
     String json = objectMapper.writeValueAsString(original);
-    assertThat(json).contains("\"event\":\"RULE_REFRESHED\"");
-    assertThat(json).contains("\"rule_id\":\"pricing.simple\"");
-    assertThat(json).contains("\"source_instance_id\":\"instance-abc\"");
+    assertThat(json)
+        .contains("\"event\":\"RULE_REFRESHED\"")
+        .contains("\"rule_id\":\"pricing.simple\"")
+        .contains("\"source_instance_id\":\"instance-abc\"");
 
     RefreshEvent decoded = objectMapper.readValue(json, RefreshEvent.class);
     assertThat(decoded).isEqualTo(original);

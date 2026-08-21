@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -82,10 +83,11 @@ public class RedisCachedRuleStorage implements RuleStorage {
   private final MeterRegistry meterRegistry;
 
   /**
-   * Underlying storage; set by {@link StorageFactory} immediately after construction. Not final
-   * because the bean is constructed before the factory knows which base storage to wrap.
+   * Underlying storage; set once by {@link StorageFactory} immediately after construction. Held in
+   * an {@link AtomicReference} for safe cross-thread publication of the set-once reference — the
+   * bean is constructed before the factory knows which base storage to wrap (finding S10).
    */
-  private RuleStorage delegate;
+  private final AtomicReference<RuleStorage> delegate = new AtomicReference<>();
 
   public RedisCachedRuleStorage(
       RedisTemplate<String, Rule> redisTemplate,
@@ -103,7 +105,7 @@ public class RedisCachedRuleStorage implements RuleStorage {
 
   /** Wire the underlying storage. Called by {@link StorageFactory} before first use. */
   public void setDelegate(RuleStorage delegate) {
-    this.delegate = Objects.requireNonNull(delegate, "delegate");
+    this.delegate.set(Objects.requireNonNull(delegate, "delegate"));
     log.info("RedisCachedRuleStorage delegate set: {}", delegate.getClass().getSimpleName());
   }
 
@@ -136,7 +138,7 @@ public class RedisCachedRuleStorage implements RuleStorage {
     sample.stop(
         meterRegistry.timer(METRIC_READ_DURATION, TAG_LAYER, LAYER_REDIS, TAG_RESULT, "miss"));
 
-    Optional<Rule> result = delegate.getRule(ruleId);
+    Optional<Rule> result = delegate.get().getRule(ruleId);
     result.ifPresent(this::cachePut);
     return result;
   }
@@ -146,8 +148,12 @@ public class RedisCachedRuleStorage implements RuleStorage {
     requireDelegate();
     Timer.Sample sample = Timer.start(meterRegistry);
 
-    List<String> expectedIds = delegate.getRuleIds();
+    List<String> expectedIds = delegate.get().getRuleIds();
     Map<String, Rule> existing = collectFromRedis();
+
+    // Drop cached entries no longer authoritative (deleted at the delegate but still within their
+    // Redis TTL) so a deleted rule is never resurrected into the compiled corpus. (S1)
+    existing.keySet().retainAll(new HashSet<>(expectedIds));
 
     Set<String> missing = new HashSet<>(expectedIds);
     missing.removeAll(existing.keySet());
@@ -164,7 +170,7 @@ public class RedisCachedRuleStorage implements RuleStorage {
         .counter(METRIC_BULK_MISS, "missing_count", String.valueOf(missing.size()))
         .increment();
 
-    List<Rule> all = delegate.getAllRules();
+    List<Rule> all = delegate.get().getAllRules();
     for (Rule r : all) {
       if (!existing.containsKey(r.getRuleId())) {
         cachePut(r);
@@ -176,6 +182,9 @@ public class RedisCachedRuleStorage implements RuleStorage {
     return new ArrayList<>(existing.values());
   }
 
+  // S4276: BooleanSupplier can't be used here — CircuitBreaker.decorateSupplier returns a
+  // Supplier<T>, so the boxed Supplier<Boolean> is required by the resilience4j API.
+  @SuppressWarnings("java:S4276")
   @Override
   public boolean ruleExists(String ruleId) {
     requireDelegate();
@@ -192,7 +201,7 @@ public class RedisCachedRuleStorage implements RuleStorage {
     } catch (Exception e) {
       log.warn("Redis EXISTS failed for ruleId={}, falling through", ruleId, e);
     }
-    return delegate.ruleExists(ruleId);
+    return delegate.get().ruleExists(ruleId);
   }
 
   // ─── RuleStorage: writes ─────────────────────────────────────────────────────
@@ -200,14 +209,14 @@ public class RedisCachedRuleStorage implements RuleStorage {
   @Override
   public void saveRule(Rule rule) {
     requireDelegate();
-    delegate.saveRule(rule);
+    delegate.get().saveRule(rule);
     cachePut(rule);
   }
 
   @Override
   public void deleteRule(String ruleId) {
     requireDelegate();
-    delegate.deleteRule(ruleId);
+    delegate.get().deleteRule(ruleId);
     safeDelete(ruleId);
   }
 
@@ -217,7 +226,7 @@ public class RedisCachedRuleStorage implements RuleStorage {
   public void refreshCache() {
     requireDelegate();
     invalidateAll();
-    delegate.refreshCache();
+    delegate.get().refreshCache();
   }
 
   @Override
@@ -225,7 +234,12 @@ public class RedisCachedRuleStorage implements RuleStorage {
     requireDelegate();
     meterRegistry.counter(METRIC_INVALIDATION, TAG_SCOPE, "single").increment();
     safeDelete(ruleId);
-    delegate.refreshRule(ruleId);
+    delegate.get().refreshRule(ruleId);
+    // Re-populate authoritatively from the base storage (write-through). If the best-effort DEL
+    // above was dropped (Redis blip / circuit open), this SET overwrites any stale entry so
+    // siblings
+    // don't keep serving old DRL text after a "successful" refresh. (S2)
+    delegate.get().getRule(ruleId).ifPresent(this::cachePut);
   }
 
   // ─── RuleStorage: authoritative pass-through ─────────────────────────────────
@@ -233,13 +247,13 @@ public class RedisCachedRuleStorage implements RuleStorage {
   @Override
   public long getTotalRuleCount() {
     requireDelegate();
-    return delegate.getTotalRuleCount();
+    return delegate.get().getTotalRuleCount();
   }
 
   @Override
   public List<String> getRuleIds() {
     requireDelegate();
-    return delegate.getRuleIds();
+    return delegate.get().getRuleIds();
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -382,7 +396,7 @@ public class RedisCachedRuleStorage implements RuleStorage {
   }
 
   private void requireDelegate() {
-    if (delegate == null) {
+    if (delegate.get() == null) {
       throw new IllegalStateException(
           "RedisCachedRuleStorage delegate not set; StorageFactory must call setDelegate()");
     }

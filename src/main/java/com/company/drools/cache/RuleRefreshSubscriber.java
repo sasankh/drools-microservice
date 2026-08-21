@@ -1,5 +1,6 @@
 package com.company.drools.cache;
 
+import com.company.drools.common.RuleIds;
 import com.company.drools.core.engine.DroolsEngineService;
 import com.company.drools.core.model.Rule;
 import com.company.drools.storage.RuleStorage;
@@ -45,11 +46,21 @@ public class RuleRefreshSubscriber implements MessageListener {
   private static final String TAG_LAYER = "layer";
   private static final String LAYER_SUBSCRIBER = "subscriber";
 
+  // Coalesce a burst of bulk-refresh events: skip a bulk recompile if one completed within this
+  // window. Each bulk refresh reloads the full corpus from storage, so back-to-back ones are
+  // redundant; anything missed inside the window is reconciled by the next event or auto-refresh.
+  private static final long BULK_COALESCE_WINDOW_MS = 500L;
+
   private final RuleStorage storage;
   private final DroolsEngineService droolsEngineService;
   private final String instanceId;
   private final ObjectMapper objectMapper;
   private final MeterRegistry meterRegistry;
+
+  // Handling runs on the single-thread rule-refresh executor (see RedisConfig), so this is only
+  // ever
+  // read/written by one thread; volatile guards visibility if that ever changes.
+  private volatile long lastBulkRefreshAtMs = 0L;
 
   public RuleRefreshSubscriber(
       RuleStorage storage,
@@ -129,8 +140,11 @@ public class RuleRefreshSubscriber implements MessageListener {
   }
 
   private void handleSingleRefresh(String ruleId) {
-    if (ruleId == null) {
-      log.warn("RULE_REFRESHED event received with null ruleId, skipping");
+    // Validate the raw ruleId before it reaches storage — this path bypasses the HTTP-layer
+    // @ValidRuleId check, so an attacker with Redis publish access could otherwise inject a
+    // traversal id. (S11)
+    if (!RuleIds.isPathSafe(ruleId)) {
+      log.warn("RULE_REFRESHED event with invalid/unsafe ruleId, skipping: {}", ruleId);
       return;
     }
     Optional<Rule> rule = storage.getRule(ruleId);
@@ -142,15 +156,26 @@ public class RuleRefreshSubscriber implements MessageListener {
   }
 
   private void handleBulkRefresh() {
+    long now = System.currentTimeMillis();
+    long since = now - lastBulkRefreshAtMs;
+    if (since < BULK_COALESCE_WINDOW_MS) {
+      log.debug(
+          "Bulk refresh {}ms ago (< {}ms) — coalescing event", since, BULK_COALESCE_WINDOW_MS);
+      return;
+    }
+    lastBulkRefreshAtMs = now;
     List<Rule> rules = storage.getAllRules();
     droolsEngineService.loadRules(rules);
   }
 
   private void handleDelete(String ruleId) {
-    // RULE_DELETED handling is deferred until DroolsEngineService exposes removeRule().
-    // For v1, we log INFO so operators can manually trigger a full refresh if needed.
-    // Today the AdminController has no delete endpoint, so this branch is rarely reached.
-    log.info(
-        "RULE_DELETED received for {} — not auto-applied (operator must trigger refresh)", ruleId);
+    // Validate the raw ruleId (bypasses HTTP validation — see handleSingleRefresh). (S11)
+    if (!RuleIds.isPathSafe(ruleId)) {
+      log.warn("RULE_DELETED event with invalid/unsafe ruleId, skipping: {}", ruleId);
+      return;
+    }
+    // Propagate the delete to this instance's compiled corpus so a rule deleted on one task stops
+    // firing on siblings. (S5)
+    droolsEngineService.removeRule(ruleId);
   }
 }

@@ -22,6 +22,13 @@ management:
     health:
       show-details: when-authorized
       show-components: when-authorized
+  # Only aggregate the Redis health indicator when the app actually uses Redis. Otherwise Spring
+  # Boot auto-enables it whenever spring-boot-starter-data-redis is on the classpath, so a Redis
+  # blip (or Redis-disabled deployments) would flip /actuator/health to 503 DOWN even though the
+  # service is fully functional via circuit-breaker fallback. Gated on REDIS_ENABLED. (P4)
+  health:
+    redis:
+      enabled: ${REDIS_ENABLED:false}
 
 spring:
   application:
@@ -125,6 +132,9 @@ drools:
     burst-size: ${DROOLS_RATE_LIMITING_BURST_SIZE:100}
     cleanup-interval-minutes: ${DROOLS_RATE_LIMITING_CLEANUP_INTERVAL:5}
     max-clients: ${DROOLS_RATE_LIMITING_MAX_CLIENTS:10000}
+    # Identify clients by getRemoteAddr() by default. Set true ONLY behind a trusted proxy/LB that
+    # overwrites inbound X-Forwarded-For; then the left-most XFF entry is used as the client IP. (P2)
+    trust-proxy: ${DROOLS_RATE_LIMITING_TRUST_PROXY:false}
 
 # Redis Configuration
 redis:
