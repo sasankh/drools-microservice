@@ -15,6 +15,8 @@ You're here because **the service is slow, throttling, OOMing, or otherwise unde
 
 > Every command here works against the running stack. If a command fails, the underlying assumption may be off — check [31-troubleshooting.md](31-troubleshooting.md) first.
 
+> **Admin auth:** every `/admin/*` command below requires the `X-Admin-API-Key` header (the app fails to start on `prod`/`docker` without a key set). Export it once and add the header — `export ADMIN_API_KEY=admin-secret` then `-H "X-Admin-API-Key: $ADMIN_API_KEY"`. Actuator commands on `:8081` need no key. Without the header, admin calls return `401`.
+
 ---
 
 ## Step 1: Symptom triage
@@ -281,12 +283,12 @@ Caveat: longer timeout means slower fast-fail. Threads can stay blocked on a hun
 ### Diagnose
 
 ```bash
-# Comprehensive memory snapshot
-curl -fsS http://localhost:8080/admin/memory/info | jq '.heap, .warnings'
+# Comprehensive memory snapshot (admin endpoints require the key; set in prod/docker)
+curl -fsS -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/memory/info | jq '.heap, .warnings'
 
 # Quick repeated snapshot to see trend
 for i in {1..10}; do
-  curl -fsS http://localhost:8080/admin/memory/snapshot | jq -c '{ts:.timestamp, heap:.heapUsedMB, pct:.heapUsagePercent}'
+  curl -fsS -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/memory/snapshot | jq -c '{ts:.timestamp, heap:.heapUsedMB, pct:.heapUsagePercent}'
   sleep 5
 done
 ```

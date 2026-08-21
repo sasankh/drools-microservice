@@ -345,21 +345,24 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 5. **Memory Monitoring** (NEW): Real-time memory diagnostics
    ```bash
+   # Admin endpoints require the key when ADMIN_API_KEY is set (always in prod/docker)
+   export ADMIN_API_KEY=admin-secret
+
    # Check current memory status
-   curl http://localhost:8080/admin/memory/info | jq
+   curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/memory/info | jq
 
    # Monitor heap usage
-   curl -s http://localhost:8080/admin/memory/info | jq '.heap'
+   curl -s -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/memory/info | jq '.heap'
 
    # Real-time monitoring (updates every 5 seconds)
-   watch -n 5 'curl -s http://localhost:8080/admin/memory/info | jq ".heap.usagePercent"'
+   watch -n 5 'curl -s -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/memory/info | jq ".heap.usagePercent"'
 
    # Test memory leak fix (should remain stable)
    for i in {1..10}; do
        echo "Refresh $i/10"
-       curl -X POST http://localhost:8080/admin/refresh-rules
+       curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/refresh-rules
        sleep 3
-       curl -s http://localhost:8080/admin/memory/info | jq '.heap.usedMB'
+       curl -s -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/memory/info | jq '.heap.usedMB'
    done
    # Memory should NOT grow by 10-100MB each refresh
 

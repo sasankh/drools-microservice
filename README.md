@@ -581,17 +581,20 @@ GET /admin/memory/snapshot
 
 **Usage Example**:
 ```bash
+# Admin endpoints require the key when ADMIN_API_KEY is set (always in prod/docker)
+export ADMIN_API_KEY=admin-secret
+
 # Monitor memory in real-time (every 5 seconds)
-watch -n 5 'curl -s http://localhost:8080/admin/memory/info | jq ".heap.usagePercent"'
+watch -n 5 'curl -s -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/memory/info | jq ".heap.usagePercent"'
 
 # Check for memory warnings
-curl -s http://localhost:8080/admin/memory/info | jq '.warnings'
+curl -s -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/memory/info | jq '.warnings'
 
 # Verify memory is stable after rule refreshes
 for i in {1..10}; do
-    curl -X POST http://localhost:8080/admin/refresh-rules
+    curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/refresh-rules
     sleep 3
-    curl -s http://localhost:8080/admin/memory/info | jq '.heap.usedMB'
+    curl -s -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/memory/info | jq '.heap.usedMB'
 done
 ```
 
@@ -911,6 +914,8 @@ The script patches `docker-compose.yml` to disable rate limiting for the load te
 
 **Baseline from 2026-05-11**: 157,754 requests, **0 errors (0%)**, ~518 RPS, heap stable 180–340 MB, hot reload at 2 min with 0 dropped requests.
 
+**Re-validated 2026-08-20** (post production-readiness hardening, Java 25): 151,741 requests, **0 errors (0%)**, ~499 RPS (peak ~518), heap sawtooth 60–331 MB (post-GC 46 MB), hot reload at 2 min with 0 dropped requests, 17/17 rules loaded after.
+
 ---
 
 Or run the steps manually:
@@ -982,7 +987,7 @@ for i in 1 2 3 4 5; do
   curl -s -X POST http://localhost:8080/admin/refresh-rules \
     -H "X-Admin-API-Key: admin-secret" > /dev/null
   sleep 2
-  curl -s http://localhost:8080/admin/memory/info | \
+  curl -s -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/info | \
     python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Reload $i: heap={d[\"heap\"][\"usedMB\"]}MB ({d[\"heap\"][\"usagePercent\"]}%)')"
 done
 ```
@@ -992,7 +997,7 @@ Heap should oscillate (G1GC collecting between reloads) — not grow monotonical
 ```bash
 curl -s -X POST http://localhost:8080/admin/memory/gc -H "X-Admin-API-Key: admin-secret" > /dev/null
 sleep 3
-curl -s http://localhost:8080/admin/memory/info | \
+curl -s -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/info | \
   python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Post-GC: {d[\"heap\"][\"usedMB\"]}MB / {d[\"heap\"][\"maxMB\"]}MB ({d[\"heap\"][\"usagePercent\"]}%)')"
 # Expected: < 100MB after GC (no leak)
 ```
@@ -1042,7 +1047,7 @@ while [ $(date +%s) -lt $END ]; do
     SUC=$(wc -l < $TMPDIR_LT/s 2>/dev/null | tr -d ' '); SUC=${SUC:-0}
     ERR=$(wc -l < $TMPDIR_LT/e 2>/dev/null | tr -d ' '); ERR=${ERR:-0}
     TOT=$((SUC + ERR)); RPS=$((TOT / ELAPSED))
-    MEM=$(curl -s http://localhost:8080/admin/memory/info 2>/dev/null | \
+    MEM=$(curl -s -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/info 2>/dev/null | \
       python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{d['heap']['usedMB']}MB ({d['heap']['usagePercent']}%)\")" 2>/dev/null || echo "?")
     echo "  [${ELAPSED}s] success=$SUC errors=$ERR rps~$RPS heap=$MEM"; LAST=$NOW
   fi
@@ -1055,7 +1060,7 @@ ERR=$(wc -l < $TMPDIR_LT/e 2>/dev/null | tr -d ' '); ERR=${ERR:-0}
 TOT=$((SUC + ERR))
 ERR_PCT=$(echo "scale=2; $ERR * 100 / $TOT" | bc 2>/dev/null || echo "0")
 echo ""; echo "=== RESULTS: ${ELAPSED}s | total=$TOT success=$SUC errors=$ERR ($ERR_PCT%) rps~$((TOT/ELAPSED)) ==="
-echo "Final heap: $(curl -s http://localhost:8080/admin/memory/info | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{d['heap']['usedMB']}MB ({d['heap']['usagePercent']}%)\")")"
+echo "Final heap: $(curl -s -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/info | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{d['heap']['usedMB']}MB ({d['heap']['usagePercent']}%)\")")"
 rm -rf $TMPDIR_LT
 ```
 
