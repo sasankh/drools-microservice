@@ -1,7 +1,7 @@
 # Drools Rule Engine Microservice - Architecture Documentation
 
 **Version**: 1.2.0
-**Last Updated**: 2026-05-24 (post-modernization, post-load-test, post-Redis-cache + pub/sub + Phase-9.4-hardening)
+**Last Updated**: 2026-08-20 (post-modernization, post-load-test, post-Redis-cache + pub/sub + Phase-9.4-hardening; IP-only rate limiting + pool-saturation 503 + prod/docker admin fail-closed)
 **Status**: Production-Ready Architecture (load tested at 1,000 rules single-container 2026-05-10; 3-replica + Redis-kill failure mode 2026-05-24 — see [39-load-test-findings.md](39-load-test-findings.md))
 
 ---
@@ -226,7 +226,7 @@ class RuleExecutionRequest {
   - 404: Rule not found
   - 429: Rate limit exceeded
   - 500: Internal errors, rule execution failures
-  - 503: Service unavailable (circuit breaker open)
+  - 503: Service unavailable (circuit breaker open, OR rule-execution thread pool saturated)
 
 #### Filters (4 total — see [`api/filter/`](../src/main/java/com/company/drools/api/filter/))
 
@@ -246,7 +246,7 @@ class RuleExecutionRequest {
 
 **Note on log sanitization**: `LogSanitizer` is a utility class in [`com.company.drools.common`](../src/main/java/com/company/drools/common/LogSanitizer.java), NOT a filter. It's called explicitly by controllers/services before logging request/response payloads.
 
-**Note on request timeout**: rule-execution timeout is enforced inside `RuleExecutor` via `CompletableFuture.get(30s)` + `future.cancel(true)`, not a separate filter.
+**Note on request timeout**: rule-execution timeout is enforced inside `RuleExecutor` via `CompletableFuture.get(30s)`; on timeout it calls `KieSession.halt()` (via a shared `AtomicReference<KieSession>`) to cooperatively stop the running `fireAllRules`, then `future.cancel(true)`, and throws `TimeoutException` → HTTP 408. It is not a separate filter. Separately, if the rule-execution pool is saturated the `AbortPolicy` raises `RejectedExecutionException` → `ServiceUnavailableException` → HTTP 503.
 
 ---
 
@@ -349,7 +349,7 @@ KieBase (Executable Rule Set)
 - Successful compilation: Returns KieContainer ready for execution
 
 **Caching**:
-- Compiled KieBase objects cached in DroolsEngineService
+- All compiled rules held in a single long-lived `KieContainer` in DroolsEngineService (updated in place via `KieContainer.updateToVersion(ReleaseId)`)
 - Avoids re-compilation on every request
 - Cache invalidation on rule refresh
 
@@ -539,8 +539,8 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
 **Purpose**: Cache expensive compiled rule objects (not rule text)
 
 **Storage**:
-- Stored in `DroolsEngineService` as `Map<String, KieBase>`
-- In-memory only (not serializable to Redis)
+- Held in `DroolsEngineService` as a single long-lived `KieContainer` (all rules compiled into one KieBase; no per-rule `Map`)
+- In-memory only (Redis caches raw DRL text, not compiled state)
 
 **Lifecycle**:
 - Created on first rule load
@@ -592,7 +592,7 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
    - kieSession.fireAllRules(maxRuleFirings = 10000)  // cap prevents runaway loops
    - Extract results from modified data Map
    - Dispose session
-   - future.get(timeoutSeconds, SECONDS); on timeout: future.cancel(true)
+   - future.get(timeoutSeconds, SECONDS); on timeout: KieSession.halt() + future.cancel(true) → HTTP 408
         ↓
 6. METRICS & LOGGING
    - Record execution time on RuleMetadata (incremental averaging)
@@ -726,9 +726,9 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
 └─────────────────────────────────────────────────────────────┘
                           ↓ Caching
 ┌─────────────────────────────────────────────────────────────┐
-│                    COMPILED CACHE                            │
-│  Map<String, KieBase> compiledRules                          │
-│  - In-memory only                                            │
+│                 COMPILED RULE STATE                          │
+│  Single long-lived KieContainer (updateToVersion swap)       │
+│  - All rules in one KieBase; in-memory only                  │
 │  - Fast execution (1-10ms)                                   │
 └─────────────────────────────────────────────────────────────┘
                           ↓ Request arrives
@@ -888,7 +888,9 @@ A refresh on instance A (`POST /admin/refresh-rules`) (1) deletes A's Redis keys
 │  - Max threads: 50                                           │
 │  - Queue size: 100                                           │
 │  - Keep-alive: 60s                                           │
-│  - Rejection policy: CallerRunsPolicy                        │
+│  - Rejection policy: AbortPolicy → RejectedExecution →       │
+│      ServiceUnavailableException → HTTP 503 (sheds load;     │
+│      does NOT run the rule on the Tomcat thread)             │
 │  Purpose: Isolate rule execution from request threads        │
 └─────────────────────────────────────────────────────────────┘
                           ↓ Parallel
@@ -1042,8 +1044,8 @@ Internal dependencies. **What breaks if X fails?**
 | Redis pub/sub | Cross-instance refresh coherence | Local refresh still works; other instances stay on old compiled rules until their own refresh or TTL expiry |
 | AWS S3 | Cold rule loads, refresh | Already-loaded rules (served from `kieContainer`, no cache hit needed) |
 | KieContainer module cleanup | Memory leak risk | Logged; `KieRepository.removeKieModule` is best-effort after swap |
-| `ADMIN_API_KEY` not set | Admin auth (disabled — warning logged) | Everything else; admin endpoints become open |
-| Single thread pool exhausted | New requests queued or rejected (CallerRunsPolicy) | Existing requests; ops endpoints |
+| `ADMIN_API_KEY` not set | Admin auth: open + WARN in local/dev; **hard startup failure** in prod/docker | Everything else; admin endpoints become open (local/dev only) |
+| Rule-execution thread pool exhausted | New rule executions rejected with HTTP 503 (AbortPolicy → ServiceUnavailableException) | Existing requests; ops endpoints |
 
 ---
 
@@ -1069,24 +1071,26 @@ Internal dependencies. **What breaks if X fails?**
 ┌─────────────────────────────────────────────────────────────┐
 │  LAYER 2: ADMIN AUTHENTICATION                               │
 │  AdminAuthFilter @Order(0). Path match: uri.startsWith       │
-│  ("/admin/"). Header: X-Admin-API-Key. When ADMIN_API_KEY    │
-│  env var is empty/null, **auth is SKIPPED** (warning logged  │
-│  at startup). 401 + JSON error on failure.                   │
-│  Source: AdminAuthFilter.java:36-71                          │
+│  ("/admin/"). Header: X-Admin-API-Key (constant-time cmp).   │
+│  When ADMIN_API_KEY is empty/null: local/dev SKIP auth       │
+│  (startup WARN); prod/docker FAIL TO START (hard error).     │
+│  401 + JSON error on failure.                                │
+│  Source: AdminAuthFilter.java                               │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
 │  LAYER 3: RATE LIMITING                                      │
 │  RateLimitingFilter @Order(1). Per-client (NOT global).      │
 │  Defaults: 1000/min, 10000/hr, burst 100, max-clients 10000. │
-│  Client identification — multi-tier (priority order):        │
-│    1. X-API-Key header     → "api-key:{key}"                 │
-│    2. Authorization Bearer → "bearer:{hash}"                 │
-│    3. X-Client-Id header   → "client-id:{id}"                │
-│    4. request.getRemoteAddr() → "ip:{addr}"  (FALLBACK)      │
-│  X-Forwarded-For is **explicitly ignored** (spoofable).      │
+│  Client identification — SOURCE IP ONLY:                     │
+│    request.getRemoteAddr() → "ip:{addr}"                     │
+│  Application headers (X-API-Key, Authorization, X-Client-Id) │
+│    are NOT used (keying on them would defeat the limiter).   │
+│  X-Forwarded-For ignored unless trust-proxy=true; then the   │
+│    left-most XFF entry is the client IP.                     │
+│  At max-clients: LRU-evict oldest bucket (NOT reject).       │
 │  /admin/* paths are **exempt** from rate limiting.           │
-│  Source: RateLimitingFilter.java:65-94                       │
+│  Source: RateLimitingFilter.java                            │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -1096,7 +1100,7 @@ Internal dependencies. **What breaks if X fails?**
 │    DROOLS_VALIDATION_REQUEST_MAX_SIZE_BYTES                  │
 │  - Wraps chunked-transfer streams with SizeLimitedInputStream│
 │    to prevent bypass via chunked encoding                    │
-│  - 30s rule execution timeout; future.cancel(true) on fire   │
+│  - 30s exec timeout: halt() + cancel(true) -> HTTP 408       │
 │  - maxRuleFirings = 10000 cap (RuleExecutor.java:22)         │
 │  Source: RequestSizeValidationFilter.java                    │
 └─────────────────────────────────────────────────────────────┘
@@ -1196,28 +1200,28 @@ public @interface ValidRuleData { ... }
 
 **Algorithm**: In-memory bucket per client; minute and hour windows.
 
-**Client identification — multi-tier** (priority order, [RateLimitingFilter.java:69-94](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java#L69-L94) `getClientIdentifier()`):
+**Client identification — source IP only** ([RateLimitingFilter.java](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java) `getClientIdentifier()`):
 
 ```
-Header          Format                       Example
-─────────────── ──────────────────────────── ────────────────────
-X-API-Key       api-key:{value}              api-key:abc123
-Authorization:  bearer:{sha256(token)[0:8]}  bearer:9f4a2b71
-  Bearer
-X-Client-Id     client-id:{value}            client-id:partner-A
-(none)          ip:{getRemoteAddr()}         ip:203.0.113.42
-                                             ↑ FALLBACK only
+Config                         Bucket key                    Example
+────────────────────────────── ───────────────────────────── ──────────────────
+default (trust-proxy=false)    ip:{getRemoteAddr()}          ip:203.0.113.42
+trust-proxy=true + XFF present  ip:{left-most X-Forwarded-For} ip:198.51.100.7
+trust-proxy=true + no XFF       ip:{getRemoteAddr()}          ip:203.0.113.42
 ```
 
-`X-Forwarded-For` is **explicitly ignored** because it is spoofable from the client side. If the service runs behind a trusted reverse proxy, the proxy must inject `X-API-Key` or `X-Client-Id` based on validated identity.
+Application-level headers (`X-API-Key`, `Authorization`, `X-Client-Id`) are **not** read for bucketing. They are unauthenticated on the public API — keying on them would let a caller pick a fresh bucket per request (unlimited throughput) or churn the client map to evict real users (finding P2).
+
+`X-Forwarded-For` is ignored by default because it is spoofable from the client side. Only set `trust-proxy=true` (env `DROOLS_RATE_LIMITING_TRUST_PROXY`) when the service sits behind a trusted proxy/LB that **overwrites** inbound `X-Forwarded-For` with the real client IP.
 
 **Defaults** (`application.yml`, overridable per profile):
 - `DROOLS_RATE_LIMITING_ENABLED=true`
 - `DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE=1000`
 - `DROOLS_RATE_LIMITING_REQUESTS_PER_HOUR=10000`
 - `DROOLS_RATE_LIMITING_BURST_SIZE=100`
-- `DROOLS_RATE_LIMITING_MAX_CLIENTS=10000` (memory protection — when full, new clients use a shared bucket)
+- `DROOLS_RATE_LIMITING_MAX_CLIENTS=10000` (memory protection — when full, the least-recently-used bucket is evicted to admit the new client; new clients are NOT rejected)
 - `DROOLS_RATE_LIMITING_CLEANUP_INTERVAL=5` (minutes)
+- `DROOLS_RATE_LIMITING_TRUST_PROXY=false` (when true, key on the left-most `X-Forwarded-For` entry)
 
 **Admin exemption**: `/admin/*` paths bypass rate limiting entirely — verified by [RateLimitingFilterTest:120-127](../src/test/java/com/company/drools/api/filter/RateLimitingFilterTest.java#L120-L127).
 
@@ -1463,7 +1467,7 @@ Response:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    STAGE 1: BUILD                            │
-│  Base: maven:3.9-eclipse-temurin-25                          │
+│  Base: maven:3.9-eclipse-temurin-25 (@sha256 pinned)         │
 │  - Copy pom.xml and source code                              │
 │  - Run: mvn clean package -DskipTests                        │
 │  - Output: target/drools-rule-engine.jar (~50MB)             │
@@ -1471,11 +1475,11 @@ Response:
                           ↓ Copy JAR only
 ┌─────────────────────────────────────────────────────────────┐
 │                    STAGE 2: RUNTIME                          │
-│  Base: amazoncorretto:25-alpine (~180MB)                     │
+│  Base: amazoncorretto:25-alpine (~180MB) — @sha256 pinned    │
 │  - Create non-root user (drools:1000)                        │
 │  - Copy JAR from build stage                                 │
 │  - Expose ports 8080, 8081                                   │
-│  - Health check: curl /admin/health                          │
+│  - Health check: /admin/health with X-Admin-API-Key header   │
 │  - Entrypoint: java -jar app.jar                             │
 │  Final Size: ~347MB                                          │
 └─────────────────────────────────────────────────────────────┘
@@ -1492,8 +1496,8 @@ Response:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    LOCALSTACK (S3 Emulation)                 │
-│  Image: localstack/localstack:latest                         │
-│  Ports: 4566 (AWS API)                                       │
+│  Image: localstack/localstack:2.3                            │
+│  Ports: 127.0.0.1:4566 (AWS API, host-loopback only)         │
 │  Services: S3                                                │
 │  Volumes: ./localstack-data                                  │
 └─────────────────────────────────────────────────────────────┘
@@ -1604,7 +1608,7 @@ Response:
 | **AWS SDK** | AWS SDK v2 | S3 client, async operations |
 | **Redis Client** | Lettuce | Async Redis client (Spring Data Redis) |
 | **Validation** | Jakarta Validation | Input validation framework |
-| **Testing** | JUnit 5 | 548 unit tests + 14 Testcontainers integration tests |
+| **Testing** | JUnit 5 | 536 unit tests + 14 Testcontainers integration tests |
 | **Mocking** | Mockito | Used throughout `*Test.java` |
 | **Performance** | JMeter | Load test orchestrator at `scripts/run-load-test.sh` (Phases 0–9 — see [39-load-test-findings.md](39-load-test-findings.md)) |
 

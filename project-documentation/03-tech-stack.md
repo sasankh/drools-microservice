@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, architects |
 | **Purpose** | Every technology used, with version, purpose, and rationale. The single source of truth for "what version of X are we on?" |
-| **Last verified against** | [pom.xml](../pom.xml), [Dockerfile](../Dockerfile) on 2026-05-24 |
+| **Last verified against** | [pom.xml](../pom.xml), [Dockerfile](../Dockerfile) on 2026-08-20 |
 | **Related docs** | [02-project-structure.md](02-project-structure.md), [27-development-setup.md](27-development-setup.md), [36-architecture-decision-records.md](36-architecture-decision-records.md) |
 
 ---
@@ -64,6 +64,8 @@ Local setup helper: [`set-java-env.sh`](../set-java-env.sh) (macOS); detailed gu
 - Alpine base = ~180 MB; the multi-stage build produces a final image of ~347 MB.
 - Amazon Corretto is AWS's hardened JDK distribution; receives security patches in lockstep with OpenJDK and is well-tested in AWS environments where this service is deployed.
 - Alpine's musl libc is acceptable here because we have no native dependencies that conflict with musl. (The JDK bundles its own libraries.)
+
+**Both base images are pinned by `@sha256:` digest** in the [Dockerfile](../Dockerfile) (e.g. `amazoncorretto:25-alpine-jdk@sha256:…`, `maven:3.9-eclipse-temurin-25@sha256:…`) so builds are reproducible and immune to a mutated upstream tag.
 
 The Maven build stage uses `maven:3.9-eclipse-temurin-25` (separate JDK distribution) — the build-time JDK doesn't need to match the runtime JDK as long as both are 25. See [Dockerfile](../Dockerfile) for the multi-stage layout.
 
@@ -305,6 +307,6 @@ If you're considering version bumps:
 
 - **Versions**: [`pom.xml`](../pom.xml) lines 16–28 (`<properties>`), then per-dependency overrides
 - **Java 25 enforcement**: [`pom.xml`](../pom.xml) Maven Enforcer Plugin section
-- **Container Java**: [`Dockerfile`](../Dockerfile) `FROM amazoncorretto:25-alpine-jdk`
-- **Build Java**: [`Dockerfile`](../Dockerfile) `FROM maven:3.9-eclipse-temurin-25 AS build`
+- **Container Java**: [`Dockerfile`](../Dockerfile) `FROM amazoncorretto:25-alpine-jdk@sha256:…` (digest-pinned)
+- **Build Java**: [`Dockerfile`](../Dockerfile) `FROM maven:3.9-eclipse-temurin-25@sha256:… AS build` (digest-pinned)
 - **JVM tuning**: `Dockerfile` `ENV JAVA_OPTS=...` and `docker-compose.yml` env override

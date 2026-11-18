@@ -11,14 +11,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -47,7 +43,7 @@ class RateLimitingFilterTest extends BaseUnitTest {
     setField(config, "maxClients", 10000);
 
     rateLimitingService = new RateLimitingConfig.InMemoryRateLimitingService(config);
-    filter = new RateLimitingFilter(rateLimitingService, new ObjectMapper());
+    filter = new RateLimitingFilter(rateLimitingService, new ObjectMapper(), false);
   }
 
   private void setField(Object target, String fieldName, Object value) {
@@ -136,74 +132,20 @@ class RateLimitingFilterTest extends BaseUnitTest {
   class ClientIdentification {
 
     @Test
-    @DisplayName("identifies client by X-API-Key header")
-    void testFilter_APIKeyHeader_IdentifiesClient() throws Exception {
-      when(request.getRequestURI()).thenReturn("/execute-rule");
-      when(request.getHeader("X-API-Key")).thenReturn("test-api-key");
-
-      StringWriter stringWriter = new StringWriter();
-      PrintWriter printWriter = new PrintWriter(stringWriter);
-      when(response.getWriter()).thenReturn(printWriter);
-
-      // Exhaust limit for API key client
-      for (int i = 0; i < 6; i++) {
-        filter.doFilter(request, response, filterChain);
-      }
-
-      // Same IP but no API key should still be allowed (different client)
-      HttpServletRequest ipRequest = org.mockito.Mockito.mock(HttpServletRequest.class);
-      HttpServletResponse ipResponse = org.mockito.Mockito.mock(HttpServletResponse.class);
-      when(ipRequest.getRequestURI()).thenReturn("/execute-rule");
-      when(ipRequest.getRemoteAddr()).thenReturn("192.168.1.1");
-
-      filter.doFilter(ipRequest, ipResponse, filterChain);
-
-      verify(filterChain).doFilter(ipRequest, ipResponse);
-    }
-
-    @Test
-    @DisplayName("identifies client by Bearer token")
-    void testFilter_BearerToken_IdentifiesClient() throws Exception {
-      when(request.getRequestURI()).thenReturn("/execute-rule");
-      when(request.getHeader("Authorization")).thenReturn("Bearer eyJhbGciOiJIUzI1NiJ9.test");
-
-      StringWriter stringWriter = new StringWriter();
-      PrintWriter printWriter = new PrintWriter(stringWriter);
-      when(response.getWriter()).thenReturn(printWriter);
-
-      // Exhaust limit for bearer token client
-      for (int i = 0; i < 6; i++) {
-        filter.doFilter(request, response, filterChain);
-      }
-
-      // Different bearer token should be allowed (different client)
-      HttpServletRequest otherRequest = org.mockito.Mockito.mock(HttpServletRequest.class);
-      HttpServletResponse otherResponse = org.mockito.Mockito.mock(HttpServletResponse.class);
-      when(otherRequest.getRequestURI()).thenReturn("/execute-rule");
-      when(otherRequest.getHeader("Authorization")).thenReturn("Bearer differentToken123");
-
-      filter.doFilter(otherRequest, otherResponse, filterChain);
-
-      verify(filterChain).doFilter(otherRequest, otherResponse);
-    }
-
-    @Test
-    @DisplayName("falls back to remote address when no auth headers present")
-    void testFilter_IPAddress_FallbackIdentifier() throws Exception {
+    @DisplayName("identifies clients by remote address")
+    void testFilter_RemoteAddr_IdentifiesClient() throws Exception {
       when(request.getRequestURI()).thenReturn("/execute-rule");
       when(request.getRemoteAddr()).thenReturn("203.0.113.50");
 
-      // No auth headers set, should fall back to IP
       filter.doFilter(request, response, filterChain);
 
       verify(filterChain).doFilter(request, response);
     }
 
     @Test
-    @DisplayName("ignores X-Forwarded-For header to prevent spoofing")
+    @DisplayName("ignores X-Forwarded-For by default to prevent spoofing")
     void testFilter_XForwardedFor_Ignored() throws Exception {
-      // Both requests come from the same remote address but different X-Forwarded-For
-      // They should share the same rate limit bucket (remote addr)
+      // Same remote address, spoofed X-Forwarded-For — must share one bucket (remote addr).
       when(request.getRequestURI()).thenReturn("/execute-rule");
       when(request.getRemoteAddr()).thenReturn("10.0.0.1");
       when(request.getHeader("X-Forwarded-For")).thenReturn("198.51.100.1");
@@ -212,12 +154,11 @@ class RateLimitingFilterTest extends BaseUnitTest {
       PrintWriter printWriter = new PrintWriter(stringWriter);
       when(response.getWriter()).thenReturn(printWriter);
 
-      // Exhaust limit — should use remote addr (10.0.0.1), not X-Forwarded-For
+      // Keyed on remote addr (10.0.0.1), not the spoofable X-Forwarded-For.
       for (int i = 0; i < 6; i++) {
         filter.doFilter(request, response, filterChain);
       }
 
-      // Should be rate-limited based on remote addr
       verify(response).setStatus(429);
     }
   }
@@ -269,49 +210,51 @@ class RateLimitingFilterTest extends BaseUnitTest {
   class ClientIdentificationEdgeCases {
 
     @Test
-    @DisplayName("identifies client by X-Client-Id header")
-    void testFilter_XClientIdHeader_IdentifiesClient() throws Exception {
+    @DisplayName("spoofed app-level headers cannot escape the per-IP bucket (P2)")
+    void testFilter_SpoofedHeaders_ShareBucketByIp() throws Exception {
       when(request.getRequestURI()).thenReturn("/execute-rule");
-      when(request.getHeader("X-Client-Id")).thenReturn("my-service");
+      when(request.getRemoteAddr()).thenReturn("10.0.0.1");
+      // A fresh X-API-Key / X-Client-Id per call must NOT mint a new bucket.
+      when(request.getHeader("X-API-Key")).thenReturn("rotating-key");
+      when(request.getHeader("X-Client-Id")).thenReturn("rotating-id");
 
       StringWriter stringWriter = new StringWriter();
       when(response.getWriter()).thenReturn(new PrintWriter(stringWriter));
 
-      // Exhaust limit for X-Client-Id client
       for (int i = 0; i < 6; i++) {
         filter.doFilter(request, response, filterChain);
       }
 
-      // Different client ID via IP should still be allowed
-      HttpServletRequest otherRequest = org.mockito.Mockito.mock(HttpServletRequest.class);
-      HttpServletResponse otherResponse = org.mockito.Mockito.mock(HttpServletResponse.class);
-      when(otherRequest.getRequestURI()).thenReturn("/execute-rule");
-      when(otherRequest.getRemoteAddr()).thenReturn("10.0.0.5");
-
-      filter.doFilter(otherRequest, otherResponse, filterChain);
-
-      verify(filterChain).doFilter(otherRequest, otherResponse);
+      // Still limited by the remote address — bypass closed.
+      verify(response).setStatus(429);
     }
 
-    static Stream<Arguments> fallthroughHeaders() {
-      return Stream.of(
-          Arguments.of("X-API-Key", "", "10.0.0.99"),
-          Arguments.of("Authorization", "Basic dXNlcjpwYXNz", "10.0.0.88"),
-          Arguments.of("X-Client-Id", "", "10.0.0.77"),
-          Arguments.of("X-Forwarded-For", "198.51.100.5", "10.0.0.1"));
-    }
-
-    @ParameterizedTest(name = "falls through with header [{0}]")
-    @MethodSource("fallthroughHeaders")
-    void testFilter_HeaderVariants_FallsThrough(
-        String headerName, String headerValue, String remoteAddr) throws Exception {
+    @Test
+    @DisplayName("trust-proxy=true keys on the left-most X-Forwarded-For entry")
+    void testFilter_TrustProxy_UsesXForwardedFor() throws Exception {
+      RateLimitingFilter proxyFilter =
+          new RateLimitingFilter(rateLimitingService, new ObjectMapper(), true);
       when(request.getRequestURI()).thenReturn("/execute-rule");
-      when(request.getHeader(headerName)).thenReturn(headerValue);
-      when(request.getRemoteAddr()).thenReturn(remoteAddr);
+      when(request.getRemoteAddr()).thenReturn("10.0.0.1");
+      when(request.getHeader("X-Forwarded-For")).thenReturn("203.0.113.9, 10.0.0.1");
 
-      filter.doFilter(request, response, filterChain);
+      StringWriter stringWriter = new StringWriter();
+      when(response.getWriter()).thenReturn(new PrintWriter(stringWriter));
 
-      verify(filterChain).doFilter(request, response);
+      // Exhaust the limit for the XFF client 203.0.113.9.
+      for (int i = 0; i < 6; i++) {
+        proxyFilter.doFilter(request, response, filterChain);
+      }
+      verify(response).setStatus(429);
+
+      // A different XFF client from the same remote address is a distinct bucket → allowed.
+      HttpServletRequest other = org.mockito.Mockito.mock(HttpServletRequest.class);
+      HttpServletResponse otherResp = org.mockito.Mockito.mock(HttpServletResponse.class);
+      when(other.getRequestURI()).thenReturn("/execute-rule");
+      when(other.getRemoteAddr()).thenReturn("10.0.0.1");
+      when(other.getHeader("X-Forwarded-For")).thenReturn("203.0.113.99");
+      proxyFilter.doFilter(other, otherResp, filterChain);
+      verify(filterChain).doFilter(other, otherResp);
     }
   }
 

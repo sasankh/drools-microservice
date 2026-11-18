@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | All readers — developers, architects, operators, external integrators, AI agents |
 | **Purpose** | Answer "what is this project, why does it exist, and what does it do?" in five minutes |
-| **Last verified against code** | 2026-05-24 (post-modernization, post-load-test, post-Redis-cache-+-pub/sub layer, post-Phase-9.4-hardening) |
+| **Last verified against code** | 2026-08-20 (post-modernization, post-load-test, post-Redis-cache-+-pub/sub layer, post-Phase-9.4-hardening; IP-only rate limiting + prod/docker admin fail-closed) |
 | **Related docs** | [02-project-structure.md](02-project-structure.md), [03-tech-stack.md](03-tech-stack.md), [04-architecture.md](04-architecture.md), [10-api-reference.md](10-api-reference.md) |
 
 ---
@@ -33,8 +33,8 @@ This service externalizes business rules into a dedicated execution layer. Engin
 | **Load rules from S3** | At startup or on `POST /admin/refresh-rules`, all `.drl` files under the bucket are fetched, sandbox-checked, and compiled. | [`S3RuleStorage`](../src/main/java/com/company/drools/storage/S3RuleStorage.java), [`RuleCompiler`](../src/main/java/com/company/drools/core/engine/RuleCompiler.java) |
 | **Sandbox dangerous DRL** | Every rule is scanned by `DrlSanitizer` before compilation. Blocks `eval()`, dangerous classes (Runtime, ClassLoader, Thread, etc.), and unauthorized imports. | [`DrlSanitizer`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java); see [16-drl-sandboxing.md](16-drl-sandboxing.md) |
 | **Cache compiled rules** | Compiled `KieBase` lives in a single long-lived `KieContainer` updated in place via `KieContainer.updateToVersion(ReleaseId)` on refresh (Drools 10 incremental-update pattern). When `REDIS_ENABLED=true`, `RedisCachedRuleStorage` decorates the base storage with a read-through cache of DRL text; `RuleRefreshPublisher`/`Subscriber` keeps multi-task ECS deployments in sync via pub/sub on `drools:rule:events`. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20). | [`RedisCachedRuleStorage`](../src/main/java/com/company/drools/storage/RedisCachedRuleStorage.java) |
-| **Authenticate admin endpoints** | When `ADMIN_API_KEY` is set, `/admin/*` requires `X-Admin-API-Key` header. Empty key = open in dev (warning logged). | [`AdminAuthFilter`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java); see [15-admin-authentication.md](15-admin-authentication.md) |
-| **Rate limit clients** | Per-client multi-tier identification (X-API-Key → Bearer → X-Client-Id → IP). 1000 req/min, 10000 req/hour. Admin endpoints exempt. | [`RateLimitingFilter`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java); see [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) |
+| **Authenticate admin endpoints** | When an admin key is set, `/admin/*` requires the `X-Admin-API-Key` header (constant-time compared). Blank key = open with a WARN in `local`/`dev`, but a **hard startup failure** in `prod`/`docker`. | [`AdminAuthFilter`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java); see [15-admin-authentication.md](15-admin-authentication.md) |
+| **Rate limit clients** | Per-client limit keyed on **source IP only** (`getRemoteAddr()`, or left-most `X-Forwarded-For` when `trust-proxy=true`). 1000 req/min, 10000 req/hour. Admin endpoints exempt. | [`RateLimitingFilter`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java); see [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) |
 | **Set security headers** | 7 headers on every response (CSP, HSTS, X-Frame-Options, etc.). | [`SecurityHeadersFilter`](../src/main/java/com/company/drools/api/filter/SecurityHeadersFilter.java); see [14-security-architecture.md](14-security-architecture.md) |
 | **Sanitize logs** | Sensitive fields (credit card, SSN, tokens, API keys) masked before log emission. | [`LogSanitizer`](../src/main/java/com/company/drools/common/LogSanitizer.java) |
 | **Health, metrics, memory diagnostics** | `/admin/health`, `/admin/memory/info`, `/admin/thread-pools`, `/admin/info`, `/actuator/*`. Micrometer-instrumented. | [`AdminController`](../src/main/java/com/company/drools/api/controller/AdminController.java), [`MemoryController`](../src/main/java/com/company/drools/api/controller/MemoryController.java) |
@@ -57,8 +57,8 @@ This service externalizes business rules into a dedicated execution layer. Engin
 
 The service is **production-ready** as of 2026-02-26:
 
-- **39 of 42 security findings closed** across 9 security phases.
-- **548 unit tests** across 46 test files (down from 597 after deleting the dead `RuleCache` layer on 2026-05-20, then back up with `SCAN`-CB-wrap unit tests on 2026-05-24). 14 Testcontainers integration tests, surefire-excluded on macOS-DinD (run on Linux CI).
+- **Most security findings addressed** across 9 phases; 2 tracked-open — **B1** (the DRL sandbox is not a sound boundary — deferred, see [`SECURITY.md`](../SECURITY.md)) and **#28** (Redis auth/TLS, enforced on the prod profile).
+- **536 unit tests** across 48 test files. 14 Testcontainers integration tests, surefire-excluded on macOS-DinD (run on Linux CI).
 - **Docker integration test plan**: 30 checks across 9 steps, all passing as of last run.
 - **Memory leak fixed** (2026-02-19, hardened 2026-05-10): KieContainer lifecycle now uses Drools 10's `updateToVersion` + explicit `KieRepository.removeKieModule(oldReleaseId)` cleanup. Verified leak-free under sustained refresh load (1 MB drift / 98 refreshes — see [39-load-test-findings.md](39-load-test-findings.md)).
 - **Java 25 enforced** at build time via Maven Enforcer Plugin (bumped from Java 17 on 2026-05-09 — see [ADR-013](36-architecture-decision-records.md#adr-013-java-17--25--spring-boot-modernization-2026-05-09)).

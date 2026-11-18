@@ -4,6 +4,8 @@ import com.company.drools.api.dto.RuleExecutionRequest;
 import com.company.drools.api.dto.RuleExecutionResponse;
 import com.company.drools.api.exception.RuleExecutionException;
 import com.company.drools.api.exception.RuleNotFoundException;
+import com.company.drools.api.exception.ServiceUnavailableException;
+import com.company.drools.api.exception.TimeoutException;
 import com.company.drools.common.LogSanitizer;
 import com.company.drools.core.engine.DroolsEngineService;
 import com.company.drools.core.engine.RuleExecutor;
@@ -119,6 +121,25 @@ public class RuleExecutionController {
               ENDPOINT_EXECUTE_RULE,
               TAG_ERROR_TYPE,
               "execution_failed")
+          .increment();
+      sample.stop(
+          Timer.builder(METRIC_API_RESPONSE_TIME)
+              .tag(TAG_ENDPOINT, ENDPOINT_EXECUTE_RULE)
+              .tag(TAG_STATUS, STATUS_ERROR)
+              .register(meterRegistry));
+      throw e;
+    } catch (TimeoutException | ServiceUnavailableException e) {
+      // Let execution timeout (→408) and load-shedding (→503) surface with their correct HTTP
+      // status
+      // via GlobalExceptionHandler, instead of being wrapped as a generic 400 RULE_EXECUTION_ERROR
+      // by the catch-all below. (P3)
+      meterRegistry
+          .counter(
+              METRIC_API_ERRORS,
+              TAG_ENDPOINT,
+              ENDPOINT_EXECUTE_RULE,
+              TAG_ERROR_TYPE,
+              e instanceof TimeoutException ? "timeout" : "unavailable")
           .increment();
       sample.stop(
           Timer.builder(METRIC_API_RESPONSE_TIME)

@@ -87,7 +87,7 @@ wait_for_health() {
 }
 
 mem_info() {
-  curl -s "$APP_URL/admin/memory/info" 2>/dev/null | \
+  curl -s -H "X-Admin-API-Key: $ADMIN_KEY" "$APP_URL/admin/memory/info" 2>/dev/null | \
     python3 -c "import sys,json; d=json.load(sys.stdin); \
       print(f\"{d['heap']['usedMB']}MB / {d['heap']['maxMB']}MB ({d['heap']['usagePercent']}%)\")" 2>/dev/null || echo "?"
 }
@@ -169,7 +169,7 @@ smoke_test() {
     -H "Content-Type: application/json" \
     -d "{\"rule_id\":\"$rule_id\",\"data\":$payload}" 2>/dev/null)
   ERR=$(echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error') or 'none')" 2>/dev/null || echo "?")
-  if [ "$HTTP" = "200" ] && [ "$ERR" = "None" ]; then
+  if [ "$HTTP" = "200" ] && [ "$ERR" = "none" ]; then
     pass "$label (HTTP 200, no error)"
   else
     fail "$label — HTTP=$HTTP error=$ERR"
@@ -212,7 +212,7 @@ MEM_READINGS=()
 for i in 1 2 3 4 5; do
   curl -s -X POST "$APP_URL/admin/refresh-rules" -H "X-Admin-API-Key: $ADMIN_KEY" > /dev/null 2>&1
   sleep 2
-  USED=$(curl -s "$APP_URL/admin/memory/info" 2>/dev/null | \
+  USED=$(curl -s -H "X-Admin-API-Key: $ADMIN_KEY" "$APP_URL/admin/memory/info" 2>/dev/null | \
     python3 -c "import sys,json; d=json.load(sys.stdin); print(d['heap']['usedMB'])" 2>/dev/null || echo "0")
   MEM_READINGS+=("$USED")
   info "Reload $i: heap=${USED}MB"
@@ -233,7 +233,7 @@ fi
 info "Triggering GC..."
 curl -s -X POST "$APP_URL/admin/memory/gc" -H "X-Admin-API-Key: $ADMIN_KEY" > /dev/null 2>&1
 sleep 4
-POST_GC=$(curl -s "$APP_URL/admin/memory/info" 2>/dev/null | \
+POST_GC=$(curl -s -H "X-Admin-API-Key: $ADMIN_KEY" "$APP_URL/admin/memory/info" 2>/dev/null | \
   python3 -c "import sys,json; d=json.load(sys.stdin); print(d['heap']['usedMB'])" 2>/dev/null || echo "999")
 
 if [ "$POST_GC" -lt 150 ] 2>/dev/null; then
@@ -257,6 +257,10 @@ PAYLOADS=(
 )
 
 TMPDIR_LT=$(mktemp -d)
+# Pre-create the success/error counter files so `wc -l < …` never hits a missing
+# file under `set -euo pipefail` (a zero-error window would otherwise abort the run).
+: > "$TMPDIR_LT/s"
+: > "$TMPDIR_LT/e"
 LT_START=$(date +%s)
 LT_END=$((LT_START + LOAD_DURATION))
 LT_RELOAD_DONE=0
@@ -311,7 +315,7 @@ LT_ERR_CODES=$(sort "$TMPDIR_LT/e" 2>/dev/null | uniq -c | sort -rn | head -3 | 
 LT_FINAL_MEM=$(mem_info)
 rm -rf "$TMPDIR_LT"
 
-LT_RULES=$(curl -s "$APP_URL/admin/health" 2>/dev/null | \
+LT_RULES=$(curl -s -H "X-Admin-API-Key: $ADMIN_KEY" "$APP_URL/admin/health" 2>/dev/null | \
   python3 -c "import sys,json; d=json.load(sys.stdin); \
     print(d['components']['drools']['details']['loaded_rules'])" 2>/dev/null || echo "?")
 

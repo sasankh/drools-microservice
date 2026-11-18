@@ -42,7 +42,7 @@ info:
     - **Dependency Sweep Closed**: All Maven Central libraries on current latest stable
 
     ## Previous Updates (2026-02-26)
-    - **Security Hardening**: 39/42 security fixes across 9 phases
+    - **Security Hardening**: most findings addressed across 9 phases; 2 tracked-open (B1 DRL-sandbox RCE — deferred; #28 Redis TLS/auth — enforced on prod)
     - **Admin Authentication**: API key protection for admin endpoints
     - **DRL Sandboxing**: Rule content scanning prevents arbitrary code execution
     - **Security Headers**: CSP, HSTS, X-Frame-Options, X-Content-Type-Options on all responses

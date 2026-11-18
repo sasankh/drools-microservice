@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Everyone — the doc you reach for when you have one specific question |
 | **Purpose** | Quick answers to the questions most people actually ask, with links to full coverage |
-| **Last verified** | 2026-05-24 against running stack |
+| **Last verified** | 2026-08-20 against running stack |
 
 ---
 
@@ -30,7 +30,8 @@
 ```bash
 docker compose up -d --build
 # wait ~2-5 minutes for first build
-curl http://localhost:8080/admin/health | jq '.status'
+# docker-compose sets ADMIN_API_KEY=admin-secret, so /admin/* needs the header
+curl http://localhost:8080/admin/health -H "X-Admin-API-Key: admin-secret" | jq '.status'
 # → "UP"
 ```
 
@@ -57,7 +58,7 @@ Both `pricing.discount.vip` (20% off) AND `pricing.discount.simple` (10% off) ma
 ### Can I see all loaded rules?
 
 ```bash
-curl -fsS http://localhost:8080/admin/rules | jq '.rules[].rule_id'
+curl -fsS http://localhost:8080/admin/rules -H "X-Admin-API-Key: admin-secret" | jq '.rules[].rule_id'
 ```
 
 ---
@@ -160,22 +161,18 @@ Native rule-version support is **roadmap, not implemented**. The `version` field
 
 ### How do I authenticate?
 
-- **`/execute-rule`**: no auth on the service itself. Authentication is your gateway's responsibility. The service uses rate limiting per multi-tier client identity for resource protection.
-- **`/admin/*`**: send `X-Admin-API-Key: <value>` header when `ADMIN_API_KEY` env var is set on the service. Otherwise admin endpoints are open (with a startup warning). See [15-admin-authentication.md](15-admin-authentication.md).
+- **`/execute-rule`**: no auth on the service itself. Authentication is your gateway's responsibility. The service uses rate limiting keyed on the caller's network address for resource protection.
+- **`/admin/*`**: send `X-Admin-API-Key: <value>` header when an `ADMIN_API_KEY` is configured (compared in constant time). The `prod`/`docker` profiles **fail to start** if the key is blank (fail-closed) — a running-but-open admin surface is not possible there. Only `local`/`dev` start with `/admin/*` open (logging a WARN) when the key is unset. See [15-admin-authentication.md](15-admin-authentication.md).
 
 ### How does rate limiting identify my client?
 
-Multi-tier priority:
-1. `X-API-Key` header → `api-key:{value}`
-2. `Authorization: Bearer {token}` → `bearer:{hash}`
-3. `X-Client-Id` header → `client-id:{value}`
-4. `request.getRemoteAddr()` → `ip:{addr}` (fallback)
+The limiter keys on the caller's network address **only** — `ip:{request.getRemoteAddr()}`. Application-level headers (`X-API-Key`, `Authorization`, `X-Client-Id`) are unauthenticated on the public `/execute-rule` API and are **not** read for keying (trusting them would let any caller forge a bucket).
 
-`X-Forwarded-For` is **explicitly ignored** (spoofable). See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md).
+`X-Forwarded-For` is **ignored by default** (spoofable). It is trusted — the left-most entry becomes the key — only when `drools.rate-limiting.trust-proxy=true`, which you should enable only when a trusted proxy/LB overwrites the header. See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md).
 
 ### My requests are rate-limited but my IP isn't busy. Why?
 
-If you're behind a load balancer, **everyone behind the LB shares the IP-fallback bucket**. Inject `X-API-Key` or `X-Client-Id` at the LB to differentiate clients.
+If you're behind a load balancer, **everyone behind the LB shares one IP bucket** (the LB's address). To differentiate clients by their real IP, set `drools.rate-limiting.trust-proxy=true` and have the LB set/overwrite `X-Forwarded-For` — the limiter will then key on its left-most entry. Enable this only behind a proxy you control, since the header is otherwise spoofable.
 
 ### How big can my request body be?
 
@@ -442,7 +439,7 @@ Nothing, intentionally. `LogSanitizer` masks credit cards, SSNs, tokens, API key
 
 ### Is there any default authentication?
 
-No. By default `ADMIN_API_KEY` is empty → admin endpoints are open with a startup WARN log. **Production must set the env var.** See [15-admin-authentication.md](15-admin-authentication.md).
+It depends on the profile. On `local`/`dev`, an empty `ADMIN_API_KEY` leaves `/admin/*` open with a startup WARN log (developer convenience). On `prod`/`docker` this is **not** allowed — the app **fails to start** unless `ADMIN_API_KEY` is set (fail-closed), so production is never left unauthenticated. The `docker` profile ships a value via docker-compose (`admin-secret`). See [15-admin-authentication.md](15-admin-authentication.md).
 
 ### How do I report a security issue?
 

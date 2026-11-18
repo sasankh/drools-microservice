@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Audience** | Partners, developers, operators |
-| **Purpose** | Complete behavior of the per-client rate limiter — including the multi-tier client identification that's the most surprising part of the design |
-| **Last verified against** | [`RateLimitingFilter.java`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java), [`RateLimitingConfig.java`](../src/main/java/com/company/drools/config/RateLimitingConfig.java), [`RateLimitingFilterTest.java`](../src/test/java/com/company/drools/api/filter/RateLimitingFilterTest.java) on 2026-05-24 |
+| **Purpose** | Complete behavior of the per-client rate limiter — client identity is the source IP only, which is the most misunderstood part of the design |
+| **Last verified against** | [`RateLimitingFilter.java`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java), [`RateLimitingConfig.java`](../src/main/java/com/company/drools/config/RateLimitingConfig.java), [`RateLimitingFilterTest.java`](../src/test/java/com/company/drools/api/filter/RateLimitingFilterTest.java) on 2026-08-20 |
 | **Related docs** | [09-environment-variables-reference.md](09-environment-variables-reference.md), [12-error-code-catalog.md](12-error-code-catalog.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
@@ -12,12 +12,8 @@
 ## TL;DR
 
 - **Default limits**: 1000 requests/minute, 10,000/hour, burst 100. Per client.
-- **Client is identified by header priority** (not just by IP):
-  1. `X-API-Key` → `api-key:{value}`
-  2. `Authorization: Bearer {token}` → `bearer:{hash}`
-  3. `X-Client-Id` → `client-id:{value}`
-  4. `request.getRemoteAddr()` → `ip:{addr}` (fallback only)
-- **`X-Forwarded-For` is explicitly ignored** (spoofable; would let attackers consume someone else's quota).
+- **Client is identified by source IP only** — `request.getRemoteAddr()` → `ip:{addr}`. Application-level headers (`X-API-Key`, `Authorization`, `X-Client-Id`) are **not** read for bucketing; keying on unauthenticated headers would let any caller pick a fresh bucket per request (unlimited throughput) or rotate headers to churn the client map (finding P2).
+- **`X-Forwarded-For` is ignored by default.** Only when `drools.rate-limiting.trust-proxy=true` (env `DROOLS_RATE_LIMITING_TRUST_PROXY`, default `false`) is the left-most `X-Forwarded-For` entry used as the client IP — enable this **only** behind a trusted proxy/LB that overwrites inbound `X-Forwarded-For`, otherwise it is spoofable.
 - **Admin endpoints (`/admin/*`) are exempt** from rate limiting.
 - **`/execute-rule` is what's rate-limited.** Other paths under `/api/` are also subject if they exist.
 - On limit hit: HTTP **429 Too Many Requests**, JSON body with `RATE_LIMIT_EXCEEDED` error code.
@@ -40,8 +36,8 @@ incoming request
    └── YES (paths under /execute-rule or /api/, NOT /admin/*)
        │
        ▼
-   getClientIdentifier(request)        ← line 69
-       │  (multi-tier: X-API-Key → Bearer → X-Client-Id → IP)
+   getClientIdentifier(request)
+       │  (source IP only: getRemoteAddr(), or left-most X-Forwarded-For when trust-proxy=true)
        ▼
    rateLimitingService.isAllowed(clientId)
        │
@@ -56,67 +52,63 @@ Verified by [`RateLimitingFilterTest.java`](../src/test/java/com/company/drools/
 
 ---
 
-## Client identification — the multi-tier algorithm
+## Client identification — source IP only
 
-This is the most often-misunderstood part of the design.
+This is the most often-misunderstood part of the design. **The rate limiter keys buckets on the source IP address only.** Application-level headers are never read for identity.
 
-[`RateLimitingFilter.java:69-95`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java#L69-L95):
+[`RateLimitingFilter.java`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java) `getClientIdentifier`:
 
 ```java
 private String getClientIdentifier(HttpServletRequest request) {
-  String clientId;
-
-  // 1. Check for API key header
-  clientId = request.getHeader("X-API-Key");
-  if (clientId != null && !clientId.isEmpty()) {
-    return "api-key:" + clientId;
+  // Identify the client by network address only. Application-level headers (X-API-Key,
+  // Authorization, X-Client-Id) are unauthenticated on the public /execute-rule API — keying on
+  // them let any caller pick a fresh bucket per request (unlimited throughput) or rotate headers
+  // to fill the client map and lock out real users. See finding P2.
+  if (trustProxy) {
+    String forwardedFor = request.getHeader("X-Forwarded-For");
+    if (forwardedFor != null && !forwardedFor.isBlank()) {
+      // Left-most entry is the originating client. Only trustworthy when a trusted proxy
+      // overwrites inbound X-Forwarded-For (operator's responsibility via trust-proxy=true).
+      int comma = forwardedFor.indexOf(',');
+      String first = (comma >= 0 ? forwardedFor.substring(0, comma) : forwardedFor).trim();
+      if (!first.isEmpty()) {
+        return "ip:" + first;
+      }
+    }
   }
-
-  // 2. Check for Authorization header (Bearer)
-  String authHeader = request.getHeader("Authorization");
-  if (authHeader != null && authHeader.startsWith("Bearer ")) {
-    return "bearer:" + Integer.toHexString(authHeader.hashCode());
-  }
-
-  // 3. Check for custom client ID header
-  clientId = request.getHeader("X-Client-Id");
-  if (clientId != null && !clientId.isEmpty()) {
-    return "client-id:" + clientId;
-  }
-
-  // 4. Fall back to remote address (don't trust X-Forwarded-For — it's spoofable)
   return "ip:" + request.getRemoteAddr();
 }
 ```
 
 ### What identity gets assigned to a client?
 
-| Request sends | Identity | Bucket key |
-|---|---|---|
-| `X-API-Key: abc123` | api-key | `api-key:abc123` |
-| `Authorization: Bearer eyJhbGc...` | bearer (hashed) | `bearer:9f4a2b71` (8 hex chars) |
-| `X-Client-Id: partner-A` | client-id | `client-id:partner-A` |
-| (none of the above) | IP | `ip:203.0.113.42` |
+| Deployment | Bucket key |
+|---|---|
+| Default (`trust-proxy=false`) | `ip:` + `request.getRemoteAddr()` — the actual TCP peer |
+| `trust-proxy=true`, request has `X-Forwarded-For` | `ip:` + left-most `X-Forwarded-For` entry |
+| `trust-proxy=true`, no `X-Forwarded-For` | `ip:` + `request.getRemoteAddr()` (falls back) |
 
-### What gets first match wins
+> `X-API-Key`, `Authorization`, and `X-Client-Id` have **no effect** on the rate-limit bucket. Sending them changes nothing about which bucket a request lands in.
 
-If a client sends both `X-API-Key` and `Authorization: Bearer`, only the **first match** in the priority order is used. The bucket key would be `api-key:...`, not `bearer:...`.
+### Why headers are not used for bucketing
 
-### Why Bearer tokens are hashed
+On the public `/execute-rule` API these headers are unauthenticated. If the limiter keyed on them:
+- Any caller could send a **fresh random `X-API-Key` per request** and get a brand-new 1000/min budget every time — unlimited throughput, rate limiting defeated.
+- Any caller could **rotate `X-Client-Id` values** to churn distinct entries through the client map and evict legitimate users' buckets.
 
-The full token would be a long string of secret material — logging or storing it as a bucket key is risky. We use `Integer.toHexString(authHeader.hashCode())` which gives us 8 hex chars derived from the full Authorization header.
+Keying purely on the network address the JVM actually sees (`getRemoteAddr()`) removes both attacks. See finding P2.
 
-> **This is hash-based collision risk acknowledged**: 32-bit hash space means two different tokens could (rarely) share a bucket. For rate-limit-only purposes this is acceptable — at worst, two attackers with hash-colliding tokens share a 1000/min budget, which still prevents abuse. **Do not** rely on this hash for security identity.
+### Why `X-Forwarded-For` is off by default
 
-### Why `X-Forwarded-For` is ignored
-
-`X-Forwarded-For` is set by upstream proxies. Anyone can prepend a fake value to it client-side:
+`X-Forwarded-For` is set by upstream proxies, and anyone can prepend a fake value client-side:
 ```
 X-Forwarded-For: spoofed-victim-ip, real-client-ip, real-proxy-ip
 ```
-A naive rate limiter that uses the leftmost value gets spoofed. We use only `request.getRemoteAddr()`, which is the actual TCP peer the JVM sees — only spoofable if someone has L3-level network access.
+A limiter that trusts the left-most value on untrusted input gets spoofed. By default the service uses only `request.getRemoteAddr()`, the actual TCP peer — spoofable only with L3-level network access.
 
-> **Implication for deployment behind a load balancer**: if you put this service behind ALB / Cloudflare / similar, **the load balancer's IP** becomes `getRemoteAddr()` for every request. All clients then share one bucket. Production must inject `X-API-Key` or `X-Client-Id` at the LB / API gateway layer to differentiate clients. Otherwise, the IP-fallback is meaningless behind any proxy.
+**When you are behind a trusted proxy/LB** (ALB, Cloudflare, nginx) that **overwrites** inbound `X-Forwarded-For` with the real client IP, set `DROOLS_RATE_LIMITING_TRUST_PROXY=true`. The limiter then reads the left-most `X-Forwarded-For` entry so per-client buckets survive the proxy. This is safe **only** because a trusted proxy has stripped any client-supplied XFF. Do **not** enable it if the proxy appends to (rather than overwrites) inbound XFF.
+
+> **Implication if you leave `trust-proxy=false` behind a load balancer**: **the load balancer's IP** becomes `getRemoteAddr()` for every request, so all clients share one bucket. Set `trust-proxy=true` (with a trusted proxy that overwrites XFF) to differentiate clients by their real IP.
 
 ---
 
@@ -129,6 +121,7 @@ A naive rate limiter that uses the leftmost value gets spoofed. We use only `req
 | Burst | 100 | `DROOLS_RATE_LIMITING_BURST_SIZE` | Per-client |
 | Max clients tracked | 10,000 | `DROOLS_RATE_LIMITING_MAX_CLIENTS` | Service-wide |
 | Cleanup interval | 5 min | `DROOLS_RATE_LIMITING_CLEANUP_INTERVAL` | Service-wide |
+| Trust proxy (`X-Forwarded-For`) | false | `DROOLS_RATE_LIMITING_TRUST_PROXY` | Service-wide |
 | Master switch | true | `DROOLS_RATE_LIMITING_ENABLED` | Service-wide |
 
 ### Both limits apply
@@ -139,22 +132,22 @@ Example: a client sends 1000 requests in the first 6 seconds of the minute. They
 
 ### `max-clients` and what happens at capacity
 
-The rate limiter tracks per-client state in a `ConcurrentHashMap`. To prevent memory exhaustion (an attacker spoofing 10 million `X-Client-Id` values to fill the map), there's a hard cap.
+The rate limiter tracks per-client state in a `ConcurrentHashMap`. To bound memory (many distinct source IPs over time), there's a hard cap.
 
-[`RateLimitingConfig.java:85-91`](../src/main/java/com/company/drools/config/RateLimitingConfig.java#L85-L91):
+[`RateLimitingConfig.java`](../src/main/java/com/company/drools/config/RateLimitingConfig.java) `isAllowed` / `evictLeastRecentlyUsed`:
 ```java
-if (!clientData.containsKey(clientId)
-    && clientData.size() >= config.getMaxClients()) {
-  log.warn("Rate limiter client map at capacity, rejecting new client");
-  return false;
+if (!clientData.containsKey(clientId) && clientData.size() >= config.getMaxClients()) {
+  evictLeastRecentlyUsed();
 }
+ClientRateData data = clientData.computeIfAbsent(clientId, k -> new ClientRateData());
+return data.isAllowed(now, config);
 ```
 
 **At capacity (10,000 distinct clients tracked)**:
 - **Existing clients** continue to be served normally (their state is already in the map).
-- **New clients** are **rejected outright** — first request returns 429.
+- A **new client is admitted** — the limiter **evicts the least-recently-used bucket** to make room, then creates the new client's bucket. New clients are **not** rejected with a 429.
 
-This is intentional. A spoofing attack tries to inject many distinct client IDs to fill memory. Rejecting new clients at capacity caps the memory cost while keeping the legitimate-client population working. After the cleanup interval (5 min default), idle clients are evicted, freeing slots.
+This is a deliberate change from the earlier reject-new-client behavior, which turned the memory cap into a denial-of-service against genuine new users (finding P2). LRU eviction bounds memory without penalizing real traffic. Idle buckets are also removed by the periodic cleanup below.
 
 ### Cleanup of stale buckets
 
@@ -235,9 +228,9 @@ def call_rule(rule_id, data, retries=3):
     raise Exception("Rate limited after retries")
 ```
 
-### Use a stable client identifier
+### Your bucket is your source IP
 
-If you're a service integrating against this API, **send `X-API-Key` or `X-Client-Id`** so your bucket is stable across redeploys, IP rotations, and proxies. Don't rely on IP-based identification.
+Rate-limit buckets are keyed on the source IP only — sending `X-API-Key` / `X-Client-Id` / `Authorization` does **not** give you a separate bucket. If you call from behind NAT or a shared egress, you share a bucket with everyone on that IP. If you call through a proxy the service trusts (`trust-proxy=true`), your bucket follows the left-most `X-Forwarded-For` value the proxy sets. There is nothing a client can send to change its bucket.
 
 ### Stay under the 1-second-equivalent burst
 
@@ -266,15 +259,15 @@ DROOLS_RATE_LIMITING_MAX_CLIENTS=50000
 
 Log line on rate-limit rejection:
 ```
-WARN c.c.d.api.filter.RateLimitingFilter - Rate limit exceeded for client: api-key:abc123
+WARN c.c.d.api.filter.RateLimitingFilter - Rate limit exceeded for client: ip:203.0.113.42
 ```
 
-Log line at max-clients capacity:
+Log line when a new client is admitted by evicting the LRU bucket at capacity (DEBUG level):
 ```
-WARN c.c.d.config.RateLimitingConfig - Rate limiter client map at capacity (10000), rejecting new client
+DEBUG c.c.d.config.RateLimitingConfig - Rate limiter at capacity (10000), evicted least-recently-used client bucket
 ```
 
-The capacity warning is high-signal — it indicates either a real spike in distinct clients or a spoofing attack. Alert on this.
+The eviction line is high-signal — it indicates the tracked-client population is churning through `max-clients`, which may mean a real spike in distinct source IPs. Enable DEBUG on `com.company.drools.config.RateLimitingConfig` if you want to alert on it.
 
 ### Disabling temporarily
 
@@ -291,13 +284,11 @@ DROOLS_RATE_LIMITING_ENABLED=false
 
 ### "Per-client" doesn't mean "per-user"
 
-The rate limiter has no concept of users. It tracks whatever string `getClientIdentifier()` returns. If your API gateway forwards a Bearer token *but doesn't decode it*, every user behind that gateway sharing the same... wait, actually each user has a unique Bearer token, so they each get a unique `bearer:hash` bucket. This works correctly **as long as the Authorization header is unique per user**.
+The rate limiter has no concept of users. It tracks whatever string `getClientIdentifier()` returns, which is always `ip:<address>`. Every user sharing a source IP (corporate NAT, a shared egress gateway, a load balancer without `trust-proxy`) shares one bucket. There is no header a user can send to get their own bucket.
 
-If users somehow share the same Authorization value (a shared service token), they share a bucket.
+### All traffic from one source IP shares a bucket
 
-### Anonymous traffic from one source IP shares a bucket
-
-Without `X-API-Key` / Bearer / `X-Client-Id`, all anonymous requests from the same TCP peer share one `ip:...` bucket. In production this is rarely what you want — see the load-balancer note above. Inject a header at the gateway layer.
+Every request from the same TCP peer shares one `ip:...` bucket. Behind a load balancer that terminates the connection, that peer is the LB — so all clients collapse into one bucket unless you set `trust-proxy=true` and the LB overwrites `X-Forwarded-For` with the real client IP. See the load-balancer note above.
 
 ### Rate limiting is per-instance, not cluster-wide
 
@@ -323,41 +314,33 @@ To enforce cluster-wide limits, you'd need to back the rate limiter with Redis. 
 
 ## Verification (live)
 
-Confirm the multi-tier identification with the running stack:
+Confirm IP-based identification with the running stack. Note that adding `X-API-Key` / `X-Client-Id` does **not** create a separate bucket — the counter for the same source IP keeps decrementing regardless of headers:
 
 ```bash
-# Without any header — ip-based bucket
+# Bucket keyed on source IP
 curl -i -X POST http://localhost:8080/execute-rule \
   -H 'Content-Type: application/json' \
   -d '{"rule_id":"pricing.discount.simple","data":{"amount":100}}' \
   | grep -i 'X-RateLimit'
 
-# With API key — separate bucket
+# Same source IP + an API key header — SAME bucket, counter keeps dropping
 curl -i -X POST http://localhost:8080/execute-rule \
   -H 'Content-Type: application/json' \
   -H 'X-API-Key: client-foo' \
   -d '{"rule_id":"pricing.discount.simple","data":{"amount":100}}' \
   | grep -i 'X-RateLimit'
-
-# With Client-Id — yet another bucket
-curl -i -X POST http://localhost:8080/execute-rule \
-  -H 'Content-Type: application/json' \
-  -H 'X-Client-Id: partner-bar' \
-  -d '{"rule_id":"pricing.discount.simple","data":{"amount":100}}' \
-  | grep -i 'X-RateLimit'
 ```
 
-Each of these will have its own `X-RateLimit-Remaining` counter, decrementing independently. To prove this empirically, hit each one a few times and observe the counters move separately.
+The `X-RateLimit-Remaining` counter decrements across **both** calls together, proving the header is ignored for bucketing.
 
 To force a 429 (test the rejection path):
 
 ```bash
-# Loop fast; eventually hit the burst+per-minute cap
+# Loop fast; eventually hit the burst+per-minute cap for this source IP
 for i in $(seq 1 1100); do
   curl -s -o /dev/null -w "%{http_code}\n" \
     -X POST http://localhost:8080/execute-rule \
     -H 'Content-Type: application/json' \
-    -H 'X-Client-Id: throttle-test' \
     -d '{"rule_id":"pricing.discount.simple","data":{"amount":100}}'
 done | sort | uniq -c
 ```

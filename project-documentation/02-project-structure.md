@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, AI agents (the navigation map both reach for first) |
 | **Purpose** | Annotated tree of every file and folder in the repo, so a reader can find any code, config, or doc by purpose |
-| **Last verified against repo** | 2026-05-24 (post-modernization, post-load-test, post-Redis-cache layer + Phase 9.4 hardening) |
+| **Last verified against repo** | 2026-08-20 (post-modernization, post-load-test, post-Redis-cache layer + Phase 9.4 hardening; StorageConfig removed, RuleIds/ServiceUnavailableException/RedisSecurityValidator added) |
 | **Related docs** | [01-project-overview.md](01-project-overview.md), [03-tech-stack.md](03-tech-stack.md), [27-development-setup.md](27-development-setup.md) |
 
 ---
@@ -52,7 +52,7 @@ drools-microservice/
 
 ### `src/main/java/com/company/drools/`
 
-The Java root. 59 files organized into 6 functional packages (`api`, `cache`, `common`, `config`, `core`, `storage`) plus the `Application.java` entrypoint.
+The Java root. 61 files organized into 6 functional packages (`api`, `cache`, `common`, `config`, `core`, `storage`) plus the `Application.java` entrypoint.
 
 ```
 com/company/drools/
@@ -79,13 +79,14 @@ com/company/drools/
 │   │   ├── RuleNotFoundException.java     # → 404
 │   │   ├── RuleExecutionException.java    # → 400
 │   │   ├── TimeoutException.java          # → 408
-│   │   ├── CircuitBreakerException.java   # → 503
+│   │   ├── CircuitBreakerException.java   # → 503 (breaker open)
+│   │   ├── ServiceUnavailableException.java # → 503 (rule-execution pool saturated)
 │   │   └── RuleStorageException.java      # wraps S3/filesystem storage failures → 500
 │   │
 │   ├── filter/                        # Spring servlet filters (@Order matters)
 │   │   ├── SecurityHeadersFilter.java     # @Order(-1) — adds 7 response headers
 │   │   ├── AdminAuthFilter.java           # @Order(0)  — X-Admin-API-Key on /admin/*
-│   │   ├── RateLimitingFilter.java        # @Order(1)  — multi-tier client ID
+│   │   ├── RateLimitingFilter.java        # @Order(1)  — source-IP client ID
 │   │   └── RequestSizeValidationFilter.java # no @Order — runs last; chunked-stream limiter
 │   │
 │   └── validation/                    # Jakarta Validation custom annotations
@@ -125,7 +126,8 @@ com/company/drools/
 │   └── RuleRefreshSubscriber.java         # MessageListener — self-dedups via source_instance_id, dispatches to engine
 │
 ├── common/                            # Shared utilities
-│   └── LogSanitizer.java                  # Masks sensitive data in logs (CC, SSN, tokens, etc.)
+│   ├── LogSanitizer.java                  # Masks sensitive data in logs (CC, SSN, tokens, etc.)
+│   └── RuleIds.java                       # Rule ID ↔ storage-path transformation helpers
 │
 └── config/                            # 17 Spring @Configuration classes
     ├── DroolsConfig.java                  # KieServices/KieContainer beans
@@ -144,7 +146,7 @@ com/company/drools/
     ├── DotenvConfig.java                  # Loads .env file (addLast — env vars override)
     ├── RuleLoadingConfig.java             # Startup rule load + auto-refresh scheduler
     ├── RuleStorageConfig.java             # Storage bean wiring
-    └── StorageConfig.java                 # Generic storage props (paths, etc.)
+    └── RedisSecurityValidator.java        # @Profile(prod) — fails startup unless REDIS_URL is rediss:// with credentials
 ```
 
 ### `src/main/resources/`
@@ -160,7 +162,7 @@ The `application.yml` is the most-referenced config file in the codebase. See [0
 
 ### `src/test/java/com/company/drools/`
 
-46 test files, **548 unit tests + 14 Testcontainers integration tests** passing. The Testcontainers integration tests are excluded from default `mvn test` via `pom.xml` surefire `excludes` (macOS DinD blocker; run on Linux CI). Coverage roughly preserved from the 96.2% / 89.7% pre-modernization baseline.
+48 test files, **536 unit tests + 14 Testcontainers integration tests** passing. The Testcontainers integration tests are excluded from default `mvn test` via `pom.xml` surefire `excludes` (macOS DinD blocker; run on Linux CI). Coverage remeasured 2026-08-20 on Java 25: 90.1% instruction / 78.4% branch (unit tests only), enforced by a `jacoco:check` floor of 88% / 74% bound to `verify`.
 
 ```
 src/test/java/com/company/drools/
@@ -377,7 +379,7 @@ If you are an AI agent considering whether to read those folders: don't, unless 
 | All exception handlers (HTTP status mapping) | [GlobalExceptionHandler.java](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java) |
 | Security headers filter | [SecurityHeadersFilter.java](../src/main/java/com/company/drools/api/filter/SecurityHeadersFilter.java) |
 | Admin API key filter | [AdminAuthFilter.java](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java) |
-| Rate limiting filter (multi-tier client ID) | [RateLimitingFilter.java](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java) |
+| Rate limiting filter (source-IP client ID) | [RateLimitingFilter.java](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java) |
 | Request size validation filter | [RequestSizeValidationFilter.java](../src/main/java/com/company/drools/api/filter/RequestSizeValidationFilter.java) |
 | Custom rule-ID validator | [RuleIdValidator.java](../src/main/java/com/company/drools/api/validation/RuleIdValidator.java) |
 | Custom rule-data validator | [RuleDataValidator.java](../src/main/java/com/company/drools/api/validation/RuleDataValidator.java) |

@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -27,11 +28,21 @@ public class RateLimitingFilter extends OncePerRequestFilter {
   private final RateLimitingConfig.InMemoryRateLimitingService rateLimitingService;
   private final ObjectMapper objectMapper;
 
+  /**
+   * When {@code false} (default), clients are identified purely by their network address ({@code
+   * getRemoteAddr()}). When {@code true}, the left-most {@code X-Forwarded-For} entry is used
+   * instead — enable ONLY behind a trusted proxy/load balancer that overwrites inbound {@code
+   * X-Forwarded-For}, otherwise it is spoofable.
+   */
+  private final boolean trustProxy;
+
   public RateLimitingFilter(
       RateLimitingConfig.InMemoryRateLimitingService rateLimitingService,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper,
+      @Value("${drools.rate-limiting.trust-proxy:false}") boolean trustProxy) {
     this.rateLimitingService = rateLimitingService;
     this.objectMapper = objectMapper;
+    this.trustProxy = trustProxy;
   }
 
   @Override
@@ -67,29 +78,22 @@ public class RateLimitingFilter extends OncePerRequestFilter {
   }
 
   private String getClientIdentifier(HttpServletRequest request) {
-    // Try to identify client by various methods
-    String clientId;
-
-    // 1. Check for API key header
-    clientId = request.getHeader("X-API-Key");
-    if (clientId != null && !clientId.isEmpty()) {
-      return "api-key:" + clientId;
+    // Identify the client by network address only. Application-level headers (X-API-Key,
+    // Authorization, X-Client-Id) are unauthenticated on the public /execute-rule API — keying on
+    // them let any caller pick a fresh bucket per request (unlimited throughput) or rotate headers
+    // to fill the client map and lock out real users. See finding P2.
+    if (trustProxy) {
+      String forwardedFor = request.getHeader("X-Forwarded-For");
+      if (forwardedFor != null && !forwardedFor.isBlank()) {
+        // Left-most entry is the originating client. Only trustworthy when a trusted proxy
+        // overwrites inbound X-Forwarded-For (operator's responsibility via trust-proxy=true).
+        int comma = forwardedFor.indexOf(',');
+        String first = (comma >= 0 ? forwardedFor.substring(0, comma) : forwardedFor).trim();
+        if (!first.isEmpty()) {
+          return "ip:" + first;
+        }
+      }
     }
-
-    // 2. Check for Authorization header (for authenticated clients)
-    String authHeader = request.getHeader("Authorization");
-    if (authHeader != null && authHeader.startsWith("Bearer ")) {
-      // Use a hash of the token to avoid logging sensitive data
-      return "bearer:" + Integer.toHexString(authHeader.hashCode());
-    }
-
-    // 3. Check for custom client ID header
-    clientId = request.getHeader("X-Client-Id");
-    if (clientId != null && !clientId.isEmpty()) {
-      return "client-id:" + clientId;
-    }
-
-    // 4. Fall back to remote address (don't trust X-Forwarded-For — it's spoofable)
     return "ip:" + request.getRemoteAddr();
   }
 

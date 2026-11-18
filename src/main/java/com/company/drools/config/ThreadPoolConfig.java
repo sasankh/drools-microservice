@@ -70,11 +70,12 @@ public class ThreadPoolConfig {
     executor.setWaitForTasksToCompleteOnShutdown(true);
     executor.setAwaitTerminationSeconds(30);
 
-    // Rejection policy - caller runs to provide backpressure.
-    // WARNING: CallerRunsPolicy executes the task on the Tomcat request thread when the pool
-    // is saturated. This prevents task loss but may increase request latency under heavy load.
-    // If this becomes an issue, consider AbortPolicy with proper error handling instead.
-    executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+    // Rejection policy - abort so saturation sheds load with a 503 (see RuleExecutor →
+    // ServiceUnavailableException). CallerRunsPolicy was previously used here, but it runs the rule
+    // body on the Tomcat request thread, which cannot be cancelled and silently bypasses the
+    // execution timeout exactly when load is highest (finding P3). AbortPolicy throws
+    // RejectedExecutionException, which RuleExecutor maps to 503.
+    executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
 
     // Allow core threads to timeout when idle
     executor.setAllowCoreThreadTimeOut(true);

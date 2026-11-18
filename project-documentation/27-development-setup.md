@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | New contributors, engineers extending the service |
 | **Purpose** | Clone-to-running-tests in under 30 minutes. Plus the conventions and patterns this codebase follows so contributions are consistent. |
-| **Last verified against** | [`pom.xml`](../pom.xml), [`Dockerfile`](../Dockerfile), [`setup-dev-environment.sh`](../setup-dev-environment.sh) on 2026-05-24 |
+| **Last verified against** | [`pom.xml`](../pom.xml), [`Dockerfile`](../Dockerfile), [`setup-dev-environment.sh`](../setup-dev-environment.sh) on 2026-08-20 |
 | **Related docs** | [03-tech-stack.md](03-tech-stack.md), [28-testing-guide.md](28-testing-guide.md), [32-getting-started.md](32-getting-started.md), [34-java-setup-guide.md](34-java-setup-guide.md) |
 
 ---
@@ -67,7 +67,7 @@ The `set-java-env.sh` is macOS-specific (uses `/usr/libexec/java_home`). Linux u
 ```bash
 mvn clean compile         # compile only
 # OR
-mvn clean package         # compile + run all 548 unit tests + package jar (15 Testcontainers integration tests surefire-excluded; run on Linux CI)
+mvn clean package         # compile + run all 536 unit tests + package jar (14 Testcontainers integration tests surefire-excluded; run on Linux CI)
 # OR
 mvn clean package -DskipTests   # if you want to skip tests
 ```
@@ -171,9 +171,10 @@ These plugins run as part of the build pipeline. Awareness of what they enforce 
 | **maven-enforcer-plugin** 3.6.2 | `validate` | Requires Java 25 (`[25,26)`) and Maven 3.8+ | Build aborts with clear error if Java mismatch |
 | **maven-compiler-plugin** 3.11.0 | `compile` | Source/target = 25, `parameters: true` (preserves param names) | Standard compile errors |
 | **spring-boot-maven-plugin** 3.5.3 | `package` | Repackages the jar as a Spring Boot fat jar; excludes Lombok | If executable jar isn't produced, this is the cause |
-| **spotless-maven-plugin** 2.36.0 | `verify` (when `spotless:check`) | Code formatting via Google Java Format 1.17.0; removes unused imports; trims trailing whitespace | `mvn spotless:check` fails if any file is unformatted |
-| **jacoco-maven-plugin** 0.8.8 | `test` | Records coverage; outputs `target/site/jacoco/` | None (no threshold gate currently — see CODE_FINDINGS F-029) |
-| **spotbugs-maven-plugin** 4.7.3.0 | `verify` (when `spotbugs:check`) | Static analysis at "Max" effort, "High" threshold | Reports bugs but doesn't fail unless you run `:check` |
+| **spotless-maven-plugin** 2.36.0 | `verify` (bound `spotless:check`) | Code formatting via Google Java Format 1.17.0; removes unused imports; trims trailing whitespace | **`mvn verify` fails** if any file is unformatted — the `spotless-check` execution is bound to the `verify` phase (S4), so it runs automatically, not only when you invoke `spotless:check` |
+| **jacoco-maven-plugin** 0.8.8 | `test` (report) + `verify` (check) | Records coverage; outputs `target/site/jacoco/`; **enforces a coverage floor** | **`mvn verify` fails** if coverage drops below the floor: INSTRUCTION ≥ **0.88**, BRANCH ≥ **0.74** (the `jacoco-check` execution is bound to `verify`) |
+| **spotbugs-maven-plugin** 4.7.3.0 | `verify` (bound `spotbugs:check`) | Static analysis at "Max" effort, "High" threshold | **`mvn verify` fails** on High-priority findings — the `spotbugs-check` execution is bound to the `verify` phase |
+| **dependency-check-maven** | CI (`mvn verify -Powasp` / CI job) | OWASP dependency vulnerability scan; HTML+JSON reports in `target/dependency-check`; suppressions in `dependency-check-suppressions.xml` | Runs in CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)); flags known-vulnerable dependencies |
 | **maven-surefire-plugin** 3.0.0 | `test` | Runs `**/*Test.java`, `**/*Tests.java` | Test failure aborts build |
 
 > **Pre-commit habit**: run `mvn spotless:apply` before every commit. Otherwise CI fails on `spotless:check`. Wire it into a git pre-commit hook if you want.
@@ -315,7 +316,7 @@ refactor(cache): extract RedisCachedRuleStorage decorator
 
 PR checklist before merging:
 - [ ] `mvn spotless:apply` ran
-- [ ] `mvn test` passes (all 548+ unit tests — integration tests excluded from default surefire run)
+- [ ] `mvn test` passes (all 536 unit tests — integration tests excluded from default surefire run)
 - [ ] `mvn spotbugs:check` clean (or new warnings explained)
 - [ ] If env var added: documented in [09-environment-variables-reference.md](09-environment-variables-reference.md)
 - [ ] If endpoint added: documented in [10-api-reference.md](10-api-reference.md)
@@ -376,7 +377,7 @@ If any step fails locally, fix and re-run before pushing.
 
 You can:
 - Build: `mvn package`
-- Run tests: `mvn test` (all 548+ pass — integration tests excluded by default)
+- Run tests: `mvn test` (all 536 pass — integration tests excluded by default)
 - Run service: `mvn spring-boot:run -Dspring-boot.run.profiles=dev`
 - Hit `/execute-rule` and get a result
 - Format code: `mvn spotless:apply`

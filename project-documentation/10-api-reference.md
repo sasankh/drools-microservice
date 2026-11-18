@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Partners, developers, AI agents |
 | **Purpose** | Complete prose reference for every HTTP endpoint, with request/response shapes and live curl examples |
-| **Last verified against** | Controller files in [`src/main/java/com/company/drools/api/controller/`](../src/main/java/com/company/drools/api/controller/), [`api-reference/openapi.yml`](api-reference/openapi.yml) on 2026-05-24 |
+| **Last verified against** | Controller files in [`src/main/java/com/company/drools/api/controller/`](../src/main/java/com/company/drools/api/controller/), [`api-reference/openapi.yml`](api-reference/openapi.yml) on 2026-08-20 |
 | **Related docs** | [11-integration-guide.md](11-integration-guide.md), [12-error-code-catalog.md](12-error-code-catalog.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md), [15-admin-authentication.md](15-admin-authentication.md), [api-reference/openapi.yml](api-reference/openapi.yml) |
 
 ---
@@ -16,7 +16,7 @@ The service exposes **two ports** with **three logical groups** of endpoints:
 | Port | Path prefix | Audience | Auth |
 |---:|---|---|---|
 | 8080 | `/execute-rule` | All clients (the business API) | None |
-| 8080 | `/admin/*` | Operators, ops automation | `X-Admin-API-Key` if `ADMIN_API_KEY` set |
+| 8080 | `/admin/*` | Operators, ops automation | `X-Admin-API-Key` if `ADMIN_API_KEY` set (required in `prod`/`docker` — app fails to start without it) |
 | 8081 | `/actuator/*` | Monitoring, infra | None (typically firewalled to internal) |
 
 **Note**: `/admin/*` is on the **main port** (8080), not the management port (8081). This is unusual but intentional — see [04-architecture.md](04-architecture.md) for rationale. The management port (8081) only hosts Spring Boot Actuator endpoints.
@@ -29,8 +29,8 @@ In production, you would expose 8080 to clients/operators (typically with auth a
 
 | Endpoint family | Auth required? | How |
 |---|---|---|
-| `POST /execute-rule` | None on the service itself | Authentication is your gateway's responsibility. The service uses rate limiting (per multi-tier client identity) for resource protection. |
-| `GET/POST /admin/*` | API key when `ADMIN_API_KEY` is set | Send `X-Admin-API-Key: <value>` header. When `ADMIN_API_KEY` is empty/unset, admin endpoints are open and a warning is logged at startup. See [15-admin-authentication.md](15-admin-authentication.md). |
+| `POST /execute-rule` | None on the service itself | Authentication is your gateway's responsibility. The service uses rate limiting (keyed on source IP only) for resource protection. |
+| `GET/POST /admin/*` | API key when `ADMIN_API_KEY` is set | Send `X-Admin-API-Key: <value>` header. When `ADMIN_API_KEY` is empty/unset: `local`/`dev` leave admin endpoints open with a startup WARN, but `prod`/`docker` **fail to start**. See [15-admin-authentication.md](15-admin-authentication.md). |
 | `GET /actuator/*` | None | Bind to internal-only network. Don't expose externally. |
 
 ---
@@ -141,8 +141,8 @@ Content-Type: application/json
 | 404 | `RULE_NOT_FOUND` | `rule_id` not in cache/storage |
 | 408 | `TIMEOUT_ERROR` | Rule fired longer than `RULE_EXECUTION_TIMEOUT_SECONDS` (30s default) |
 | 413 | `REQUEST_TOO_LARGE` | Body exceeded `DROOLS_VALIDATION_REQUEST_MAX_SIZE_BYTES` (1 MiB default) |
-| 429 | `RATE_LIMIT_EXCEEDED` | Per-client rate limit hit |
-| 503 | `SERVICE_UNAVAILABLE` | Circuit breaker open (S3 or Redis) |
+| 429 | `RATE_LIMIT_EXCEEDED` | Per-source-IP rate limit hit |
+| 503 | `SERVICE_UNAVAILABLE` | Circuit breaker open (S3 or Redis), OR rule-execution thread pool saturated |
 
 **Live curl**
 
@@ -597,25 +597,28 @@ docker run -p 8888:8080 -e SWAGGER_JSON=/openapi.yml \
 To verify these endpoints against your running stack:
 
 ```bash
+# admin endpoints require the key when ADMIN_API_KEY is set (always in prod/docker)
+export ADMIN_API_KEY=admin-secret
+
 # health
-curl -fsS http://localhost:8080/admin/health | jq '.status'        # → "UP"
+curl -fsS -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/health | jq '.status'        # → "UP"
 
 # rules listed
-curl -fsS http://localhost:8080/admin/rules | jq '.total_rules'    # → 17
+curl -fsS -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/rules | jq '.total_rules'    # → 17
 
-# basic rule execution
+# basic rule execution (public API — no admin key)
 curl -sX POST http://localhost:8080/execute-rule \
   -H 'Content-Type: application/json' \
   -d '{"rule_id":"pricing.discount.simple","data":{"amount":100}}' \
   | jq '.result.discount'                                          # → 10
 
 # memory check
-curl -fsS http://localhost:8080/admin/memory/info | jq '.heap.usagePercent'
+curl -fsS -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/memory/info | jq '.heap.usagePercent'
 
 # threads
-curl -fsS http://localhost:8080/admin/thread-pools | jq '.rule_execution_pool.completed_task_count'
+curl -fsS -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/thread-pools | jq '.rule_execution_pool.completed_task_count'
 
-# Spring Actuator
+# Spring Actuator (management port 8081 — no admin key)
 curl -fsS http://localhost:8081/actuator/health | jq '.status'     # → "UP"
 ```
 

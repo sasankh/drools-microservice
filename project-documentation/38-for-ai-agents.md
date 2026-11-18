@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Future AI sessions (Claude Code, Codex, agents) working on this repo |
 | **Purpose** | Distill the verification rules and pitfalls learned during the 2026-05-08 documentation overhaul, so future agents don't re-make the same mistakes |
-| **Last verified against** | This conversation's overhaul findings + [`.ai-workspace/documentations/CODE_FINDINGS.md`](../.ai-workspace/documentations/CODE_FINDINGS.md) on 2026-05-08 (refreshed 2026-05-10 for stack modernization + load test; refreshed 2026-05-24 for Phase 9 multi-instance load test + Redis CB hardening) |
+| **Last verified against** | This conversation's overhaul findings + [`.ai-workspace/documentations/CODE_FINDINGS.md`](../.ai-workspace/documentations/CODE_FINDINGS.md) on 2026-05-08 (refreshed 2026-05-10 for stack modernization + load test; refreshed 2026-05-24 for Phase 9 multi-instance load test + Redis CB hardening; refreshed 2026-08-20 for the re-review hardening — admin fail-closed, IP-only rate limiting, Redis prod TLS, honest security posture) |
 | **Related docs** | [00-system-overview.md](00-system-overview.md), [12-error-code-catalog.md](12-error-code-catalog.md), [36-architecture-decision-records.md](36-architecture-decision-records.md), [`../.ai-workspace/README.md`](../.ai-workspace/README.md) |
 
 ---
@@ -40,11 +40,11 @@ If you can't cite, don't write. If you cited and the cite is wrong, the doc is w
 ### 3. Don't trust counts — verify them
 
 **What we found** (counts drift fast as the codebase evolves — these are examples of *the kind of mistake*, not necessarily today's values):
-- Java source file count drifts with every PR — verify with `find src/main/java -name "*.java" | wc -l` (was 57 on 2026-05-08; 59 on 2026-05-24)
+- Java source file count drifts with every PR — verify with `find src/main/java -name "*.java" | wc -l` (was 57 on 2026-05-08; 59 on 2026-05-24; 61 on 2026-08-20)
 - "9 distinct error codes" → actually 10 (was a guess pre-2026-05-08)
 - "18 sandbox import prefixes / 13 blocked classes / 15 blocked methods" → actually 20 / 12 / 19 (verified against `DrlSanitizer.java`)
 - "66 cases" or "23 cases" in `DrlSanitizerTest` → actually 8 test methods (4 `@Test` + 4 `@ParameterizedTest` over `@MethodSource` streams that expand to ~50+ effective cases)
-- Total test count drifts — was 597 mid-2026, then 545 after dead-`RuleCache` deletion, then 548 after Phase 9.4 added 3 unit tests for SCAN-CB-wrap. Verify with `mvn test` summary line.
+- Total test count drifts — was 597 mid-2026, then 545 after dead-`RuleCache` deletion, then 548 after Phase 9.4, then **536** unit tests / 14 Testcontainers ITs (48 test files) as of the 2026-08-20 re-review. Verify with `mvn test` summary line.
 
 **The rule**: counts are cheap to verify (`find … | wc -l`, `grep -c`, `wc -l`, `mvn test`). Always verify before quoting; never copy a count from another doc that hasn't been re-verified against source.
 
@@ -54,13 +54,15 @@ If you can't cite, don't write. If you cited and the cite is wrong, the doc is w
 
 **The rule**: when you see input-massaging in a validator (`trim`, `toLowerCase`, `replace`), assume it's silently changing semantics. Document the gotcha; don't paper over it. Other places to suspect: any DTO field with `@JsonProperty` mapping (renames hide bugs), any `if (x != null && !x.isEmpty())` guard (empty after trim is different from empty before trim).
 
-### 5. The "39/42 security findings" claim has a qualifier
+### 5. Don't quote "39/42 security findings" — state the honest posture
 
-The corpus repeats "39 of 42 security findings closed" in 5+ places. Originally 3 were unaddressed; #30 was closed by the 2026-05-09 stack modernization (Java 25, Spring Boot 3.5.3, Drools 10.2.0). The 2 still unaddressed:
-- **#28 (HIGH)** Redis without auth/TLS — skipped per user, only one with real prod risk
-- **#38 (INFO)** KieContainer disposal safety — already documented in code
+Older docs framed security as "39 of 42 findings closed." **Drop that framing** — it implies a tidy near-done state that misrepresents the two genuinely open items. Honest wording: *most findings are addressed; two remain tracked-open, one of them a real, live-provable RCE.*
 
-Full breakdown in [`.ai-workspace/project-plans/security-backlog.md`](../.ai-workspace/project-plans/security-backlog.md). Don't restate "39/42" without knowing what the remaining 2 are; if you're advising on a production deploy, surface #28 specifically.
+The two tracked-open findings:
+- **B1 — the DRL sandbox is NOT a sound security boundary.** `DrlSanitizer` is a finite blocklist of imports/classes/methods, but a rule can reference a fully-qualified class name (e.g. `java.lang.Runtime.getRuntime()...`) with **no import statement**, sidestepping the import checks; and JEP 486 (Java 24+) removed the `SecurityManager`, so there is no runtime containment either. Treat **write access to the rule store as equivalent to remote code execution**. This is deferred and documented in `SECURITY.md` — do not describe the sandbox as a security control.
+- **#28 — Redis auth/TLS.** Now **enforced on the `prod` profile** by `RedisSecurityValidator` (startup fails unless `REDIS_URL` is `rediss://` with credentials); see [ADR-021](36-architecture-decision-records.md#adr-021-redis-prod-tlsauth-enforcement--removal-of-jackson-default-typing-2026-08-20). Non-prod profiles are unaffected by design.
+
+Full breakdown in [`.ai-workspace/project-plans/security-backlog.md`](../.ai-workspace/project-plans/security-backlog.md) and `SECURITY.md`. If you're advising on a production deploy, surface B1 (rule-store = code execution) first.
 
 ### 6. Live-test runtime behavior, don't reason about it
 
@@ -100,7 +102,7 @@ Output for `snap-memory` lands in [`../.ai-workspace/snap-memory/`](../.ai-works
 | Source | What's there |
 |---|---|
 | [`.ai-workspace/documentations/CODE_FINDINGS.md`](../.ai-workspace/documentations/CODE_FINDINGS.md) | Catalog of code-vs-doc mismatches discovered during the overhaul (32+ items, all severity Low; doc-fixes applied, code-side recommendations logged) |
-| [`.ai-workspace/project-plans/security-backlog.md`](../.ai-workspace/project-plans/security-backlog.md) | The 3 unaddressed security findings from "39/42" — what they are, prod risk |
+| [`.ai-workspace/project-plans/security-backlog.md`](../.ai-workspace/project-plans/security-backlog.md) + `SECURITY.md` | The two tracked-open security findings (B1 DRL-sandbox-is-not-a-boundary RCE, deferred; #28 Redis auth/TLS, now enforced on prod) — what they are, prod risk |
 | [`.ai-workspace/documentations/CHECKLIST.md`](../.ai-workspace/documentations/CHECKLIST.md) | Phase-by-phase rebuild log including the retroactive Phase 4+5 rigorous review (which caught the metric-name and count bugs above) |
 | [36-architecture-decision-records.md](36-architecture-decision-records.md) | ADRs covering the non-obvious design choices (Drools 10 `KieContainer.updateToVersion` rule loading — see ADR-003 with 2026-05-10 update, write-lock-on-get LRU, AdminAuthFilter instead of Spring Security, traditional DRL only, Drools 10 + Java 25 modernization) |
 

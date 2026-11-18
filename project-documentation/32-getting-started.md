@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | New developers and evaluators (see something work in under 30 minutes) |
 | **Purpose** | Fastest path from `git clone` to "I just executed a rule and got a result" |
-| **Last verified against** | Running stack on 2026-05-24 |
+| **Last verified against** | Running stack on 2026-08-20 |
 | **Related docs** | [27-development-setup.md](27-development-setup.md) (full dev setup), [33-simple-start.md](33-simple-start.md) (rule author quickstart), [10-api-reference.md](10-api-reference.md) |
 
 ---
@@ -71,7 +71,9 @@ docker compose logs --tail 50 localstack
 ## Step 3: Verify the service is up (30 sec)
 
 ```bash
-curl -fsS http://localhost:8080/admin/health | jq '.status'
+# docker-compose sets ADMIN_API_KEY=admin-secret, so /admin/* needs the header.
+# (Or hit the unauthenticated actuator: curl -fsS http://localhost:8081/actuator/health | jq '.status')
+curl -fsS http://localhost:8080/admin/health -H "X-Admin-API-Key: admin-secret" | jq '.status'
 # → "UP"
 ```
 
@@ -86,7 +88,7 @@ If you get `Connection refused`, the app hasn't finished booting. Wait 30s and r
 ### Call 1: List loaded rules
 
 ```bash
-curl -fsS http://localhost:8080/admin/rules | jq '.total_rules, .rules[].rule_id'
+curl -fsS http://localhost:8080/admin/rules -H "X-Admin-API-Key: admin-secret" | jq '.total_rules, .rules[].rule_id'
 ```
 
 You should see `17` followed by these rule IDs (order may vary):
@@ -161,7 +163,7 @@ You've now seen the service work. Where to go next depends on your role:
 
 → [27-development-setup.md](27-development-setup.md) — local Java setup, IDE, conventions, build/test workflow.
 → [04-architecture.md](04-architecture.md) — full architecture: filter chain, threading, Drools 10 `updateToVersion` rule-loading pattern, security layers.
-→ [28-testing-guide.md](28-testing-guide.md) — test suite map (46 files, 548+ unit + 15 integration tests), how to add tests.
+→ [28-testing-guide.md](28-testing-guide.md) — test suite map (48 files, 536 unit + 14 integration tests), how to add tests.
 
 ### "I'm an architect / I want to understand the design"
 
@@ -182,7 +184,7 @@ You've now seen the service work. Where to go next depends on your role:
 → [10-api-reference.md](10-api-reference.md) — every endpoint, every request/response shape.
 → [11-integration-guide.md](11-integration-guide.md) — code examples in curl, Python, Java, Node.js.
 → [12-error-code-catalog.md](12-error-code-catalog.md) — every error code with HTTP status.
-→ [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) — multi-tier client identification.
+→ [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) — IP-based client identification (with optional `trust-proxy`).
 
 ### "I'm a rule author / I want to write business rules"
 

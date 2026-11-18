@@ -215,6 +215,41 @@ class RuleExecutionControllerTest {
         .andExpect(jsonPath("$.error.code").value("RULE_EXECUTION_ERROR"));
   }
 
+  @Test
+  void testExecuteRule_Timeout_Returns408() throws Exception {
+    // Execution timeout must surface as 408 TIMEOUT_ERROR, not a generic 400 (P3).
+    when(droolsEngineService.hasRule("slow.rule")).thenReturn(true);
+    when(droolsEngineService.executeRule(eq("slow.rule"), anyMap()))
+        .thenThrow(
+            new com.company.drools.api.exception.TimeoutException("Rule execution: slow.rule", 25));
+
+    mockMvc
+        .perform(
+            post("/execute-rule")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"rule_id\":\"slow.rule\",\"data\":{\"amount\":100}}"))
+        .andExpect(status().isRequestTimeout())
+        .andExpect(jsonPath("$.error.code").value("TIMEOUT_ERROR"));
+  }
+
+  @Test
+  void testExecuteRule_PoolSaturated_Returns503() throws Exception {
+    // Load-shedding (pool saturated) must surface as 503 SERVICE_UNAVAILABLE, not a generic 400
+    // (P3).
+    when(droolsEngineService.hasRule("busy.rule")).thenReturn(true);
+    when(droolsEngineService.executeRule(eq("busy.rule"), anyMap()))
+        .thenThrow(
+            new com.company.drools.api.exception.ServiceUnavailableException("capacity exceeded"));
+
+    mockMvc
+        .perform(
+            post("/execute-rule")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"rule_id\":\"busy.rule\",\"data\":{\"amount\":100}}"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.error.code").value("SERVICE_UNAVAILABLE"));
+  }
+
   // --- Log Sanitization Tests (2) ---
 
   @Test

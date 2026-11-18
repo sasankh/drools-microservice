@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Operators, developers |
 | **Purpose** | The Admin API key flow end-to-end — when it activates, what happens when it doesn't, and how to operate it |
-| **Last verified against** | [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java), [`AdminAuthFilterTest.java`](../src/test/java/com/company/drools/api/filter/AdminAuthFilterTest.java) on 2026-05-24 |
+| **Last verified against** | [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java), [`AdminAuthFilterTest.java`](../src/test/java/com/company/drools/api/filter/AdminAuthFilterTest.java) on 2026-08-20 |
 | **Related docs** | [10-api-reference.md](10-api-reference.md), [12-error-code-catalog.md](12-error-code-catalog.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
@@ -12,8 +12,10 @@
 ## TL;DR
 
 - **One env var controls everything**: `ADMIN_API_KEY`.
-- **If set**: every `/admin/*` request must include `X-Admin-API-Key: <value>`. Missing or wrong → HTTP 401.
-- **If empty/unset**: admin endpoints are **open** (no auth). A warning is logged at startup.
+- **If set**: every `/admin/*` request must include `X-Admin-API-Key: <value>`. Missing or wrong → HTTP 401. Comparison is **constant-time** (`MessageDigest.isEqual`).
+- **If empty/unset**: behavior depends on the active profile:
+  - **`prod` or `docker`**: **fail-closed** — the application refuses to start (`IllegalStateException`). Admin endpoints are never served unprotected in a deployable profile.
+  - **`local` or `dev`**: admin endpoints are **open** (no auth) and a WARN is logged at startup.
 - **Filter only protects `/admin/*`** (paths starting with `/admin/`). `/execute-rule` and `/actuator/*` are unaffected.
 - **The filter is defense in depth.** Primary auth should be at your API gateway. This is a backstop.
 
@@ -23,9 +25,25 @@
 
 [`AdminAuthFilter`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java) is a `@Component` Spring filter at `@Order(0)`. It runs second in the chain (after `SecurityHeadersFilter` at `@Order(-1)`).
 
-### Activation logic
+### Startup validation (fail-closed in deployable profiles)
 
-[`AdminAuthFilter.java:63-71`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java#L63-L71):
+The constructor decides at startup what a blank key means, based on the active profile. The set of "key-required" profiles is `{prod, docker}`:
+
+```java
+private static final Set<String> KEY_REQUIRED_PROFILES = Set.of("prod", "docker");
+
+// In the constructor:
+boolean blank = adminApiKey == null || adminApiKey.isBlank();
+if (blank && isKeyRequiredProfileActive(environment)) {
+  // Fail closed: refuse to start rather than serve /admin/* unprotected.
+  throw new IllegalStateException(
+      "ADMIN_API_KEY must be set when running with a deployable profile ...");
+}
+```
+
+So a blank key **fails startup** under `prod`/`docker`, and only falls through to the open-with-WARN path under `local`/`dev`.
+
+### Activation logic
 
 ```java
 private boolean shouldAuthenticate(HttpServletRequest request) {
@@ -42,7 +60,7 @@ Two conditions must both be true to enforce auth:
 1. `ADMIN_API_KEY` env var is non-empty.
 2. The request URI starts with `/admin/`.
 
-If either is false, the filter passes through without checking anything.
+If either is false, the filter passes through without checking anything. (Under `prod`/`docker`, condition 1 being false has already been ruled out — the app would not have started.)
 
 ### Startup log line
 
@@ -51,19 +69,18 @@ The filter's constructor logs based on whether the key is set:
 | State | Log line | Level |
 |---|---|---|
 | Key set | `Admin endpoint authentication enabled` | INFO |
-| Key empty/null | `Admin API key is not configured — admin endpoints are unprotected. Set ADMIN_API_KEY environment variable for production.` | **WARN** |
+| Key empty/null, `local`/`dev` | `Admin API key is not configured — admin endpoints are unprotected. Set ADMIN_API_KEY environment variable for production.` | **WARN** |
+| Key empty/null, `prod`/`docker` | `IllegalStateException: ADMIN_API_KEY must be set when running with a deployable profile [prod, docker] ...` | **startup fails** |
 
-> The WARN log is your tripwire. **If you see it in production, you have a security gap.** Alert on this log entry.
+> Under `local`/`dev` the WARN log is your tripwire — but you should never see it in a deployable profile, because there a blank key stops the app from starting at all. Alert on both the WARN line and on startup failures.
 
 ### Header check
-
-[`AdminAuthFilter.java:50-58`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java#L50-L58):
 
 ```java
 if (shouldAuthenticate(request)) {
   String providedKey = request.getHeader(API_KEY_HEADER);  // "X-Admin-API-Key"
 
-  if (providedKey == null || !providedKey.equals(adminApiKey)) {
+  if (providedKey == null || !constantTimeEquals(providedKey, adminApiKey)) {
     log.warn("Unauthorized admin access attempt from {}", request.getRemoteAddr());
     writeUnauthorizedResponse(response);
     return;
@@ -72,7 +89,16 @@ if (shouldAuthenticate(request)) {
 filterChain.doFilter(request, response);
 ```
 
-A constant-time comparison would be marginally better (timing-attack resistance), but `String.equals()` is what's used. For the use case (defense in depth, low-volume admin traffic, not a high-stakes auth endpoint), this is acceptable.
+The comparison is **constant-time**, backed by `MessageDigest.isEqual` over the UTF-8 bytes of the two keys — not `String.equals`:
+
+```java
+private static boolean constantTimeEquals(String provided, String expected) {
+  return MessageDigest.isEqual(
+      provided.getBytes(StandardCharsets.UTF_8), expected.getBytes(StandardCharsets.UTF_8));
+}
+```
+
+This avoids leaking the key one byte at a time through response-timing side channels, so the check does not depend on admin traffic being low-volume or low-stakes to be safe.
 
 ### Response on failure
 
@@ -91,7 +117,7 @@ HTTP **401 Unauthorized** with this body:
 }
 ```
 
-Implementation: [`AdminAuthFilter.java:73-92`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java#L73-L92).
+Implementation: [`AdminAuthFilter.writeUnauthorizedResponse`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java).
 
 The same response shape is returned whether the header is missing or wrong — no information leak about which case it was. (A 401 with `WWW-Authenticate` header isn't used because we're not implementing HTTP Basic / Digest auth — this is a custom API key scheme.)
 
@@ -177,11 +203,11 @@ That's why the implementation is intentionally simple: it's not trying to be a f
 
 ### Why not Spring Security?
 
-We use a 93-line filter instead of `spring-boot-starter-security`. The trade-off:
+We use a 131-line filter instead of `spring-boot-starter-security`. The trade-off:
 
 | Pro | Con |
 |---|---|
-| Tiny attack surface — 93 lines vs ~50,000 in spring-security | Doesn't get OAuth / JWT / RBAC for free |
+| Tiny attack surface — 131 lines vs ~50,000 in spring-security | Doesn't get OAuth / JWT / RBAC for free |
 | No dependency drift | Have to write our own auth if we ever need more |
 | Easy to audit | Less ergonomic for complex auth flows |
 
@@ -248,7 +274,7 @@ Currently not supported — there's one key. If you need per-operator audit trai
 
 ## Why `/admin/*` and not `/admin/**`?
 
-Look closely at [`AdminAuthFilter.java:70`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java#L70):
+Look closely at the check in [`AdminAuthFilter.shouldAuthenticate`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java):
 ```java
 return uri.startsWith("/admin/");
 ```
@@ -302,12 +328,15 @@ curl -sX POST http://localhost:8080/execute-rule \
 # → HTTP/1.1 200
 ```
 
-### Live: with key unset (default)
+### Live: with key unset
 
+Behavior depends on the active profile.
+
+**`local`/`dev` (open with WARN):**
 ```bash
-# Default — no ADMIN_API_KEY set
+# No ADMIN_API_KEY set, dev profile
 unset ADMIN_API_KEY
-docker compose up -d --force-recreate app
+SPRING_PROFILES_ACTIVE=dev docker compose up -d --force-recreate app
 
 # /admin/health is open
 curl -i http://localhost:8080/admin/health 2>&1 | head -1
@@ -318,17 +347,25 @@ docker compose logs app | grep 'Admin API key'
 # → WARN  c.c.d.api.filter.AdminAuthFilter - Admin API key is not configured ...
 ```
 
+**`prod`/`docker` (fail-closed — app does not start):**
+```bash
+# No ADMIN_API_KEY set, docker profile
+unset ADMIN_API_KEY
+SPRING_PROFILES_ACTIVE=docker docker compose up -d --force-recreate app
+
+# The container fails to become healthy; startup log shows:
+docker compose logs app | grep -i 'ADMIN_API_KEY must be set'
+# → IllegalStateException: ADMIN_API_KEY must be set when running with a deployable profile [prod, docker] ...
+```
+
 ---
 
 ## Test coverage
 
-[`AdminAuthFilterTest.java`](../src/test/java/com/company/drools/api/filter/AdminAuthFilterTest.java) covers (9 tests):
-- Auth disabled when key empty/null → all paths pass
-- Auth enabled, valid key → request proceeds
-- Auth enabled, missing header → 401
-- Auth enabled, wrong header → 401
-- Non-admin paths bypass auth even when key set
-- Edge cases: empty header value, whitespace key, etc.
+[`AdminAuthFilterTest.java`](../src/test/java/com/company/drools/api/filter/AdminAuthFilterTest.java) covers (13 tests, grouped in `@Nested` classes):
+- **When API key is configured**: valid key proceeds; invalid key → 401; missing header → 401; non-admin and `/actuator/*` paths bypass auth; `/admin/refresh-rules` is protected; error-response JSON shape.
+- **When API key is not configured (non-deployable profile)**: admin requests allowed with empty key and with null key.
+- **Fail-closed in deployable profiles (P1)**: constructor throws when the key is blank under `prod`; throws when null under `docker`; does NOT throw under `local`; starts normally when a key is configured in a deployable profile.
 
 Run with:
 ```bash

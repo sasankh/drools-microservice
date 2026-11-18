@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, operators |
 | **Purpose** | Line-by-line walkthrough of `Dockerfile` and `docker-compose.yml` so a reader understands every flag, env var, healthcheck, and volume |
-| **Last verified against** | [`Dockerfile`](../Dockerfile), [`docker-compose.yml`](../docker-compose.yml) on 2026-05-24 |
+| **Last verified against** | [`Dockerfile`](../Dockerfile), [`docker-compose.yml`](../docker-compose.yml) on 2026-08-20 |
 | **Related docs** | [03-tech-stack.md](03-tech-stack.md), [05-environments-and-profiles.md](05-environments-and-profiles.md), [06-deployment.md](06-deployment.md), [24-jvm-optimization.md](24-jvm-optimization.md) |
 
 ---
@@ -22,7 +22,7 @@ The Dockerfile and compose file together encode dozens of decisions about JVM tu
 ### Stage 1: Build (lines 1–13)
 
 ```dockerfile
-FROM maven:3.9-eclipse-temurin-25 AS build
+FROM maven:3.9-eclipse-temurin-25@sha256:<digest> AS build
 WORKDIR /app
 
 # Cache dependencies by copying pom.xml first
@@ -33,6 +33,8 @@ RUN mvn dependency:go-offline -B
 COPY src ./src
 RUN mvn clean package -DskipTests
 ```
+
+**Why the `@sha256:<digest>` suffix**: both base images are pinned to an exact content digest in the real Dockerfile (not just a mutable tag), so a rebuild always pulls the identical base layer — reproducible builds, immune to a re-pushed upstream tag. See the actual digests in [`Dockerfile`](../Dockerfile).
 
 **Why `maven:3.9-eclipse-temurin-25` for the build stage**:
 - Maven 3.9+ matches the project's enforcer rule.
@@ -50,7 +52,7 @@ RUN mvn clean package -DskipTests
 ### Stage 2: Runtime (lines 16–57)
 
 ```dockerfile
-FROM amazoncorretto:25-alpine-jdk
+FROM amazoncorretto:25-alpine-jdk@sha256:<digest>
 WORKDIR /app
 
 # Add non-root user for security
@@ -125,7 +127,7 @@ ENV JAVA_OPTS="-XX:+UseContainerSupport \
 
 ```dockerfile
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/admin/health || exit 1
+  CMD wget -q --tries=1 --header="X-Admin-API-Key: ${ADMIN_API_KEY}" -O /dev/null http://localhost:8080/admin/health || exit 1
 ```
 
 | Field | Value | Why |
@@ -134,7 +136,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 | `timeout` | 10s | Allows for occasional GC pause. |
 | `start-period` | 60s | Spring Boot + Drools rule compilation takes ~30–45s on a cold start. Don't fail the container during boot. |
 | `retries` | 3 | Three consecutive failures = container marked unhealthy. Avoids flap on a single transient blip. |
-| Command | `wget --spider` to `/admin/health` | Alpine has `wget` built in but not `curl`. `--spider` does HEAD/GET without saving. |
+| Command | `wget` to `/admin/health` **with the `X-Admin-API-Key` header** | Alpine has `wget` built in but not `curl`. `/admin/*` requires the admin key when one is set (prod/docker), so the probe forwards `${ADMIN_API_KEY}`; `-O /dev/null` discards the body. |
 
 **Why `/admin/health` (port 8080) and not `/actuator/health` (port 8081)**:
 - `/admin/health` is the project's enriched health endpoint with component-level breakdown (Drools, S3, Redis, circuit breakers, cache).
@@ -182,7 +184,7 @@ app:
     dockerfile: Dockerfile
   ports:
     - "8080:8080"  # Main API + admin
-    - "8081:8081"  # Actuator
+    - "127.0.0.1:8081:8081"  # Actuator — bound to host loopback only
   deploy:
     resources:
       limits:    { memory: 4G, cpus: '2.0' }
@@ -197,6 +199,11 @@ app:
                 -XX:+HeapDumpOnOutOfMemoryError
                 -XX:HeapDumpPath=/tmp/heap-dumps/heapdump.hprof
                 -Xlog:gc*:file=/tmp/gc-logs/gc.log:time,uptime,level,tags
+
+    # Admin authentication — the docker profile FAILS TO START without this (AdminAuthFilter
+    # fail-closed on deployable profiles). Matches the X-Admin-API-Key used by the healthcheck
+    # and full-docker-test-plan.md.
+    - ADMIN_API_KEY=admin-secret
 
     # Rule source configuration
     - RULE_SOURCE=s3
@@ -247,7 +254,8 @@ app:
   networks: [drools-network]
   restart: unless-stopped
   healthcheck:
-    test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/admin/health"]
+    # /admin/* requires the admin key under the docker profile — send the X-Admin-API-Key header
+    test: ["CMD", "wget", "--quiet", "--tries=1", "--header=X-Admin-API-Key: admin-secret", "-O", "/dev/null", "http://localhost:8080/admin/health"]
     interval: 30s
     timeout: 10s
     retries: 3

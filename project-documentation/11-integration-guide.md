@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | External integrators, partner application developers |
 | **Purpose** | How to call this service from a client application — language-agnostic patterns plus copy-paste examples in curl, Python, Java, and Node.js |
-| **Last verified against** | Live stack on 2026-05-24 |
+| **Last verified against** | Live stack on 2026-08-20 |
 | **Related docs** | [10-api-reference.md](10-api-reference.md), [12-error-code-catalog.md](12-error-code-catalog.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md), [15-admin-authentication.md](15-admin-authentication.md) |
 
 ---
@@ -13,9 +13,9 @@
 
 To execute a rule:
 - `POST /execute-rule` with body `{"rule_id": "...", "data": {...}}`
-- Send a stable `X-API-Key` or `X-Client-Id` header for predictable rate-limit identity
+- Rate-limit buckets are keyed on your **source IP only** — no header changes your bucket (see below)
 - Read `X-RateLimit-Remaining` / `X-RateLimit-Reset` and back off when needed
-- Retry only on **429** (rate limit) and **503** (circuit breaker open), never on **400** (validation) or **404** (no such rule)
+- Retry only on **429** (rate limit) and **503** (circuit breaker open **or** transient thread-pool saturation), never on **400** (validation) or **404** (no such rule)
 - Treat the response's `error.code` field as the source of truth (not the HTTP status)
 
 ---
@@ -31,7 +31,6 @@ DROOLS_URL="http://localhost:8080"
 # Execute a rule
 curl -sX POST "$DROOLS_URL/execute-rule" \
   -H 'Content-Type: application/json' \
-  -H 'X-Client-Id: my-app' \
   -d '{
     "rule_id": "pricing.discount.simple",
     "data": { "amount": 100 }
@@ -70,20 +69,18 @@ See [15-admin-authentication.md](15-admin-authentication.md).
 
 ---
 
-## Stable client identity
+## Client identity is your source IP
 
-The service rate-limits per client. By default, "client" means `request.getRemoteAddr()` — the TCP peer's IP. **Behind a load balancer, this means everyone shares one bucket.**
+The service rate-limits per client, and **"client" always means your source IP** — `request.getRemoteAddr()`, the TCP peer the service sees. There is **no header you can send to change your bucket**: `X-API-Key`, `Authorization`, and `X-Client-Id` are deliberately **not** read by the limiter (keying on unauthenticated headers would let any caller defeat it — finding P2).
 
-To get your own bucket:
-
-| Header you send | Bucket key in the limiter |
+| What you send | Bucket key in the limiter |
 |---|---|
-| `X-API-Key: my-key` | `api-key:my-key` |
-| `Authorization: Bearer eyJ...` | `bearer:<hash>` |
-| `X-Client-Id: my-service-a` | `client-id:my-service-a` |
-| (none) | `ip:<remote_addr>` |
+| `X-API-Key`, `Authorization`, `X-Client-Id`, anything | ignored for bucketing |
+| (bucket key is always) | `ip:<source-address>` |
 
-Pick whichever fits your auth scheme. **Stable across redeploys is the goal** — don't put a random UUID per process or you'll spam the rate limiter's `max-clients` cap.
+Implications:
+- **Behind a load balancer that terminates the connection, everyone shares one bucket** (the LB's IP). The operator fixes this by deploying behind a trusted proxy that overwrites `X-Forwarded-For` and setting `DROOLS_RATE_LIMITING_TRUST_PROXY=true` — then each real client IP gets its own bucket. This is an operator setting; there is nothing a client sends to opt in.
+- If you call from behind NAT / a shared egress, you share a bucket with everyone on that egress IP. Plan your request budget accordingly.
 
 ---
 
@@ -98,11 +95,9 @@ All four examples below execute the same simple-discount rule and produce the sa
 set -euo pipefail
 
 DROOLS_URL="${DROOLS_URL:-http://localhost:8080}"
-CLIENT_ID="${CLIENT_ID:-my-app}"
 
 response=$(curl -sX POST "$DROOLS_URL/execute-rule" \
   -H 'Content-Type: application/json' \
-  -H "X-Client-Id: $CLIENT_ID" \
   -d '{"rule_id":"pricing.discount.simple","data":{"amount":100}}')
 
 # Parse and use jq for branching
@@ -135,13 +130,11 @@ from tenacity import (
 )
 
 DROOLS_URL = os.environ.get("DROOLS_URL", "http://localhost:8080")
-CLIENT_ID = os.environ.get("CLIENT_ID", "my-app")
 TIMEOUT = 30  # match the service's RULE_EXECUTION_TIMEOUT_SECONDS
 
 session = requests.Session()
 session.headers.update({
     "Content-Type": "application/json",
-    "X-Client-Id": CLIENT_ID,
 })
 
 
@@ -211,10 +204,9 @@ public class DroolsClient {
 
   private final WebClient webClient;
 
-  public DroolsClient(String baseUrl, String clientId) {
+  public DroolsClient(String baseUrl) {
     this.webClient = WebClient.builder()
         .baseUrl(baseUrl)
-        .defaultHeader("X-Client-Id", clientId)
         .defaultHeader("Content-Type", "application/json")
         .build();
   }
@@ -278,7 +270,7 @@ public class DroolsClient {
 }
 
 // Usage:
-//   DroolsClient client = new DroolsClient("http://localhost:8080", "my-app");
+//   DroolsClient client = new DroolsClient("http://localhost:8080");
 //   Map<String, Object> result = client.executeRule(
 //       "pricing.discount.simple", Map.of("amount", 100));
 //   // result.get("discount") == 10.0
@@ -293,7 +285,6 @@ public class DroolsClient {
 // No dependencies required.
 
 const DROOLS_URL = process.env.DROOLS_URL ?? "http://localhost:8080";
-const CLIENT_ID = process.env.CLIENT_ID ?? "my-app";
 const TIMEOUT_MS = 30_000;
 
 class DroolsError extends Error {
@@ -312,7 +303,6 @@ async function _post(body) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Client-Id": CLIENT_ID,
       },
       body: JSON.stringify(body),
       signal: ctrl.signal,
@@ -376,7 +366,7 @@ if body.get("error"):
     if code == "RATE_LIMIT_EXCEEDED":
         # back off, retry
     elif code == "SERVICE_UNAVAILABLE":
-        # circuit breaker open; back off, retry
+        # circuit breaker open OR rule-execution pool saturated; back off, retry
     elif code == "RULE_NOT_FOUND":
         # don't retry; this rule isn't deployed
     elif code == "INVALID_INPUT":
@@ -404,7 +394,7 @@ See [12-error-code-catalog.md](12-error-code-catalog.md) for every code.
 | 413 | `REQUEST_TOO_LARGE` | **No** | Reduce payload |
 | 429 | `RATE_LIMIT_EXCEEDED` | **Yes** | Honor `X-RateLimit-Reset-After`. Don't retry faster than that. |
 | 500 | `INTERNAL_ERROR` | Maybe | Once or twice with exponential backoff. If it keeps happening, the service has a bug. |
-| 503 | `SERVICE_UNAVAILABLE` | **Yes** | Circuit breaker open. Wait `wait-duration-in-open-state` (60s S3, 30s Redis defaults). |
+| 503 | `SERVICE_UNAVAILABLE` | **Yes** | Circuit breaker open (wait `wait-duration-in-open-state` — 60s S3, 30s Redis defaults) **or** the rule-execution thread pool is momentarily saturated (retry after a short backoff). |
 
 **Recommended client retry policy**: exponential backoff with jitter, max 5 attempts, max 30s total wait. Honor `X-RateLimit-Reset-After` when present.
 
@@ -446,7 +436,7 @@ async def execute_one(session, rule_id, data):
 
 async def execute_batch(rule_id, inputs, concurrency=10):
     sem = asyncio.Semaphore(concurrency)
-    async with aiohttp.ClientSession(headers={"X-Client-Id": "batch"}) as session:
+    async with aiohttp.ClientSession(headers={"Content-Type": "application/json"}) as session:
         async def bounded(input):
             async with sem:
                 return await execute_one(session, rule_id, input)
@@ -557,7 +547,7 @@ Same pattern works in Java (`MockWebServer`), Node.js (`nock`).
 | Trust the HTTP status alone | Parse `body.error.code` for branching |
 | Retry 4xx errors | Only retry 429 and 503 (and maybe 500 once or twice) |
 | Open a new TCP connection per request | Use a session / connection pool |
-| Use a random UUID per call as `X-Client-Id` | Use a stable identifier (your service name, your account ID, etc.) |
+| Expect `X-API-Key` / `X-Client-Id` to give you a private rate-limit bucket | Remember buckets are keyed on source IP only; size your request budget for the IP you call from |
 | Set timeout < `RULE_EXECUTION_TIMEOUT_SECONDS` (30s) | Match or exceed the service's timeout — otherwise you give up before the service does |
 | Pollute logs with raw response bodies | Log `error.code` and correlation IDs only |
 | Build a "smart" client that auto-retries everything | Use a deterministic retry policy; let real errors surface |

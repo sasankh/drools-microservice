@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 6 * * 1'   # weekly Monday 06:00 UTC (for the dependency-check job)
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    name: Build, test & quality gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # `verify` runs the unit suite plus the gates bound to the verify phase:
+      # spotless:check, spotbugs:check, and jacoco:check (coverage floor). (S3/S4)
+      - name: Verify (unit tests + spotless + spotbugs + coverage floor)
+        run: mvn -B clean verify
+
+      # Testcontainers integration tests need a real Docker daemon — available on ubuntu-latest but
+      # not in the macOS dev loop (hence the surefire exclusion). Run them explicitly here. (S3/S9)
+      - name: Integration tests (Testcontainers)
+        run: >
+          mvn -B test
+          -Dtest='S3StorageIntegrationTest,RedisCachedStorageIntegrationTest,RedisPubSubIntegrationTest'
+          -Dsurefire.failIfNoSpecifiedTests=false
+
+      - name: Upload JaCoCo report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
+
+  dependency-check:
+    name: OWASP dependency-check (CVE gate, fails on CVSS >= 7)
+    runs-on: ubuntu-latest
+    # NVD is heavily rate-limited without an API key, so this runs on push to main, on schedule, and
+    # on demand — not on every PR. Add an NVD_API_KEY repo secret to speed it up. (S3/S4)
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Cache OWASP NVD data
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: nvd-data-${{ github.run_id }}
+          restore-keys: nvd-data-
+
+      - name: dependency-check
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: mvn -B dependency-check:check ${NVD_API_KEY:+-DnvdApiKey=$NVD_API_KEY}

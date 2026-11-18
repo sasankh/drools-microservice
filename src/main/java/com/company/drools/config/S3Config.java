@@ -14,6 +14,8 @@ import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.awscore.retry.AwsRetryStrategy;
+import software.amazon.awssdk.core.checksums.RequestChecksumCalculation;
+import software.amazon.awssdk.core.checksums.ResponseChecksumValidation;
 import software.amazon.awssdk.http.SdkHttpClient;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import software.amazon.awssdk.regions.Region;
@@ -77,7 +79,12 @@ public class S3Config {
       log.info("Using custom S3 endpoint: {}", endpoint);
       clientBuilder
           .endpointOverride(URI.create(endpoint))
-          .forcePathStyle(true); // Required for LocalStack
+          .forcePathStyle(true) // Required for LocalStack
+          // LocalStack (e.g. 2.3) rejects the SDK's default CRC32 request checksum. Only send
+          // checksums when required for custom/LocalStack endpoints; real AWS S3 (no endpoint
+          // override) keeps the SDK defaults.
+          .requestChecksumCalculation(RequestChecksumCalculation.WHEN_REQUIRED)
+          .responseChecksumValidation(ResponseChecksumValidation.WHEN_REQUIRED);
     }
 
     S3Client s3Client = clientBuilder.build();
