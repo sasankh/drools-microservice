@@ -1,7 +1,7 @@
 # Full Docker Integration Test Plan
 **Purpose**: Verify all application functionality works end-to-end in Docker.
-**Usage**: Tell Claude "run the full docker test plan from full-docker-test-plan.md"
-**Last Validated**: 2026-08-19 (production-readiness fixes — see [`.ai-workspace/project-plans/production-readiness-fixes-checklist.md`](.ai-workspace/project-plans/production-readiness-fixes-checklist.md))
+**Usage**: run `./scripts/run-docker-test-plan.sh` (automates every step below and prints a PASS/FAIL table), or tell Claude "run the full docker test plan from full-docker-test-plan.md"
+**Last Validated**: 2026-11-17 on Linux / Docker Engine 29.10 (pre-merge fixes — see [`.ai-workspace/project-plans/pre-merge-fixes-plan-2026-11-17.md`](.ai-workspace/project-plans/pre-merge-fixes-plan-2026-11-17.md))
 
 > ⚠️ **Admin auth is now enforced.** As of the 2026-08-19 hardening, **all `/admin/*` endpoints
 > require the `X-Admin-API-Key` header** (default `admin-secret`, set in `docker-compose.yml`). Add
@@ -16,18 +16,18 @@
 # Ensure Docker is running
 docker info > /dev/null 2>&1 && echo "Docker OK" || echo "Docker NOT running"
 
-# Stop local Redis if running (conflicts with Docker Redis on port 6379)
-brew services stop redis 2>/dev/null || true
+# Ports 8080, 8081, 4566 and 6379 must be free (stop any local Redis on 6379).
+# Linux with Podman also installed: export DOCKER_HOST=unix:///var/run/docker.sock
 
 # Clean up any existing containers
-docker-compose down -v 2>/dev/null
+docker compose down -v 2>/dev/null
 ```
 
 ## Step 1: Build & Start Docker Stack
 
 ```bash
 # Build fresh image and start all services
-docker-compose up -d --build
+docker compose up -d --build
 
 # Wait for app to become healthy (localstack + redis must be healthy first)
 # App depends_on both with condition: service_healthy
@@ -39,12 +39,12 @@ for i in $(seq 1 30); do
   echo "  [$i] status=$STATUS"
 done
 
-docker-compose ps
+docker compose ps
 ```
 
 **Expected**: All 3 services (app, localstack, redis) show status "Up ... (healthy)".
 
-**If app stays unhealthy**: Check logs with `docker-compose logs --tail=50 app` for startup errors.
+**If app stays unhealthy**: Check logs with `docker compose logs --tail=50 app` for startup errors.
 
 ---
 
@@ -170,102 +170,34 @@ curl -s http://localhost:8080/admin/rules -H "X-Admin-API-Key: admin-secret" | j
 
 ---
 
-## Step 4: Rule Execution (10 Representative Sample Rules)
+## Step 4: Rule Execution (10 Representative Sample Rules — values checked)
 
-> The 7 rules added 2026-05-10 (accumulate, exists, salience, temporal, forall, notempty,
-> compound) are covered by `RuleExecutionIntegrationTest` and the load-test orchestrator
-> — they are not re-exercised here.
+All 17 sample rules are loaded into one KieBase, and every rule whose conditions match the input fires. **Rules stack.** For example, `pricing.discount.simple` (10% on `amount >= 50`) also applies on top of VIP, bulk and similar discounts. The expected values below include that stacking. The other 7 rules (accumulate, exists, salience, temporal, forall, notempty, compound) are checked by `scripts/run-docker-test-plan.sh` (X1.x) and `RuleExecutionIntegrationTest`.
 
-All rule execution responses follow this format:
+All responses follow:
 ```json
-{
-  "rule_id": "...",
-  "result": { ... },
-  "error": null,
-  "execution_time_ms": ...
-}
+{ "rule_id": "...", "result": { ... }, "error": null, "execution_time_ms": ... }
 ```
-**Pass criteria**: `error` is `null` and `result` is a non-null object.
+**Pass criteria**: `error` is `null` **and** the `result` values match.
 
-### 4.1 Simple Discount
-```bash
-curl -s -X POST http://localhost:8080/execute-rule \
-  -H "Content-Type: application/json" \
-  -d '{"rule_id": "pricing.discount.simple", "data": {"amount": 100}}' | jq .
-```
-**Expected**: `result` contains `discount`, `discountPercent`, `discountReason`. Amount modified.
+| # | Request `data` (`rule_id`) | Expected `result` |
+|---|---|---|
+| 4.1 | `{"amount":100}` (`pricing.discount.simple`) | `amount` 90.0, `discount` 10.0 |
+| 4.2 | `{"customerType":"VIP","amount":100}` (`pricing.discount.vip`) | `amount` 72.0 (100 × 0.8 × 0.9) |
+| 4.3 | `{"quantity":15,"amount":200}` (`pricing.discount.bulk`) | `amount` 153.0 (200 × 0.85 × 0.9) |
+| 4.4 | `{"isFirstTimeCustomer":true,"amount":100}` (`pricing.discount.first-time`) | `amount` 85.5 |
+| 4.5 | `{"shippingType":"standard","weight":0.5}` (`pricing.shipping.standard`) | `shippingCost` 5.99, `estimatedDays` 5 |
+| 4.6 | `{"shippingType":"express","weight":3,"amount":150}` (`pricing.shipping.express`) | `freeShipping` true, `shippingCost` 0.0 |
+| 4.7 | `{"promotionCode":"BLACK2024","amount":200}` (`seasonal.holiday.blackfriday`) | `amount` 135.0, `promotionValid` true |
+| 4.8 | `{"isHolidaySeason":true,"amount":100}` (`seasonal.holiday.discount`) | `amount` 79.2 |
+| 4.9 | `{"customerAge":15}` (`validation.customer.age`) | `validationResult` REJECTED, `eligible` false |
+| 4.10 | `{"creditScore":720,"requestedAmount":10000}` (`validation.customer.credit`) | `creditTier` Good, `approvedAmount` 5000.0 |
 
-### 4.2 VIP Discount
+Example:
 ```bash
-curl -s -X POST http://localhost:8080/execute-rule \
-  -H "Content-Type: application/json" \
-  -d '{"rule_id": "pricing.discount.vip", "data": {"customerType": "VIP", "amount": 200}}' | jq .
+curl -s -X POST http://localhost:8080/execute-rule -H "Content-Type: application/json" \
+  -d '{"rule_id": "pricing.discount.vip", "data": {"customerType": "VIP", "amount": 100}}' | jq .result.amount   # 72.0
 ```
-**Expected**: `result` contains VIP-specific discount fields.
-
-### 4.3 Bulk Discount
-```bash
-curl -s -X POST http://localhost:8080/execute-rule \
-  -H "Content-Type: application/json" \
-  -d '{"rule_id": "pricing.discount.bulk", "data": {"quantity": 50, "unitPrice": 10}}' | jq .
-```
-**Expected**: `result` contains `quantity` and `unitPrice` (rule may add discount fields if conditions met).
-
-### 4.4 First-Time Discount
-```bash
-curl -s -X POST http://localhost:8080/execute-rule \
-  -H "Content-Type: application/json" \
-  -d '{"rule_id": "pricing.discount.first-time", "data": {"isFirstOrder": true, "amount": 100}}' | jq .
-```
-**Expected**: `result` contains `discount`, `discountPercent`, `discountReason` for first-time customer.
-
-### 4.5 Standard Shipping
-```bash
-curl -s -X POST http://localhost:8080/execute-rule \
-  -H "Content-Type: application/json" \
-  -d '{"rule_id": "pricing.shipping.standard", "data": {"weight": 5, "distance": 100}}' | jq .
-```
-**Expected**: `result` contains `weight` and `distance` (rule may add shipping cost fields).
-
-### 4.6 Express Shipping
-```bash
-curl -s -X POST http://localhost:8080/execute-rule \
-  -H "Content-Type: application/json" \
-  -d '{"rule_id": "pricing.shipping.express", "data": {"weight": 5, "distance": 100}}' | jq .
-```
-**Expected**: `result` contains `weight` and `distance` (rule may add express shipping fields).
-
-### 4.7 Black Friday
-```bash
-curl -s -X POST http://localhost:8080/execute-rule \
-  -H "Content-Type: application/json" \
-  -d '{"rule_id": "seasonal.holiday.blackfriday", "data": {"amount": 200, "category": "electronics"}}' | jq .
-```
-**Expected**: `result` contains `discount`, `discountPercent`, `discountReason` with Black Friday discount.
-
-### 4.8 Holiday Discount
-```bash
-curl -s -X POST http://localhost:8080/execute-rule \
-  -H "Content-Type: application/json" \
-  -d '{"rule_id": "seasonal.holiday.discount", "data": {"amount": 150, "holiday": "christmas"}}' | jq .
-```
-**Expected**: `result` contains holiday discount fields.
-
-### 4.9 Age Validation
-```bash
-curl -s -X POST http://localhost:8080/execute-rule \
-  -H "Content-Type: application/json" \
-  -d '{"rule_id": "validation.customer.age", "data": {"age": 25, "product": "alcohol"}}' | jq .
-```
-**Expected**: `result` contains `age` and `product` (rule may add validation result fields).
-
-### 4.10 Credit Validation
-```bash
-curl -s -X POST http://localhost:8080/execute-rule \
-  -H "Content-Type: application/json" \
-  -d '{"rule_id": "validation.customer.credit", "data": {"creditScore": 750, "requestedAmount": 5000}}' | jq .
-```
-**Expected**: `result` contains `creditScore` and `requestedAmount` (rule may add approval fields).
 
 ---
 
@@ -310,7 +242,7 @@ curl -s -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
   -d 'not json' | jq .
 ```
-**Expected**: Error response with `error.code` = `"INTERNAL_ERROR"`.
+**Expected**: HTTP 400 with `error.code` = `"INVALID_INPUT"` and message "Request body is not valid JSON" (malformed JSON has been handled as a client error since 2026-05-10).
 
 ### 5.5 Invalid Rule ID Format (Path Traversal)
 ```bash
@@ -336,7 +268,7 @@ done
 HEAP_AFTER=$(curl -s http://localhost:8080/admin/memory/info -H "X-Admin-API-Key: admin-secret" | jq '.heap.usedMB')
 echo "Heap after 3 refreshes: ${HEAP_AFTER}MB"
 ```
-**Expected**: Heap usage is stable and under 500MB. Should not grow by more than ~100MB per refresh cycle (temporary allocation is normal; KieContainer disposal prevents leaks).
+**Expected**: Heap usage is stable and under 500MB. Should not grow by more than ~100MB per refresh cycle (temporary allocation is normal; `KieContainer.updateToVersion` + `KieRepository.removeKieModule` prevent leaks).
 
 ---
 
@@ -375,7 +307,7 @@ curl -s http://localhost:8080/admin/health -H "X-Admin-API-Key: admin-secret" | 
 ### 8.2 Bean wiring (startup logs)
 
 ```bash
-docker-compose logs --tail=200 app 2>&1 | grep -E "RedisCachedRuleStorage|RuleRefreshPublisher|RuleRefreshSubscriber|pub/sub listener|Drools instance ID" | head -10
+docker compose logs app 2>&1 | grep -E "RedisCachedRuleStorage|RuleRefreshPublisher|RuleRefreshSubscriber|pub/sub listener|Drools instance ID" | head -10
 ```
 **Expected**: lines for `RedisCachedRuleStorage delegate set: S3RuleStorage`,
 `RuleRefreshPublisher initialized`, `RuleRefreshSubscriber initialized`,
@@ -455,9 +387,15 @@ Verify the service still works correctly with Redis disabled — this is the def
 single-instance setups.
 
 ```bash
-# Patch compose to REDIS_ENABLED=false (temporary; reverted at the end)
-sed -i.bak 's/- REDIS_ENABLED=true/- REDIS_ENABLED=false/' docker-compose.yml
-docker-compose stop app && docker-compose up -d app
+# Temporary override (the tracked docker-compose.yml is not modified)
+cat > /tmp/redis-off.yml <<'YML'
+services:
+  app:
+    environment:
+      - REDIS_ENABLED=false
+      - REDIS_PUBSUB_ENABLED=false
+YML
+docker compose -f docker-compose.yml -f /tmp/redis-off.yml up -d app
 for i in $(seq 1 30); do
   STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/actuator/health 2>/dev/null)
   if [ "$STATUS" = "200" ]; then echo "App UP"; break; fi; sleep 3
@@ -466,7 +404,7 @@ done
 
 ### 9.1 No Redis beans created
 ```bash
-docker-compose logs --tail=200 app 2>&1 | grep -cE "RedisCachedRuleStorage initialized|RuleRefreshPublisher initialized"
+docker compose logs --tail=200 app 2>&1 | grep -cE "RedisCachedRuleStorage initialized|RuleRefreshPublisher initialized"
 ```
 **Expected**: `0` — no Redis classes initialize when disabled.
 
@@ -484,19 +422,18 @@ curl -s -X POST http://localhost:8080/execute-rule -H "Content-Type: application
 ```
 **Expected**: `rules_loaded` = 17. Rule execution returns `error: null`.
 
-### 9.4 Restore docker-compose
+### 9.4 Back to the default (Redis on)
 ```bash
-mv docker-compose.yml.bak docker-compose.yml
-docker-compose stop app && docker-compose up -d app
+docker compose up -d app
 ```
-**Expected**: `docker-compose.yml` restored to `REDIS_ENABLED=true` default.
+**Expected**: app recreated with the default `REDIS_ENABLED=true`; `components.cache.details.mode` is `"redis"` again.
 
 ---
 
 ## Step 10: Docker Logs Check
 
 ```bash
-docker-compose logs --tail=100 app 2>&1 | grep "ERROR" | grep -v "stack_trace" | head -10
+docker compose logs --tail=100 app 2>&1 | grep "ERROR" | grep -v "stack_trace" | head -10
 ```
 **Expected**: 0 ERROR lines. Some WARN lines may be acceptable (e.g., initial connection retries during startup).
 
@@ -505,10 +442,8 @@ docker-compose logs --tail=100 app 2>&1 | grep "ERROR" | grep -v "stack_trace" |
 ## Step 11: Cleanup
 
 ```bash
-docker-compose down
+docker compose down
 
-# Restart local Redis if it was running before testing
-# brew services start redis
 ```
 **Expected**: All containers stopped and removed cleanly.
 
@@ -548,6 +483,17 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:8080/execute-r
 ```
 A normal rule still returns 200 before and after. (Pool saturation returns 503 — `RuleExecutorTest`.)
 
+### 12.7 Request-path bypass rejected (ADR-024, 2026-11-17)
+```bash
+for p in '/admin;x/health' '/%61dmin/health' '/admin/health;x'; do
+  curl -s -o /dev/null -w "$p -> %{http_code}\n" "http://localhost:8080$p"   # expect 400 (no key sent)
+done
+curl -s -o /dev/null -w '%{http_code}\n' -X POST 'http://localhost:8080/%61dmin/memory/gc'   # expect 400
+curl -s -o /dev/null -w '%{http_code}\n' -X POST 'http://localhost:8080/%65xecute-rule' \
+  -H 'Content-Type: application/json' -d '{}'                                                  # expect 400
+```
+**Expected**: all 400 `INVALID_INPUT` ("Malformed request path"). Before the fix these reached the admin controller without a key (200).
+
 ### 12.6 RULE_DELETED propagates to the compiled corpus (S5)
 ```bash
 docker exec drools-microservice-redis-1 redis-cli PUBLISH drools:rule:events \
@@ -575,20 +521,20 @@ curl -s -X POST http://localhost:8080/admin/refresh-rules -H "X-Admin-API-Key: a
 | 3.2 | Refresh all rules | `status` = `"completed"`, `rules_loaded` = 17 | |
 | 3.3 | Refresh single rule | `status` = `"success"` | |
 | 3.4 | Rules after refresh | `total_rules` still 17 | |
-| 4.1 | Simple discount | `error` is null, `result` has discount fields | |
-| 4.2 | VIP discount | `error` is null, `result` has discount fields | |
-| 4.3 | Bulk discount | `error` is null, `result` is non-null | |
-| 4.4 | First-time discount | `error` is null, `result` has discount fields | |
-| 4.5 | Standard shipping | `error` is null, `result` is non-null | |
-| 4.6 | Express shipping | `error` is null, `result` is non-null | |
-| 4.7 | Black Friday | `error` is null, `result` has discount fields | |
-| 4.8 | Holiday discount | `error` is null, `result` has discount fields | |
-| 4.9 | Age validation | `error` is null, `result` is non-null | |
-| 4.10 | Credit validation | `error` is null, `result` is non-null | |
+| 4.1 | Simple discount | `amount` 90.0 | |
+| 4.2 | VIP discount (stacked) | `amount` 72.0 | |
+| 4.3 | Bulk discount (stacked) | `amount` 153.0 | |
+| 4.4 | First-time discount (stacked) | `amount` 85.5 | |
+| 4.5 | Standard shipping | `shippingCost` 5.99 | |
+| 4.6 | Express shipping | free shipping (amount ≥ 100) | |
+| 4.7 | Black Friday (stacked) | `amount` 135.0, `promotionValid` true | |
+| 4.8 | Holiday discount (stacked) | `amount` 79.2 | |
+| 4.9 | Age validation | 15 → REJECTED | |
+| 4.10 | Credit validation | 720 → Good, 5000 | |
 | 5.1 | Non-existent rule | `error.code` = `"RULE_NOT_FOUND"` | |
 | 5.2 | Missing rule_id | `error.code` = `"INVALID_INPUT"` | |
 | 5.3 | Empty data | `error` is null, `result` = `{}` | |
-| 5.4 | Invalid JSON | `error.code` = `"INTERNAL_ERROR"` | |
+| 5.4 | Invalid JSON | HTTP 400, `error.code` = `"INVALID_INPUT"` | |
 | 5.5 | Path traversal | `error.code` = `"INVALID_INPUT"` | |
 | 6 | Memory stability | Heap < 500MB after 3 refreshes | |
 | 7 | GC trigger | `message` = `"Garbage collection triggered"` | |
@@ -602,27 +548,29 @@ curl -s -X POST http://localhost:8080/admin/refresh-rules -H "X-Admin-API-Key: a
 | 9.1 | Redis OFF: no Redis beans | `0` Redis init log lines | |
 | 9.2 | Redis OFF: health mode=off | `cache.mode = "off"`, `redis` section is null | |
 | 9.3 | Redis OFF: still functional | refresh + execute succeed | |
-| 9.4 | Compose restored | `REDIS_ENABLED=true` back in `docker-compose.yml` | |
+| 9.4 | Back to default | app recreated with Redis on (`mode: "redis"`) | |
 | 10 | No errors in logs | 0 ERROR lines in last 100 log lines | |
-| 11 | Clean shutdown | `docker-compose down` exits cleanly | |
+| 11 | Clean shutdown | `docker compose down` exits cleanly | |
 | 12.1 | Admin auth (P1) | no-key→401, key→200, wrong→401; blank-key docker profile fails to start | |
 | 12.2 | Rate limit by IP (P2) | rotating headers don't reset the bucket | |
 | 12.3 | Actuator loopback (P5) | `8081` bound to `127.0.0.1` | |
 | 12.4 | Actuator w/ Redis off (P4) | `/actuator/health` = 200 when `REDIS_ENABLED=false` | |
 | 12.5 | Exec timeout (P3/P7) | runaway rule → 408, service responsive; saturation → 503 | |
 | 12.6 | RULE_DELETED (S5) | pub/sub delete removes rule (17→16), refresh restores 17 | |
+| 12.7 | Path bypass (ADR-024) | `/admin;x/…`, `/%61dmin/…`, `/%65xecute-rule` → 400 | |
 
 ---
 
 ## Notes
-- Port 6379 may conflict with a locally running Redis — stop it first with `brew services stop redis`
+- Port 6379 may conflict with a locally running Redis — stop it first
 - App typically takes ~30 seconds to become healthy after container starts
 - Testcontainers tests (`S3StorageIntegrationTest`, `RedisCachedStorageIntegrationTest`,
   `RedisPubSubIntegrationTest`) are permanently excluded from default `mvn test` runs via
   the surefire config in `pom.xml`. To run them, you need Java 25 + a native Docker daemon
   (Linux/CI). Docker Desktop on macOS proxies its socket and breaks Testcontainers from
   inside a dockerized Maven container.
-- App ports `8080` and `8081` are published to all interfaces (needed for dev access); infrastructure ports (LocalStack 4566, Redis 6379) are bound to `127.0.0.1` only
-- Admin endpoints require the `X-Admin-API-Key` header (default `admin-secret` for dev/local)
+- App port `8080` is published on all interfaces (dev access); actuator `8081`, LocalStack `4566` and Redis `6379` are bound to `127.0.0.1` only
+- Admin endpoints require the `X-Admin-API-Key` header (`admin-secret` in docker-compose; required on the `docker`/`prod` profiles)
+- GC log and heap dumps live on named volumes: `docker compose exec app tail -f /tmp/gc-logs/gc.log`, `docker compose cp app:/tmp/heap-dumps ./heap-dumps`
 - New Redis env vars (2026-05-20): `REDIS_DRL_RULES_TTL_MINUTES`, `REDIS_DRL_RULES_KEY_PREFIX`,
   `REDIS_PUBSUB_ENABLED`, `REDIS_REFRESH_CHANNEL`. Deprecated: `REDIS_TTL_MINUTES`, `LRU_CACHE_MAX_SIZE`.

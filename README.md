@@ -39,7 +39,7 @@ Client Request → REST API → Rule Engine → Storage Layer
 ### Tech Stack
 
 - **Java 25** - Runtime platform (enforced by Maven Enforcer Plugin)
-- **Spring Boot 3.5.3** - Application framework with security and validation
+- **Spring Boot 3.5.16** - Application framework with security and validation
 - **Drools 10.2.0** - Business rules engine
 - **AWS S3** - Rule storage (with LocalStack for development)
 - **Redis** - Distributed caching (optional)
@@ -884,37 +884,46 @@ mvn test jacoco:report
 
 ### Integration Tests
 ```bash
-# Run integration tests
-mvn test -Dtest=*IntegrationTest
+# Plain integration tests (real Drools, real embedded Tomcat) run with `mvn test` by default,
+# e.g. RuleExecutionIntegrationTest, RuleRefreshIntegrationTest, PathBypassIntegrationTest.
 
-# Run with LocalStack
-mvn test -Dtest=S3StorageIntegrationTest
+# Testcontainers ITs (need a Docker daemon; excluded from default mvn test, run in CI):
+mvn test -Dtest='S3StorageIntegrationTest,RedisCachedStorageIntegrationTest,RedisPubSubIntegrationTest'
 ```
 
 ### Quick E2E & Load Test
 
-Run this whenever you want to verify the full stack is healthy — rules loading from S3, execution working, hot reload uninterrupted, memory stable.
+Run this whenever you want to verify the full stack is healthy: rules loading from S3, execution producing the right values, hot reload with no dropped requests, and stable memory.
 
-#### One-command option
+#### One-command options
 
-The script [`scripts/e2e-load-test.sh`](scripts/e2e-load-test.sh) runs the entire sequence below unattended:
+[`scripts/e2e-load-test.sh`](scripts/e2e-load-test.sh) runs the sequence below unattended. Its load phase uses a keep-alive Python harness that checks every response's values:
 
 ```bash
-# Full run (tears down stack at end)
-./scripts/e2e-load-test.sh
-
-# Keep stack running after test (useful for debugging)
-./scripts/e2e-load-test.sh --no-teardown
-
-# Skip docker compose build if image is already current
-./scripts/e2e-load-test.sh --skip-build
+./scripts/e2e-load-test.sh                 # full run: 20 workers × 300 s, tears down at end
+./scripts/e2e-load-test.sh --duration 60   # shorter load phase
+./scripts/e2e-load-test.sh --no-teardown   # keep the stack running afterwards
+./scripts/e2e-load-test.sh --skip-build    # reuse the existing image
 ```
 
-The script patches `docker-compose.yml` to disable rate limiting for the load test and restores it automatically on exit (even on failure or Ctrl-C). Exits non-zero if any check fails — CI-friendly.
+[`scripts/run-docker-test-plan.sh`](scripts/run-docker-test-plan.sh) automates [`full-docker-test-plan.md`](full-docker-test-plan.md): Steps 1–12, value checks for all 17 rules, rate-limit spoofing, runaway-rule 408, RULE_DELETED and the path-bypass check. It prints a PASS/FAIL table.
+
+```bash
+./scripts/run-docker-test-plan.sh
+```
+
+Both scripts:
+- leave tracked files untouched (rate limiting is disabled through `scripts/docker-compose.loadtest.yml`);
+- need no AWS CLI;
+- exit non-zero on any failure, so they are CI-friendly.
+
+On Linux with Podman also installed, prefix them with `DOCKER_HOST=unix:///var/run/docker.sock`.
 
 **Baseline from 2026-05-11**: 157,754 requests, **0 errors (0%)**, ~518 RPS, heap stable 180–340 MB, hot reload at 2 min with 0 dropped requests.
 
 **Re-validated 2026-08-20** (post production-readiness hardening, Java 25): 151,741 requests, **0 errors (0%)**, ~499 RPS (peak ~518), heap sawtooth 60–331 MB (post-GC 46 MB), hot reload at 2 min with 0 dropped requests, 17/17 rules loaded after.
+
+**Re-validated 2026-11-17** (Linux, Docker Engine 29.10, keep-alive harness with value checks): see the pre-merge fixes plan (`.ai-workspace/project-plans/pre-merge-fixes-plan-2026-11-17.md`, §B7) for the numbers.
 
 ---
 
