@@ -44,6 +44,7 @@ Format used here: each ADR has Status, Context, Decision, Alternatives Considere
 | [022](#adr-022-storage-delegate-held-in-an-atomicreference-2026-08-20) | Storage delegate held in an `AtomicReference` | Accepted (2026-08-20) |
 | [023](#adr-023-ci-workflow--verify-bound-quality-gates-2026-08-20) | CI workflow + verify-bound quality gates | Accepted (2026-08-20) |
 | [024](#adr-024-strict-request-path-handling-2026-11-17) | Strict request-path handling (reject ambiguous paths + normalized matching) | Accepted (2026-11-17) |
+| [025](#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18) | Per-rule-ID compiled KieBase isolation (rule_id is an execution boundary) | Accepted (2026-11-18) |
 
 ---
 
@@ -1069,6 +1070,94 @@ New filter order: SecurityHeaders (-2) → StrictRequestPath (-1) → AdminAuth 
 
 ---
 
+## ADR-025: Per-rule-ID compiled KieBase isolation (2026-11-18)
+
+**Status**: Accepted
+**Date**: 2026-11-18
+
+### Context
+
+`POST /execute-rule {rule_id, data}` did not run the requested rule. It ran **every loaded rule**.
+- `RuleCompiler` wrote every DRL file into one `KieFileSystem`. With no `kmodule.xml`, Drools built a single default KieBase holding all of them.
+- `RuleExecutor` opened `kieContainer.newKieSession()` on that base and called `fireAllRules`.
+- `rule_id` was used only for an existence check, the ACTIVE check and metrics.
+
+The effects:
+- **Wrong results.** `pricing.discount.vip` with $100 returned **72**, not 80, because `simple`'s 10% stacked on VIP's 20%. A regression test reproduced this on 2026-11-18 and observed 72.0.
+- **Cross-rule crashes.** A forall request with items that have no `price` failed with an NPE thrown from the *bundle* rule's LHS.
+- **Output-key collisions.** Several unrelated rules write `discount`, `validationMethod` and `validationResult`.
+- **Refresh cost and blast radius.** Every request evaluated every rule's LHS. A one-rule change recompiled everything (~510 ms median at 1,000 rules, load test 2026-05-10), and one bad file failed the whole batch.
+
+The 17 sample files have no cross-file `global`, `function`, `declare` or `query`, and each compiles on its own. Their DRL packages are shared per directory: four files declare `com.company.rules.pricing.discount`.
+
+### Options evaluated (spike on Drools 10.2.0, 2026-11-18)
+
+Each option ran the same functional checks:
+- `simple` with VIP fields gives 90.
+- `vip` gives 80.
+- A file with two rules and `salience` fires both, in order.
+- The forall payload without `price` succeeds.
+- All 17 sample files compile independently.
+- A retired KieBase is garbage-collected.
+
+| Option | Functional result |
+|---|---|
+| **A1** — one KieModule per rule ID (own ReleaseId, `removeKieModule` right after taking the KieBase) | All checks pass |
+| **A2a** — `KieHelper` per rule ID | All checks pass |
+| **A2b** — `KnowledgeBuilder` + `KnowledgeBaseFactory` per rule ID (no KieModule / KieRepository) | All checks pass |
+| **B** — one module, a named KieBase per rule ID, each file in its own folder | **Fails.** kbase `packages` matches the DRL's *declared* package, not the folder, so a folder-selected kbase comes out empty (amount stays 100). Files sharing a package can't be separated without rewriting their `package` line. It also needs `drools-xml-support` for `kmodule.xml`. |
+| **C** — the shared KieBase plus an `AgendaFilter` | **Fails.** The filter only gates activations; other rules' LHS still evaluates. The bundle rule threw the NPE even though only the forall rule was allowed to fire. It is also not a boundary. |
+
+Measurements: 1,000 synthetic rule IDs, all in one shared DRL package; one JVM per option; `-Xmx2g`; Docker on Linux.
+
+| | Single global KieBase (before) | A1 | A2a KieHelper | **A2b KnowledgeBuilder** |
+|---|---:|---:|---:|---:|
+| Cold build, sequential | 1.3 s | 5.8 s | 5.7 s | **4.1 s** |
+| Heap with all rules resident | 34.5 MB | 105 MB | 104 MB | **52 MB** |
+| Execution p50 / p99 (10k requests) | 99 / 582 µs | 17 / 450 µs | 16 / 450 µs | **14 / 882 µs** |
+| Single-rule refresh, median / max | 281 / 360 ms (full recompile) | 3.7 / 14.6 ms | 4.5 / 14.8 ms | **3.6 / 11.5 ms** |
+| Metaspace after 100 refreshes | 46.9 MB | 54.5 MB | 54.5 MB | **44.4 MB** |
+
+Leak check, 100 resident IDs and 2,000 refreshes of one ID:
+- **A2b:** heap after GC stays flat at +18.4 MB from 250 through 1,500 refreshes; metaspace levels off at 33.6 MB.
+- **A1:** heap stays flat at +28.4 MB; metaspace levels off at 38.6 MB.
+
+There is no per-refresh leak.
+
+### Decision
+
+**A2b.** Each rule ID gets its own compiled KieBase, built with `KnowledgeBuilder` and `KnowledgeBaseFactory`.
+- The compiled bases live in an immutable `CompiledRuleset` handle held by a `CompiledRulesetRegistry` (a `ConcurrentHashMap`).
+- A request takes the handle for its own `rule_id`, opens a fresh `KieSession` on that base, and closes it.
+- Refresh compiles a candidate off the request path and swaps the handle atomically.
+- In-flight requests keep their reference to the old handle. The JVM frees it once nothing uses it, so no leases or execution read lock are needed.
+
+Why A2b:
+- It has the lowest heap and metaspace of the isolating options.
+- It has the fastest cold build of them.
+- It doesn't involve the `KieRepository` at all, so there's no module bookkeeping to leak.
+- It gives a true per-rule incremental refresh: about 3.6 ms instead of a full recompile.
+
+### Consequences
+
+- **Breaking semantic change.** A request runs only the rules in its own DRL file, so stacked results change (VIP $100: 72 → 80; bulk, first-time, loyalty, Black Friday and holiday similarly). Callers that relied on stacking must request each rule explicitly. An explicit composition feature can be designed later if it's needed. There is no legacy fallback (user decision, 2026-11-18).
+- **Positive**: correct results; no cross-rule NPEs or key collisions.
+- **Positive**: about 6× lower p50 latency, because a request evaluates only its own rule.
+- **Positive**: single-rule refresh is about 80× faster. A bad file fails only its own ID, and that ID keeps its last good version.
+- **Negative**: the cold build is about 3× slower than one batch build (sequential). Mitigations are parallel compile and a readiness probe that stays DOWN until the first load completes.
+- **Negative**: resident heap is about 1.5× the single base (52 vs 34.5 MB at 1,000 IDs). Acceptable at this scale. A bounded, memory-weighted cache is the documented follow-up if the number of IDs grows by orders of magnitude.
+- **Risk**: `KnowledgeBaseFactory` (`org.drools.kiesession.rulebase`) is an internal Drools API. It is confined to `RuleCompiler`, and the tests compile and run all 17 sample files through it, so a Drools upgrade that changes it fails the build immediately. A1 (public API only) is the drop-in fallback.
+- Same rule name in two different rule IDs: previously a compile error, now allowed (separate bases). A duplicate name inside one file is still an error.
+- Supersedes the single-container, `updateToVersion` model of ADR-003 (see the addendum there).
+
+### References
+- `.ai-workspace/project-plans/engine-isolation-hardening-plan-2026-11-18.md` (Phase 1 spike)
+- Spike: `src/test/java/com/company/drools/spike/IsolationSpikeTest.java` (removed once implemented)
+- [`RuleIsolationIntegrationTest.java`](../src/test/java/com/company/drools/integration/RuleIsolationIntegrationTest.java)
+- `39-load-test-findings.md` (2026-05-10 baseline: 510 ms single-rule refresh at 1,000 rules)
+
+---
+
 ## Extension points
 
 These are the documented seams for extending the service without forking it.
@@ -1154,12 +1243,12 @@ The current cache layer is `RedisCachedRuleStorage`, a decorator on `RuleStorage
 
 ## Future ADRs to write (placeholders)
 
-These decisions are anticipated but not yet documented as ADRs. The last written ADR is 024; the next free number is 025 (ADR-015 was reserved for the structured-logging decision and remains the lone gap in the index).
+These decisions are anticipated but not yet documented as ADRs. The last written ADR is 025; the next free number is 026 (ADR-015 was reserved for the structured-logging decision and remains the lone gap in the index).
 
 - **ADR-015**: Logback + logstash-logback-encoder for structured logs (over alternatives) — number reserved, write-up still pending
-- **ADR-025**: Choice of Apache HTTP client for AWS SDK v2 (over Netty)
-- **ADR-026**: Maven over Gradle
-- **ADR-027**: Container Java distribution: Amazon Corretto (over Temurin / Liberica)
+- **ADR-026**: Choice of Apache HTTP client for AWS SDK v2 (over Netty)
+- **ADR-027**: Maven over Gradle
+- **ADR-028**: Container Java distribution: Amazon Corretto (over Temurin / Liberica)
 
 If anyone is making a major change to the corresponding component, write the ADR before changing the code.
 
@@ -1167,7 +1256,7 @@ If anyone is making a major change to the corresponding component, write the ADR
 
 ## How to write a new ADR
 
-1. Pick the next number (025, 026, ... — ADR-015 is reserved but not yet written; ADR-024 is the last written).
+1. Pick the next number (026, 027, ... — ADR-015 is reserved but not yet written; ADR-025 is the last written).
 2. Add an entry to the index above.
 3. Add the section below.
 4. Cite specific code lines.

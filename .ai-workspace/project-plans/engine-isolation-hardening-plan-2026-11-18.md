@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Created** | 2026-11-18 |
-| **Status** | 🟡 Plan written — Phase 0 complete; Phase 1 (spike) starting |
+| **Status** | 🟡 Phase 1 complete (ADR-025: per-ID KnowledgeBuilder KieBase); Phase 2 (isolation) in progress |
 | **Work branch** | `engine-isolation` (git worktree `.claude/worktrees/engine-isolation`, based on `improvements-1-11-18-2026` @ `e1dd059` = `develop` after PR #10) |
 | **Delivered to** | `improvements-1-11-18-2026`, then one PR to `develop` (opened when the user asks) |
 | **Release target** | Next minor after v3.3.0. This contains a **breaking semantic change**: rule stacking is removed. |
@@ -436,15 +436,15 @@ Same as A4.8, plus live: a runaway rule → 408 and the stuck gauge = 1; a cap-l
 - [x] This plan + checklist written (`engine-isolation-hardening-plan-2026-11-18.md`)
 
 ### B1. Phase 1 — Spike + ADR-025
-- [ ] Red regression test (simple + VIP fields → 90; observed 72), `@Disabled` with the observed value
-- [ ] Spike A1 (KieModule per ID + `removeKieModule`/`dispose` + GC)
-- [ ] Spike A2 (`KieHelper` / `KnowledgeBuilder`; repository growth)
-- [ ] Spike B (named KieBase per folder; same-package isolation; single-change cost)
-- [ ] Spike C (AgendaFilter; demonstrate the cross-rule NPE)
-- [ ] Shared functional checks per option (90 / 80 / same package / salience / refresh)
-- [ ] Measurements: compile (17 & 1,000; cold/warm; seq/parallel), heap, metaspace/classes over 100 refreshes, warm p50/p99, single-ID refresh
-- [ ] ADR-025 written with numbers + decision; index row; placeholders renumbered 026–028
-- [ ] Gate: spike green, `mvn -B clean verify` green
+- [x] Red regression test (simple + VIP fields → 90; **observed 72.0**), `@Disabled` with the observed value
+- [x] Spike A1 (KieModule per ID + `removeKieModule` + GC) — all checks pass
+- [x] Spike A2 (`KieHelper` / `KnowledgeBuilder`) — all checks pass; no growth over 2,000 refreshes
+- [x] Spike B — **rejected**: kbase `packages` matches the declared DRL package, not the folder (folder-selected kbase is empty); needs `drools-xml-support`
+- [x] Spike C — **rejected**: bundle LHS still NPEs under an AgendaFilter allowing only the forall rule
+- [x] Shared functional checks per option (90 / 80 / salience order / forall without price / 17 independent / GC)
+- [x] Measurements (1,000 IDs): KnowledgeBuilder cold 4.1 s (global 1.3 s), heap 52 MB (global 34.5), exec p50 14 µs (global 99), single-ID refresh 3.6 ms (global 281 ms), metaspace 44.4 MB (global 46.9); 2,000-refresh leak check flat. Parallel compile deferred to Phase 2 tuning
+- [x] ADR-025 written with numbers + decision (A2b KnowledgeBuilder); index row; placeholders renumbered 026–028
+- [x] Gate: spike green; `mvn -B clean verify` green — 613 tests, 0 failures, 2 skipped (measure + red test), coverage met
 - [ ] Commit
 
 ### B2. Phase 2 — Isolation
@@ -510,4 +510,4 @@ Same as A4.8, plus live: a runaway rule → 408 and the stuck gauge = 1; a cap-l
 
 ---
 
-_Plan created: 2026-11-18 · Last updated: 2026-11-18 (Phase 0 complete; Phase 1 spike starting)_
+_Plan created: 2026-11-18 · Last updated: 2026-11-18 (Phase 1 complete — ADR-025; Phase 2 in progress)_
