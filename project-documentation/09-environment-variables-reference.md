@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, operators, AI agents (the lookup table for "what env var controls X?") |
 | **Purpose** | Exhaustive catalog of every environment variable the code reads. The single source of truth for runtime configuration. |
-| **Last verified against** | [`application.yml`](../src/main/resources/application.yml) and `@Value` annotations in `src/main/java/com/company/drools/config/` on 2026-05-24 |
+| **Last verified against** | [`application.yml`](../src/main/resources/application.yml) and `@Value` annotations in `src/main/java/com/company/drools/config/` on 2026-08-20 |
 | **Related docs** | [05-environments-and-profiles.md](05-environments-and-profiles.md), [08-configuration.md](08-configuration.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
@@ -36,7 +36,7 @@ When this doc says "Default", it means the value used if nothing higher-priority
 - [Thread pools](#thread-pools) (8 vars)
 - [Validation](#validation) (5 vars)
 - [CORS](#cors) (5 vars)
-- [Rate limiting](#rate-limiting) (6 vars)
+- [Rate limiting](#rate-limiting) (7 vars)
 - [Admin authentication](#admin-authentication) (1 var)
 - [Redis](#redis) (7 vars)
 - [AWS](#aws) (6 vars)
@@ -44,7 +44,7 @@ When this doc says "Default", it means the value used if nothing higher-priority
 - [Metrics](#metrics) (2 vars)
 - [Drools system properties](#drools-system-properties) (3, JVM-args only)
 
-**Total: 67 distinct env vars catalogued below.**
+**Total: 68 distinct env vars catalogued below.**
 
 ---
 
@@ -192,16 +192,17 @@ Limits enforced by `@ValidRuleId`, `@ValidRuleData`, and `RequestSizeValidationF
 
 ## Rate limiting
 
-See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) for the full multi-tier client identification flow.
+See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) for the full source-IP client identification flow.
 
 | Variable | Default | What it means |
 |---|---|---|
 | `DROOLS_RATE_LIMITING_ENABLED` | `true` | Master switch. Set `false` to bypass the filter entirely (NOT recommended in prod). |
-| `DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE` | `1000` | Per-client minute limit. |
-| `DROOLS_RATE_LIMITING_REQUESTS_PER_HOUR` | `10000` | Per-client hour limit. |
+| `DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE` | `1000` | Per-source-IP minute limit. |
+| `DROOLS_RATE_LIMITING_REQUESTS_PER_HOUR` | `10000` | Per-source-IP hour limit. |
 | `DROOLS_RATE_LIMITING_BURST_SIZE` | `100` | Allowed burst above the rate (token-bucket style). |
 | `DROOLS_RATE_LIMITING_CLEANUP_INTERVAL` | `5` | Minutes between background cleanup of expired client buckets. |
-| `DROOLS_RATE_LIMITING_MAX_CLIENTS` | `10000` | Max distinct clients tracked. Beyond this, new clients share a fallback bucket — protects against memory exhaustion via spoofed `X-Client-Id`. |
+| `DROOLS_RATE_LIMITING_MAX_CLIENTS` | `10000` | Max distinct source IPs tracked. At capacity the **least-recently-used bucket is evicted** to admit a new client (new clients are not rejected). Bounds memory. |
+| `DROOLS_RATE_LIMITING_TRUST_PROXY` | `false` | When `true`, the client IP is taken from the left-most `X-Forwarded-For` entry instead of `getRemoteAddr()`. Enable **only** behind a trusted proxy/LB that overwrites inbound `X-Forwarded-For`; otherwise it is spoofable. |
 
 > **Admin endpoints (`/admin/*`) are exempt** from rate limiting entirely. Verified by [`RateLimitingFilterTest:120-127`](../src/test/java/com/company/drools/api/filter/RateLimitingFilterTest.java#L120-L127).
 
@@ -211,7 +212,7 @@ See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) for
 
 | Variable | Default | What it does |
 |---|---|---|
-| `ADMIN_API_KEY` | *(empty)* | When **set to a non-empty value**, [`AdminAuthFilter`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java) requires the `X-Admin-API-Key: <value>` header on every `/admin/*` request. When **empty or unset**, admin endpoints are **open** (a warning is logged at startup). See [15-admin-authentication.md](15-admin-authentication.md) for full operational guidance. |
+| `ADMIN_API_KEY` | *(empty)* | When **set to a non-empty value**, [`AdminAuthFilter`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java) requires the `X-Admin-API-Key: <value>` header on every `/admin/*` request (constant-time compared). When **empty or unset**: `local`/`dev` leave admin endpoints **open** with a startup WARN, but `prod`/`docker` **fail to start** (a blank key is a hard error in deployable profiles). See [15-admin-authentication.md](15-admin-authentication.md) for full operational guidance. |
 
 > **Production deployment must set this.** A long random string (32+ chars) is recommended. Rotate by deploying a new instance with the new key behind a load balancer, draining old, terminating old.
 
@@ -321,10 +322,11 @@ RULE_SOURCE=s3
 RULE_BUCKET_NAME=production-rules
 AWS_REGION=us-east-1
 # AWS credentials via IAM role on EC2/ECS — leave AWS_ACCESS_KEY_ID/SECRET empty
-ADMIN_API_KEY=<32+ char random string>
+ADMIN_API_KEY=<32+ char random string>   # required — prod fails to start if blank
 DROOLS_CORS_ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com
 REDIS_ENABLED=true
-REDIS_URL=redis://prod-redis.example.com:6379
+# prod requires TLS (rediss://) + credentials, or RedisSecurityValidator fails startup
+REDIS_URL=rediss://drools:<secret>@prod-redis.example.com:6379
 CLOUDWATCH_METRICS_ENABLED=true
 LOG_LEVEL=INFO
 ```

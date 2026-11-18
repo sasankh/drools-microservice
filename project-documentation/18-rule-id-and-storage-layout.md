@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Rule authors, operators uploading rules |
 | **Purpose** | How rule IDs map to file paths and S3 keys, what the format constraints are, and how to organize rules in storage |
-| **Last verified against** | [`StorageFactory.java`](../src/main/java/com/company/drools/storage/StorageFactory.java), [`S3RuleStorage.java`](../src/main/java/com/company/drools/storage/S3RuleStorage.java), [`LocalFileStorage.java`](../src/main/java/com/company/drools/storage/LocalFileStorage.java), [`RuleIdValidator.java`](../src/main/java/com/company/drools/api/validation/RuleIdValidator.java) on 2026-05-24 |
+| **Last verified against** | [`StorageFactory.java`](../src/main/java/com/company/drools/storage/StorageFactory.java), [`S3RuleStorage.java`](../src/main/java/com/company/drools/storage/S3RuleStorage.java), [`LocalFileStorage.java`](../src/main/java/com/company/drools/storage/LocalFileStorage.java), [`RuleIdValidator.java`](../src/main/java/com/company/drools/api/validation/RuleIdValidator.java), [`common/RuleIds.java`](../src/main/java/com/company/drools/common/RuleIds.java), [`RuleRefreshSubscriber.java`](../src/main/java/com/company/drools/cache/RuleRefreshSubscriber.java) on 2026-08-20 |
 | **Related docs** | [16-drl-sandboxing.md](16-drl-sandboxing.md), [17-rule-development.md](17-rule-development.md), [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md), [09-environment-variables-reference.md](09-environment-variables-reference.md) |
 
 ---
@@ -17,7 +17,7 @@
   - rule ID `pricing.discount.vip` ↔ Java package `com.company.rules.pricing.discount`
   - rule ID `pricing.discount.vip` ↔ rule name (the human-readable label inside `.drl`)
 - **Three storage backends**, selected by `RULE_SOURCE` env var: `local` (in-memory), `file` (filesystem), `s3` (AWS S3 / LocalStack).
-- **Path traversal protection** at two layers: `@ValidRuleId` rejects `..`, `/`, `\` *and* the storage layer re-checks via path normalization.
+- **Path traversal protection** at multiple layers: `@ValidRuleId` rejects `..`, `/`, `\`; the storage layer re-checks the **raw** rule ID via the shared [`RuleIds`](../src/main/java/com/company/drools/common/RuleIds.java) primitive (`requirePathSafe`) and, for `file`, path normalization; and the pub/sub refresh path re-validates too.
 
 ---
 
@@ -41,19 +41,19 @@ A rule has four "names" that all map 1:1:
 
 ### The transformation in code
 
-[`S3RuleStorage.java:321-327`](../src/main/java/com/company/drools/storage/S3RuleStorage.java#L321-L327):
+[`S3RuleStorage.ruleIdToS3Key`](../src/main/java/com/company/drools/storage/S3RuleStorage.java):
 
 ```java
 private String ruleIdToS3Key(String ruleId) {
-  String s3Key = ruleId.replace(".", "/") + ".drl";
-  if (s3Key.contains("../") || s3Key.startsWith("/")) {
-    throw new IllegalArgumentException("Invalid rule ID: path traversal detected");
-  }
-  return s3Key;
+  // Validate the RAW rule ID before transformation. The previous guard checked contains("../")
+  // AFTER the '.'→'/' replacement, by which point any ".." had already become "//" — so it never
+  // fired for dotted input (dead code, finding S11). RuleIds rejects traversal on the raw value.
+  RuleIds.requirePathSafe(ruleId);
+  return ruleId.replace(".", "/") + ".drl";
 }
 ```
 
-[`S3RuleStorage.java:347-353`](../src/main/java/com/company/drools/storage/S3RuleStorage.java#L347-L353) (reverse):
+[`S3RuleStorage.s3KeyToRuleId`](../src/main/java/com/company/drools/storage/S3RuleStorage.java) (reverse):
 
 ```java
 private String s3KeyToRuleId(String s3Key) {
@@ -95,11 +95,12 @@ The `LocalFileStorage` does the same dot-to-slash transformation for filesystem 
 
 ### Where these are enforced
 
-Validation happens in **three places** for defense-in-depth:
+Validation happens in **four places** for defense-in-depth:
 
-1. **`@ValidRuleId`** annotation on `RuleExecutionRequest.ruleId` ([`RuleIdValidator.java:26-65`](../src/main/java/com/company/drools/api/validation/RuleIdValidator.java#L26-L65)). Rejects with HTTP 400 `INVALID_INPUT` before any business logic runs.
+1. **`@ValidRuleId`** annotation on `RuleExecutionRequest.ruleId` ([`RuleIdValidator.java`](../src/main/java/com/company/drools/api/validation/RuleIdValidator.java)). Rejects with HTTP 400 `INVALID_INPUT` before any business logic runs.
 2. **`@ValidRuleId`** on `AdminController` path variable for `/admin/refresh-rules/{ruleId}`.
-3. **Storage layer** path-traversal check in `S3RuleStorage.ruleIdToS3Key()` and `LocalFileStorage.getRuleFilePath()` — second-line defense in case validation is bypassed.
+3. **Storage layer** path-traversal check via the shared `RuleIds.requirePathSafe(rawRuleId)` in `S3RuleStorage.ruleIdToS3Key()`, plus path normalization in `LocalFileStorage.getRuleFilePath()` — second-line defense in case validation is bypassed.
+4. **Pub/sub refresh path** — `RuleRefreshSubscriber` re-validates the raw `ruleId` (via `RuleIds.isPathSafe`) for `RULE_REFRESHED` and `RULE_DELETED` events, because that path bypasses the HTTP-layer `@ValidRuleId` check entirely (finding S11).
 
 ### What the limits mean operationally
 
@@ -239,29 +240,32 @@ Both backends recursively walk the rule directory. There is no cap on hierarchy 
 
 ## Path traversal — defense in depth
 
-Path traversal is defended at three layers:
+Path traversal is defended at four layers:
 
 ### Layer 1: `@ValidRuleId` annotation
 
-[`RuleIdValidator.java:50-56`](../src/main/java/com/company/drools/api/validation/RuleIdValidator.java#L50-L56) explicitly rejects rule IDs containing:
+[`RuleIdValidator.java`](../src/main/java/com/company/drools/api/validation/RuleIdValidator.java) explicitly rejects rule IDs containing:
 - `..`
 - `/`
 - `\`
 
 Plus the regex `^[a-zA-Z0-9._-]+$` already excludes most other path-relevant characters.
 
-### Layer 2: S3RuleStorage path check
+### Layer 2: S3RuleStorage path check (shared `RuleIds` primitive)
 
-[`S3RuleStorage.java:323-325`](../src/main/java/com/company/drools/storage/S3RuleStorage.java#L323-L325):
+[`S3RuleStorage.ruleIdToS3Key`](../src/main/java/com/company/drools/storage/S3RuleStorage.java) validates the **raw** rule ID before transformation:
 ```java
-if (s3Key.contains("../") || s3Key.startsWith("/")) {
-  throw new IllegalArgumentException("Invalid rule ID: path traversal detected");
-}
+RuleIds.requirePathSafe(ruleId);          // throws IllegalArgumentException on unsafe input
+return ruleId.replace(".", "/") + ".drl";
 ```
 
-This is *after* the dot-to-slash transformation. So if the validator missed something (or if the rule ID came from a different code path), this catches it.
+`RuleIds.isPathSafe` checks the raw value is non-blank, matches `^[a-zA-Z0-9._-]+$`, and contains no `..`, no leading `/`, and no `\`. This replaces an earlier inline `s3Key.contains("../")` guard that ran *after* the `.`→`/` replacement — by which point any `..` had already become `//`, so it never fired for dotted input. That old guard was dead code and has been removed (finding S11).
 
-### Layer 3: LocalFileStorage path normalization
+### Layer 3: Pub/sub refresh path validation
+
+[`RuleRefreshSubscriber`](../src/main/java/com/company/drools/cache/RuleRefreshSubscriber.java) handles `RULE_REFRESHED` / `RULE_DELETED` events that arrive over Redis pub/sub — a path that never passes through the HTTP-layer `@ValidRuleId` check. Before touching storage or the compiled corpus it re-validates the raw `ruleId` with `RuleIds.isPathSafe(...)`, skipping the event (with a WARN) if it is unsafe. Without this, an attacker with Redis publish access could inject a traversal ID (finding S11).
+
+### Layer 4: LocalFileStorage path normalization
 
 [`LocalFileStorage.java:158-162`](../src/main/java/com/company/drools/storage/LocalFileStorage.java#L158-L162):
 ```java
@@ -272,11 +276,11 @@ if (!filePath.startsWith(rulesRoot)) {
 }
 ```
 
-This is the strongest of the three: it *resolves* the path (collapsing any `..` segments) and verifies the resolved path is still inside the rules root. Even an OS-specific path-traversal trick (Windows-style backslashes, Unicode escapes, double-encoded sequences) is caught here.
+This is the strongest of the layers: it *resolves* the path (collapsing any `..` segments) and verifies the resolved path is still inside the rules root. Even an OS-specific path-traversal trick (Windows-style backslashes, Unicode escapes, double-encoded sequences) is caught here.
 
-### Why three layers
+### Why four layers
 
-Any single check could be bypassed by a code-evolution mistake (someone refactors validation into a different path, or the rule ID enters via a new code path that skips the validator). Three independent checks ensure that even if one fails, the other two stop the attack.
+Any single check could be bypassed by a code-evolution mistake (someone refactors validation into a different path, or the rule ID enters via a new code path that skips the validator — as the pub/sub path in fact does). Multiple independent checks, all sharing the `RuleIds` primitive, ensure that even if one entry point is missed, the others stop the attack.
 
 ---
 

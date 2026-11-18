@@ -1,51 +1,77 @@
-# scripts/ — Load Test Orchestrator + Helpers
-
-Two scripts cover different use cases:
+# scripts/ — E2E, Test-Plan Runner, Load Test Orchestrator + Helpers
 
 | Script | Purpose | Duration | When to use |
 |---|---|---|---|
-| [`e2e-load-test.sh`](#e2e-load-testsh) | Quick E2E health check + 5-min load test | ~10 min | After any code change, before merging |
-| [`run-load-test.sh`](#run-load-testsh) | Full regression harness (JMeter, 1000 rules, soak) | ~5–6 hours | After Drools/Spring Boot bumps, production readiness gates |
+| [`e2e-load-test.sh`](#e2e-load-testsh) | One-command E2E + keep-alive load test with value checks | ~8–10 min | After any code change, before merging |
+| [`run-docker-test-plan.sh`](#run-docker-test-plansh) | Automated `full-docker-test-plan.md` (Steps 1–12 + value checks) | ~8–10 min | Before merging; after Docker/compose/security changes |
+| [`run-load-test.sh`](#run-load-testsh) | Full regression harness (JMeter, 1000 rules, soak) | ~5–6 hours | After Drools/Spring Boot bumps, production readiness gates — ⚠️ needs updating for the admin key (backlog) |
 | [`test-localstack.sh`](#helpers) | Validates LocalStack S3 bucket and uploaded rules | < 1 min | After `init-localstack.sh` to confirm S3 state |
 | [`docker-build-test.sh`](#helpers) | Builds Docker image and validates health checks | ~5 min | After Dockerfile or dependency changes |
+
+> **Linux:** if Podman is also installed and `DOCKER_HOST` points at its socket, run the scripts
+> against Docker Engine with `DOCKER_HOST=unix:///var/run/docker.sock ./scripts/<script>.sh`.
+> Ports 8080, 8081, 4566 and 6379 must be free.
 
 ---
 
 ## e2e-load-test.sh
 
-A one-command E2E health check that spins up the full Docker stack, runs a 5-minute load test with a mid-run hot reload, and tears everything down.
+A one-command E2E check: it starts the full Docker stack, verifies rules, smoke-tests rule values, hot-reloads, checks memory, runs a load test with a mid-run hot reload, and tears everything down.
 
 ```bash
-# Full run (tears down stack at end)
-./scripts/e2e-load-test.sh
-
-# Keep stack running after test
-./scripts/e2e-load-test.sh --no-teardown
-
-# Skip docker compose build if image is already current
-./scripts/e2e-load-test.sh --skip-build
+./scripts/e2e-load-test.sh                 # full run: 20 workers × 300 s, tears down at end
+./scripts/e2e-load-test.sh --duration 60   # shorter load phase
+./scripts/e2e-load-test.sh --workers 50    # more concurrency
+./scripts/e2e-load-test.sh --no-teardown   # keep the stack running afterwards
+./scripts/e2e-load-test.sh --skip-build    # reuse the existing image
 ```
 
 ### What it checks
 
-1. Docker stack starts healthy (LocalStack + Redis + App)
-2. 17 sample rules upload to LocalStack S3
-3. All 17 rules load into the engine with 0 failures
-4. 4 smoke tests (different rule types)
-5. Hot reload: 17 rules reload in < 2s, execution works immediately after
-6. Memory stability: 5 rapid reloads, no monotonic heap growth; post-GC heap < 150 MB
-7. 5-min load test: 20 workers across 6 rules, hot reload triggered at 2 min mid-run
-8. Tear down
+1. Docker stack starts healthy (LocalStack + Redis + App). Rate limiting is disabled through the `scripts/docker-compose.loadtest.yml` overlay; no tracked file is edited.
+2. The 17 sample rules are in LocalStack S3. The LocalStack ready hook uploads them, so no host AWS CLI is needed.
+3. All 17 rules load into the engine with 0 failures.
+4. Smoke tests with **value checks**. All 17 rules are loaded, so stacking applies: VIP $100 → $72, bulk 15 × $200 → $153, and so on.
+5. Hot reload: 17 rules reload, and execution is correct immediately afterwards.
+6. Memory stability: 5 rapid reloads with no runaway growth; post-GC heap < 150 MB.
+7. Load test via [`lib/e2e_load.py`](lib/e2e_load.py).
+   - **How it runs:** keep-alive HTTP workers over 14 payloads covering all rule types. Every response's **values** are validated, and there's a hot reload at 120 s.
+   - **Gates:** 0 non-200, 0 wrong values, 0 client errors, average RPS ≥ `--min-rps` (default 200), no 10-second window without completed requests, 17 rules loaded afterwards.
+8. Tear down (`down -v`).
 
-Exits non-zero if any check fails. Auto-disables rate limiting in `docker-compose.yml` for the duration of the test and restores it on exit (even on Ctrl-C).
+Exits with the number of failed checks (0 = pass). CI-friendly.
 
-**Baseline (2026-05-11):** 157,754 requests · 0 errors (0%) · ~518 RPS · heap 180–340 MB · hot reload 0 dropped requests
+> **Why it changed (2026-11-17):** the previous bash/curl load step opened a new TCP connection per request. On Linux it exhausted the ~28k ephemeral ports in about 30 s, and its workers died silently under `set -e`, so the script printed "0 errors / ALL CHECKS PASSED" for a test that had stopped. Its payloads also mostly didn't trigger the rules they named.
 
 ### Requirements
 
-- Docker Desktop running
-- `curl`, `python3`, `bc` (all standard on macOS)
-- No JMeter needed
+- Docker Engine with Compose v2 (`docker compose`)
+- `curl`, `python3`
+- No JMeter or AWS CLI needed
+
+---
+
+## run-docker-test-plan.sh
+
+Runs [`full-docker-test-plan.md`](../full-docker-test-plan.md) end to end and prints a PASS / FAIL / INFO table. It exits 1 if any check FAILs. INFO rows record known issues tracked in the backlog, and never fail the run.
+
+```bash
+./scripts/run-docker-test-plan.sh               # full run, stack removed at the end
+./scripts/run-docker-test-plan.sh --skip-build  # reuse the existing image
+./scripts/run-docker-test-plan.sh --keep-stack  # leave the stack running
+```
+
+It covers:
+- **Steps 1–12:** health and admin endpoints, rule loading and refresh, execution with exact expected values for all 17 rules, error cases, memory and GC, Redis cache / TTL / invalidation / pub/sub, Redis-off mode (via a temporary compose override; the tracked file is untouched), and the log scan.
+- **Security checks:**
+  - admin auth (401/200/401)
+  - live rate-limit spoofing test (1,100 requests with rotating headers → exactly 1,000 allowed)
+  - actuator bound to loopback
+  - a runaway rule returning 408
+  - `RULE_DELETED` propagation
+  - **request-path bypass variants → 400** (ADR-024)
+
+Requirements: Docker Engine + Compose v2, `curl`, `jq`.
 
 ---
 

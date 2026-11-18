@@ -65,8 +65,8 @@ docker logs -f drools-test
 # Wait 60 seconds for startup
 sleep 60
 
-# Test health check
-curl http://localhost:8080/admin/health
+# Test health check (admin endpoints require the key; compose sets ADMIN_API_KEY=admin-secret)
+curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/health
 
 # Test main API
 curl -X POST http://localhost:8080/execute-rule \
@@ -171,8 +171,8 @@ docker logs drools-test
 # Check if ports are accessible
 netstat -an | grep 8081
 
-# Check container networking
-docker exec drools-test wget -O- http://localhost:8080/admin/health
+# Check container networking (admin endpoints require the key)
+docker exec drools-test wget -O- --header="X-Admin-API-Key: admin-secret" http://localhost:8080/admin/health
 ```
 
 ### Performance Issues

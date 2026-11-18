@@ -363,7 +363,7 @@ mvn clean compile
 [INFO] Rule 1: org.apache.maven.enforcer.rules.version.RequireMavenVersion passed
 [INFO]
 [INFO] --- compiler:3.15.0:compile (default-compile) @ drools-rule-engine ---
-[INFO] Compiling 54 source files
+[INFO] Compiling 61 source files
 [INFO] ------------------------------------------------------------------------
 [INFO] BUILD SUCCESS
 [INFO] ------------------------------------------------------------------------
@@ -629,7 +629,7 @@ source ./set-java-env.sh
 ### Files
 
 - **Setup Script**: `./set-java-env.sh`
-- **Enforcer Config**: `pom.xml` lines 262-286
+- **Enforcer Config**: `pom.xml` → `maven-enforcer-plugin` (`enforce-java` execution, `requireJavaVersion` = `[25,26)`)
 - **Shell Config**: `~/.zshrc` or `~/.bashrc`
 
 ---

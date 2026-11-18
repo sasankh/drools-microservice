@@ -1,5 +1,6 @@
 package com.company.drools.api.filter;
 
+import com.company.drools.common.RequestPaths;
 import com.company.drools.config.ValidationConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
@@ -39,8 +40,9 @@ public class RequestSizeValidationFilter extends OncePerRequestFilter {
       throws ServletException, IOException {
 
     // Only validate POST requests to execute-rule endpoint
+    // Match on the routed (normalized) path, consistent with the other filters (ADR-024).
     if ("POST".equalsIgnoreCase(request.getMethod())
-        && request.getRequestURI().contains("/execute-rule")) {
+        && RequestPaths.normalizedPath(request).startsWith("/execute-rule")) {
 
       // Check Content-Length header
       long contentLength = request.getContentLengthLong();

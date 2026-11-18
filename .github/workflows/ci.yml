@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  # `develop` is the default/release branch; `main` is kept in case one is created later.
+  push:
+    branches: [ develop, main ]
+  pull_request:
+    branches: [ develop, main ]
+  workflow_dispatch: {}
+
+# Dependency CVE scanning is left to GitHub Dependabot, not CI. The OWASP dependency-check job was
+# removed on 2026-11-18 (it needs an NVD API key and was rate-limited). The plugin is still in
+# pom.xml, so it can be run by hand: mvn dependency-check:check -DnvdApiKey=<key>
+
+# Least privilege: the jobs only read the repository.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build, test & quality gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # `verify` runs the unit suite plus the gates bound to the verify phase:
+      # spotless:check, spotbugs:check, and jacoco:check (coverage floor). (S3/S4)
+      - name: Verify (unit tests + spotless + spotbugs + coverage floor)
+        run: mvn -B clean verify
+
+      # Testcontainers integration tests need a real Docker daemon — available on ubuntu-latest but
+      # not in the macOS dev loop (hence the surefire exclusion). Run them explicitly here. (S3/S9)
+      # Testcontainers >= 1.21.4 (managed by Spring Boot 3.5.16) is required for Docker Engine 29.
+      # No failIfNoSpecifiedTests=false: a renamed/missing IT class must fail the build.
+      - name: Integration tests (Testcontainers)
+        run: >
+          mvn -B test
+          -Dtest='S3StorageIntegrationTest,RedisCachedStorageIntegrationTest,RedisPubSubIntegrationTest'
+
+      - name: Upload JaCoCo report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/

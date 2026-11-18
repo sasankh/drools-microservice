@@ -7,7 +7,9 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8080:8080"  # Main API
-      - "8081:8081"  # Spring Boot Actuator (/actuator/*)
+      # Actuator (/actuator/*) has no authentication — bind to loopback only so metrics/info are
+      # not exposed on any external interface. Internal probes reach it over the compose network. (P5)
+      - "127.0.0.1:8081:8081"  # Spring Boot Actuator (/actuator/*) — host-loopback only
     # Resource limits for container-aware JVM
     deploy:
       resources:
@@ -17,9 +19,14 @@ services:
         reservations:
           memory: 2G
           cpus: '1.0'
+    # Named volumes (not host bind mounts): Docker on Linux would create ./heap-dumps and ./gc-logs
+    # root-owned and the non-root JVM could not write gc.log -> it refuses to start. Named volumes
+    # inherit the appuser ownership set in the Dockerfile. Read them with e.g.
+    #   docker compose exec app tail -f /tmp/gc-logs/gc.log
+    #   docker compose cp app:/tmp/heap-dumps ./heap-dumps
     volumes:
-      - ./heap-dumps:/tmp/heap-dumps
-      - ./gc-logs:/tmp/gc-logs
+      - heap-dumps:/tmp/heap-dumps
+      - gc-logs:/tmp/gc-logs
     environment:
       # JVM Memory & GC Configuration
       - JAVA_OPTS=-Xms512m -Xmx2048m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+UseStringDeduplication -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heap-dumps/heapdump.hprof -Xlog:gc*:file=/tmp/gc-logs/gc.log:time,uptime,level,tags
@@ -61,7 +68,12 @@ services:
       
       # Logging
       - LOG_LEVEL=INFO
-      
+
+      # Admin API authentication — REQUIRED in the docker profile (the app fails to start without it).
+      # Matches the X-Admin-API-Key header used throughout full-docker-test-plan.md. Change this for
+      # any real deployment.
+      - ADMIN_API_KEY=admin-secret
+
       # Spring profile for containerized environment
       - SPRING_PROFILES_ACTIVE=docker
       
@@ -74,7 +86,9 @@ services:
       - drools-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/admin/health"]
+      # /admin/* now requires the admin key (see AdminAuthFilter). The container healthcheck must
+      # send it, otherwise /admin/health returns 401 and the container is marked unhealthy. (P1)
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--header=X-Admin-API-Key: admin-secret", "-O", "/dev/null", "http://localhost:8080/admin/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -127,4 +141,8 @@ volumes:
   localstack-data:
     driver: local
   redis-data:
+    driver: local
+  heap-dumps:
+    driver: local
+  gc-logs:
     driver: local

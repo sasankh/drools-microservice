@@ -18,17 +18,66 @@
         <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-        <spring.boot.version>3.5.3</spring.boot.version>
+        <spring.boot.version>3.5.16</spring.boot.version>
         <drools.version>10.2.0</drools.version>
         <aws.sdk.version>2.34.0</aws.sdk.version>
-        <testcontainers.version>1.21.3</testcontainers.version>
-        <micrometer.version>1.14.7</micrometer.version>
         <lombok.version>1.18.38</lombok.version>
-        <resilience4j.version>2.3.0</resilience4j.version>
+        <!-- 2.4.0 drops resilience4j-core's kotlin-stdlib dependency (CVE-flagged 1.9.25). -->
+        <resilience4j.version>2.4.0</resilience4j.version>
+
+        <!-- CVE patch pins newer than what the Spring Boot BOM manages (see dependencyManagement).
+             Boot is IMPORTED as a BOM (not the parent), so Boot's version properties
+             (<tomcat.version> etc.) have no effect here — overrides must be explicit entries
+             declared BEFORE the Boot BOM import (first declaration wins). Re-check on each Boot
+             bump and drop a pin once Boot manages an equal or newer version. -->
+        <tomcat.override.version>10.1.62</tomcat.override.version>
+        <netty.override.version>4.1.141.Final</netty.override.version>
+        <jackson.override.version>2.21.8</jackson.override.version>
+        <log4j.override.version>2.26.1</log4j.override.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <!-- CVE overrides: must precede spring-boot-dependencies (first declaration wins). -->
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-core</artifactId>
+                <version>${tomcat.override.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-el</artifactId>
+                <version>${tomcat.override.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-websocket</artifactId>
+                <version>${tomcat.override.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-bom</artifactId>
+                <version>${netty.override.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${jackson.override.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-bom</artifactId>
+                <version>${log4j.override.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- Spring Boot BOM also manages Testcontainers (1.21.4 in Boot 3.5.16 — the first
+                 1.21.x that works with Docker Engine 29); no separate testcontainers-bom. -->
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>
@@ -40,13 +89,6 @@
                 <groupId>software.amazon.awssdk</groupId>
                 <artifactId>bom</artifactId>
                 <version>${aws.sdk.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>org.testcontainers</groupId>
-                <artifactId>testcontainers-bom</artifactId>
-                <version>${testcontainers.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -112,7 +154,7 @@
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-cloudwatch2</artifactId>
-            <version>${micrometer.version}</version>
+            <!-- version managed by the Spring Boot BOM (keeps it in step with micrometer-core) -->
         </dependency>
         
         <dependency>
@@ -256,6 +298,35 @@
                             <goal>report</goal>
                         </goals>
                     </execution>
+                    <!-- Enforce a coverage floor at verify (S4/S7). Floor sits below the measured
+                         2026-08-19 baseline (90.1% instruction / 78.4% branch) with headroom so
+                         normal churn doesn't trip it; raise as coverage improves. -->
+                    <execution>
+                        <id>jacoco-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>INSTRUCTION</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.88</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.74</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
                 </executions>
             </plugin>
 
@@ -300,6 +371,16 @@
                         <endWithNewline />
                     </java>
                 </configuration>
+                <!-- Bind format check to verify so `mvn verify`/CI fails on unformatted code (S4). -->
+                <executions>
+                    <execution>
+                        <id>spotless-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
 
             <plugin>
@@ -317,6 +398,16 @@
                         <version>4.9.8</version>
                     </dependency>
                 </dependencies>
+                <!-- Bind static analysis to verify so `mvn verify`/CI fails on High-priority bugs (S4). -->
+                <executions>
+                    <execution>
+                        <id>spotbugs-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
             
             <plugin>
@@ -350,7 +441,7 @@
             <plugin>
                 <groupId>org.owasp</groupId>
                 <artifactId>dependency-check-maven</artifactId>
-                <version>12.1.1</version>
+                <version>12.2.2</version>
                 <configuration>
                     <!-- Fail build if any dependency has a CVSS score >= 7 (HIGH) -->
                     <failBuildOnCVSS>7</failBuildOnCVSS>

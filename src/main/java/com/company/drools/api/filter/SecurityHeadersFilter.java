@@ -9,8 +9,13 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+/**
+ * Adds the 7 security headers to every response. Runs first (order -2) so that responses written by
+ * later filters — StrictRequestPathFilter (400), AdminAuthFilter (401), RateLimitingFilter (429),
+ * RequestSizeValidationFilter (413) — also carry them.
+ */
 @Component
-@Order(-1)
+@Order(-2)
 public class SecurityHeadersFilter extends OncePerRequestFilter {
 
   @Override

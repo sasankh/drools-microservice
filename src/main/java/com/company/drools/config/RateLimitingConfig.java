@@ -82,16 +82,30 @@ public class RateLimitingConfig {
       long now = System.currentTimeMillis();
       cleanupOldEntries(now);
 
-      // Reject new clients when at capacity to prevent memory exhaustion
+      // At capacity, evict the least-recently-used bucket to make room for the new client. The old
+      // behavior rejected every new client with 429 once the map filled, which turned the memory
+      // cap
+      // into a denial-of-service against genuine new users (finding P2). LRU eviction bounds memory
+      // without penalizing real traffic.
       if (!clientData.containsKey(clientId) && clientData.size() >= config.getMaxClients()) {
-        log.warn(
-            "Rate limiter client map at capacity ({}), rejecting new client",
-            config.getMaxClients());
-        return false;
+        evictLeastRecentlyUsed();
       }
 
       ClientRateData data = clientData.computeIfAbsent(clientId, k -> new ClientRateData());
       return data.isAllowed(now, config);
+    }
+
+    private void evictLeastRecentlyUsed() {
+      clientData.entrySet().stream()
+          .min(java.util.Comparator.comparingLong(e -> e.getValue().getLastAccess()))
+          .map(java.util.Map.Entry::getKey)
+          .ifPresent(
+              oldest -> {
+                clientData.remove(oldest);
+                log.debug(
+                    "Rate limiter at capacity ({}), evicted least-recently-used client bucket",
+                    config.getMaxClients());
+              });
     }
 
     public RateLimitInfo getRateLimitInfo(String clientId) {

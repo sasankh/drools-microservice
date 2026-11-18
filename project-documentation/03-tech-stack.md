@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, architects |
 | **Purpose** | Every technology used, with version, purpose, and rationale. The single source of truth for "what version of X are we on?" |
-| **Last verified against** | [pom.xml](../pom.xml), [Dockerfile](../Dockerfile) on 2026-05-24 |
+| **Last verified against** | [pom.xml](../pom.xml), [Dockerfile](../Dockerfile) on 2026-08-20 |
 | **Related docs** | [02-project-structure.md](02-project-structure.md), [27-development-setup.md](27-development-setup.md), [36-architecture-decision-records.md](36-architecture-decision-records.md) |
 
 ---
@@ -14,26 +14,30 @@
 | Layer | Choice | Version |
 |---|---|---|
 | Language | Java (LTS) | **25** *(enforced)* |
-| Application framework | Spring Boot | **3.5.3** |
+| Application framework | Spring Boot | **3.5.16** (Spring Framework 6.2.19) |
 | Rule engine | Drools | **10.2.0** |
-| HTTP server | Embedded Tomcat (via Spring Boot) | bundled with 3.5.3 |
+| HTTP server | Embedded Tomcat | **10.1.62** (pinned above the Boot BOM for CVEs) |
 | Build tool | Apache Maven | **3.9+** |
 | Container base (build) | `maven:3.9-eclipse-temurin-25` | — |
 | Container base (runtime) | `amazoncorretto:25-alpine-jdk` | — |
 | AWS SDK | `software.amazon.awssdk` v2 | **2.34.0** |
 | Cache library | Spring Data Redis (Lettuce) | bundled with Spring Boot |
-| Resilience | Resilience4j | **2.3.0** |
-| Metrics | Micrometer (CloudWatch registry) | **1.14.7** |
+| Resilience | Resilience4j | **2.4.0** (no Kotlin dependency) |
+| Metrics | Micrometer (core + CloudWatch registry) | **1.15.12** (Boot-managed) |
 | Logging | Logback + logstash-logback-encoder | encoder **7.4** |
 | Validation | Jakarta Bean Validation (Hibernate Validator) | bundled with Spring Boot |
 | Env loading | dotenv-java | **3.0.0** |
 | Code style | Spotless + Google Java Format | spotless **2.44.5**, GJF **1.27.0** |
 | Coverage | JaCoCo | **0.8.13** |
-| Static analysis | SpotBugs | **4.9.3.0** |
+| Static analysis | SpotBugs | **4.9.8.3** (spotbugs 4.9.8) |
 | Build enforcement | Maven Enforcer Plugin | **3.6.2** |
 | Test framework | JUnit 5 (Jupiter) | bundled with `spring-boot-starter-test` |
 | Mocking | Mockito | bundled |
-| Integration tests | Testcontainers + LocalStack | **1.21.3** |
+| Integration tests | Testcontainers + LocalStack | **1.21.4** (Boot-managed; first 1.21.x that works with Docker Engine 29) |
+| JSON | Jackson | **2.21.8** (pinned above the Boot BOM) |
+| Netty (Lettuce + AWS SDK transport) | Netty | **4.1.141.Final** (pinned above the Boot BOM) |
+| Logging bridge | Log4j API → SLF4J | **2.26.1** (pinned above the Boot BOM) |
+| CVE scan | GitHub Dependabot (alerts + security-update PRs); OWASP dependency-check-maven **12.2.2** for manual runs | — |
 | Async polling | Awaitility | bundled (test scope) |
 
 ---
@@ -44,7 +48,7 @@
 
 **Why this version, why enforced:**
 - Java 25 is the current latest LTS (released September 2025); Premier support runs through September 2030.
-- Spring Boot 3.5.3 baselines on Java 17, but runs cleanly on Java 25 (forward-compatible). Drools 10 baselines on Java 17 and likewise runs on 25.
+- Spring Boot 3.5.x baselines on Java 17, but runs cleanly on Java 25 (forward-compatible). Drools 10 baselines on Java 17 and likewise runs on 25.
 - Bumping to 25 (vs staying on the older 17 LTS) was done as part of the 2026-05-09 stack modernization. See [ADR-013](36-architecture-decision-records.md#adr-013-java-17--25--spring-boot-modernization-2026-05-09).
 
 **Enforcement** (in [pom.xml](../pom.xml) — Maven Enforcer Plugin):
@@ -65,18 +69,21 @@ Local setup helper: [`set-java-env.sh`](../set-java-env.sh) (macOS); detailed gu
 - Amazon Corretto is AWS's hardened JDK distribution; receives security patches in lockstep with OpenJDK and is well-tested in AWS environments where this service is deployed.
 - Alpine's musl libc is acceptable here because we have no native dependencies that conflict with musl. (The JDK bundles its own libraries.)
 
+**Both base images are pinned by `@sha256:` digest** in the [Dockerfile](../Dockerfile) (e.g. `amazoncorretto:25-alpine-jdk@sha256:…`, `maven:3.9-eclipse-temurin-25@sha256:…`) so builds are reproducible and immune to a mutated upstream tag.
+
 The Maven build stage uses `maven:3.9-eclipse-temurin-25` (separate JDK distribution) — the build-time JDK doesn't need to match the runtime JDK as long as both are 25. See [Dockerfile](../Dockerfile) for the multi-stage layout.
 
 ---
 
 ## Application framework
 
-### Spring Boot 3.5.3
+### Spring Boot 3.5.16
 
 **Why this version:**
-- Spring Boot 3.5.x is the current latest 3.x line (Jakarta EE namespace, Java 17 baseline).
-- 3.5.3 is the latest stable patch release as of 2026-05-09. Spring Boot 4.x is on the horizon but not yet GA.
-- The bump from 3.2.5 → 3.5.3 was part of the 2026-05-09 stack modernization; see [ADR-013](36-architecture-decision-records.md#adr-013-java-17--25--spring-boot-modernization-2026-05-09).
+- Spring Boot 3.5.x is the last 3.x line (Jakarta EE namespace, Java 17 baseline). 3.5.16 (2026-06-25) is the latest 3.5 patch; it manages Spring Framework 6.2.19.
+- 3.2.5 → 3.5.3 was part of the 2026-05-09 stack modernization ([ADR-013](36-architecture-decision-records.md#adr-013-java-17--25--spring-boot-modernization-2026-05-09)). 3.5.3 → 3.5.16 (2026-11-17) cleared the CVSS ≥ 7 findings that failed CI.
+- **CVE pins:** the Boot BOM is *imported* in `<dependencyManagement>` (not used as the parent), so Boot's version properties can't be overridden. Newer Tomcat, Netty, Jackson and Log4j patches are declared as explicit entries **above** the Boot BOM import, because the first declaration wins. Drop a pin once Boot manages an equal or newer version.
+- Spring Boot 4.x (Spring 7, Jackson 3) is GA. Migrating is a separate, larger piece of work (post-merge backlog).
 
 **Starters used** (transitively pulls dependencies; see `pom.xml` lines 56–70):
 - `spring-boot-starter-web` — Spring MVC, embedded Tomcat, Jackson
@@ -164,7 +171,7 @@ The legacy `LocalLRUCache` + `RedisRuleCache` layer was deleted on 2026-05-20 �
 
 ## Resilience and observability
 
-### Resilience4j 2.3.0
+### Resilience4j 2.4.0
 
 **Why Resilience4j over Hystrix**:
 - Hystrix is in maintenance mode at Netflix.
@@ -177,7 +184,7 @@ The legacy `LocalLRUCache` + `RedisRuleCache` layer was deleted on 2026-05-20 �
 
 Configured in `CircuitBreakerConfig.java`. Two breakers: `s3CircuitBreaker`, `redisCircuitBreaker`. Stricter thresholds in prod (40%/50% failure) than dev (60%/70%). Full details in [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md).
 
-### Micrometer 1.14.7
+### Micrometer 1.15.12
 
 **Why Micrometer:**
 - Vendor-agnostic: same metric calls support CloudWatch, Prometheus, Datadog, Grafana.
@@ -229,11 +236,12 @@ Triggered via `@Valid` in controller signatures. Validation failures bubble up a
 |---|---:|---|
 | **maven-enforcer-plugin** | 3.6.2 | Java 25 (`[25,26)`), Maven 3.8+. Hard-fails the build on violation. |
 | **maven-compiler-plugin** | 3.15.0 | Source/target = 25, `parameters: true` (preserves method param names). |
-| **spring-boot-maven-plugin** | 3.5.3 | `repackage` goal — produces fat jar with embedded Tomcat. Excludes Lombok from the runtime jar. |
-| **spotless-maven-plugin** | 2.44.5 | Code formatting via Google Java Format 1.27.0. Run `mvn spotless:apply` before commit; `mvn spotless:check` is recommended in CI. Also: removes unused imports, trims trailing whitespace. |
-| **jacoco-maven-plugin** | 0.8.13 | Coverage instrumentation (`prepare-agent`) and report (`report` in test phase). Output: `target/site/jacoco/`. **No threshold configured** (would be a useful addition — see [`CODE_FINDINGS.md`](../.ai-workspace/documentations/CODE_FINDINGS.md) F-029). |
-| **spotbugs-maven-plugin** | 4.9.3.0 | Static analysis at "Max" effort, "High" threshold. Run with `mvn spotbugs:check`. Recommended in CI. |
-| **maven-surefire-plugin** | 3.0.0 | Runs unit tests in the `test` phase. Default include patterns: `**/*Test.java`, `**/*Tests.java`. |
+| **spring-boot-maven-plugin** | 3.5.16 | `repackage` goal — produces fat jar with embedded Tomcat. Excludes Lombok from the runtime jar. |
+| **spotless-maven-plugin** | 2.44.5 | Code formatting via Google Java Format 1.27.0. Run `mvn spotless:apply` before commit; `spotless:check` is bound to `verify` (CI fails on unformatted code). Also: removes unused imports, trims trailing whitespace. |
+| **jacoco-maven-plugin** | 0.8.13 | Coverage instrumentation (`prepare-agent`) and report (`report` in test phase). Output: `target/site/jacoco/`. `jacoco:check` bound to `verify` with a floor of **88% instruction / 74% branch** (ADR-023). |
+| **spotbugs-maven-plugin** | 4.9.8.3 | Static analysis at "Max" effort, "High" threshold. `spotbugs:check` bound to `verify`. |
+| **maven-surefire-plugin** | 3.0.0 | Runs unit tests in the `test` phase. Default include patterns: `**/*Test.java`, `**/*Tests.java`; the 3 Testcontainers ITs are excluded and run in CI via `-Dtest`. |
+| **dependency-check-maven** | 12.2.2 | OWASP CVE scan; `failBuildOnCVSS=7`. Not bound to a phase and **not run in CI** since 2026-11-18 (Dependabot covers CVE alerts). Manual: `mvn dependency-check:check -DnvdApiKey=<key>` (push to develop/main, weekly, on demand). |
 
 ---
 
@@ -249,7 +257,7 @@ Pulled via `spring-boot-starter-test`. We use:
 
 Base test classes: `BaseUnitTest` (Mockito + mocked `MeterRegistry`) and `BaseIntegrationTest` (Testcontainers fixtures).
 
-### Testcontainers 1.21.3 + LocalStack
+### Testcontainers 1.21.4 + LocalStack
 
 For integration tests that need real AWS S3 behavior. The `localstack` Testcontainers module spins up a fresh LocalStack container per test class.
 
@@ -290,12 +298,12 @@ If you're considering version bumps:
 
 | Component | Risk | Notes |
 |---|---|---|
-| Java 25 → 26 | TBD | Java 26 expected ~Sept 2026. Verify Drools 10.x + Spring Boot 3.5.x compatibility before bumping. |
-| Spring Boot 3.5.3 → 4.x | Medium | Spring Boot 4.x is approaching GA. Major version with possible API changes. Wait for ecosystem to stabilize. |
+| Java 25 → 26 | Low value | Java 26 (Mar 2026) is a non-LTS release; stay on 25 LTS. |
+| Spring Boot 3.5.16 → 4.x | Medium–High | Spring Boot 4.x is GA (Spring 7, Jackson 3). Spring 6.2 / Boot 3.5 open-source support ended mid-2026, so later CVEs may only be fixed in 4.x. Needs its own plan (Drools 10 + Jackson 3 compatibility, resilience4j-spring-boot module). |
 | Drools 10.2.0 → 10.x latest | Low | Patch releases within 10.x are backward compatible. |
 | Drools 10 → 11 | High | Hypothetical future major. Different runtime model expected. Out of scope. |
 | AWS SDK 2.34.0 → 2.x latest | Low | v2 patch releases are backward compatible. |
-| Resilience4j 2.3.0 → 2.x latest | Low | Verify `@CircuitBreaker` annotation usage if we adopt it later. |
+| Resilience4j 2.4.0 → 2.x latest | Low | Verify `@CircuitBreaker` annotation usage if we adopt it later. |
 | Lettuce / Jedis swap | Medium | Only if Redis becomes hot path. Stay with Lettuce. |
 | Adopt Drools Rule Units / OOPath | High | Would change `DroolsEngineService` orchestration. Currently rejected by ADR-001. |
 
@@ -305,6 +313,6 @@ If you're considering version bumps:
 
 - **Versions**: [`pom.xml`](../pom.xml) lines 16–28 (`<properties>`), then per-dependency overrides
 - **Java 25 enforcement**: [`pom.xml`](../pom.xml) Maven Enforcer Plugin section
-- **Container Java**: [`Dockerfile`](../Dockerfile) `FROM amazoncorretto:25-alpine-jdk`
-- **Build Java**: [`Dockerfile`](../Dockerfile) `FROM maven:3.9-eclipse-temurin-25 AS build`
+- **Container Java**: [`Dockerfile`](../Dockerfile) `FROM amazoncorretto:25-alpine-jdk@sha256:…` (digest-pinned)
+- **Build Java**: [`Dockerfile`](../Dockerfile) `FROM maven:3.9-eclipse-temurin-25@sha256:… AS build` (digest-pinned)
 - **JVM tuning**: `Dockerfile` `ENV JAVA_OPTS=...` and `docker-compose.yml` env override

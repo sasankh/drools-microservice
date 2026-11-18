@@ -1,7 +1,7 @@
 # Memory Monitoring Guide
 
-**Version**: 1.2.0
-**Last Updated**: 2026-05-24
+**Version**: 1.2.1
+**Last Updated**: 2026-08-20
 **Status**: Production Ready
 
 ---
@@ -46,13 +46,15 @@ The Drools Rule Engine Microservice includes comprehensive memory monitoring cap
 
 ## Memory Monitoring Endpoints
 
+> **Admin auth required.** All `/admin/memory/*` endpoints live under `/admin/*`, so when `ADMIN_API_KEY` is set (always in `prod`/`docker` — the app won't start there without it) every request must carry the `X-Admin-API-Key` header, or it returns **HTTP 401**. The examples below pass `-H "X-Admin-API-Key: admin-secret"`; substitute your real key. Export it once — `export ADMIN_API_KEY=admin-secret` — and the `watch`/loop snippets further down that omit the header for brevity still need it in any environment where the key is configured. See [15-admin-authentication.md](15-admin-authentication.md).
+
 ### 1. GET /admin/memory/info
 
 **Purpose**: Get comprehensive memory information including heap, non-heap, memory pools, and garbage collection statistics.
 
 **Usage**:
 ```bash
-curl http://localhost:8080/admin/memory/info | jq
+curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/info | jq
 ```
 
 **Response Structure**:
@@ -132,7 +134,7 @@ curl http://localhost:8080/admin/memory/info | jq
 
 **Usage**:
 ```bash
-curl -X POST http://localhost:8080/admin/memory/gc | jq
+curl -X POST -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/gc | jq
 ```
 
 **Response**:
@@ -165,7 +167,7 @@ curl -X POST http://localhost:8080/admin/memory/gc | jq
 
 **Usage**:
 ```bash
-curl http://localhost:8080/admin/memory/snapshot | jq
+curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/snapshot | jq
 ```
 
 **Response**:
@@ -556,13 +558,13 @@ JAVA_OPTS=-XX:MaxMetaspaceSize=512m
 **Investigation**:
 ```bash
 # Check heap dumps (if configured)
-ls -lh heap-dumps/
+docker compose cp app:/tmp/heap-dumps ./heap-dumps && ls -lh heap-dumps/
 
 # Analyze heap dump with jhat or VisualVM
-jhat heap-dumps/heapdump.hprof
+# open heap-dumps/heapdump.hprof in Eclipse MAT or VisualVM (jhat was removed in JDK 9)
 
 # Check GC logs
-tail -100 gc-logs/gc.log
+docker compose exec app tail -100 /tmp/gc-logs/gc.log
 ```
 
 **Solution**:
@@ -613,7 +615,7 @@ JAVA_OPTS=-Xlog:gc*:file=/tmp/gc-logs/gc.log:time,uptime,level,tags
 **Analysis**:
 ```bash
 # Check GC activity
-tail -f gc-logs/gc.log
+docker compose exec app tail -f /tmp/gc-logs/gc.log
 
 # Look for patterns:
 # - Frequent full GCs
@@ -733,8 +735,8 @@ done
 - CAUTION: > 70% heap
 
 **Files**:
-- Heap dumps: `./heap-dumps/`
-- GC logs: `./gc-logs/`
+- Heap dumps: `/tmp/heap-dumps/` in the container (named volume `heap-dumps`; `docker compose cp app:/tmp/heap-dumps ./heap-dumps`)
+- GC logs: `/tmp/gc-logs/gc.log` in the container (named volume `gc-logs`)
 
 ---
 

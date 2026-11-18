@@ -3,6 +3,7 @@ package com.company.drools.storage;
 import com.company.drools.api.exception.CircuitBreakerException;
 import com.company.drools.api.exception.RuleNotFoundException;
 import com.company.drools.api.exception.RuleStorageException;
+import com.company.drools.common.RuleIds;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
@@ -319,11 +320,11 @@ public class S3RuleStorage implements RuleStorage {
    * "pricing/discount/simple.drl"
    */
   private String ruleIdToS3Key(String ruleId) {
-    String s3Key = ruleId.replace(".", "/") + FILE_EXT_DRL;
-    if (s3Key.contains("../") || s3Key.startsWith("/")) {
-      throw new IllegalArgumentException("Invalid rule ID: path traversal detected");
-    }
-    return s3Key;
+    // Validate the RAW rule ID before transformation. The previous guard checked contains("../")
+    // AFTER the '.'→'/' replacement, by which point any ".." had already become "//" — so it never
+    // fired for dotted input (dead code, finding S11). RuleIds rejects traversal on the raw value.
+    RuleIds.requirePathSafe(ruleId);
+    return ruleId.replace(".", "/") + FILE_EXT_DRL;
   }
 
   /**

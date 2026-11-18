@@ -56,7 +56,14 @@ public class RuleCompiler {
       KieFileSystem kieFileSystem = kieServices.newKieFileSystem();
       kieFileSystem.generateAndWritePomXML(releaseId);
 
+      java.util.Set<String> seenRuleIds = new java.util.HashSet<>();
       for (Rule rule : rules) {
+        if (!seenRuleIds.add(rule.getRuleId())) {
+          log.warn(
+              "Duplicate rule ID '{}' in this load — the later definition silently overwrites the"
+                  + " earlier one (last-wins). Check the source for a duplicate.",
+              rule.getRuleId());
+        }
         String resourcePath =
             "src/main/resources/rules/" + rule.getRuleId().replace(".", "/") + ".drl";
         kieFileSystem.write(resourcePath, rule.getContent());

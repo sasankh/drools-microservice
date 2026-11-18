@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.mock.env.MockEnvironment;
 
 @DisplayName("AdminAuthFilter")
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -32,7 +33,7 @@ class AdminAuthFilterTest extends BaseUnitTest {
   class WithApiKey {
 
     private AdminAuthFilter createFilter(String apiKey) {
-      return new AdminAuthFilter(objectMapper, apiKey);
+      return new AdminAuthFilter(objectMapper, apiKey, new MockEnvironment());
     }
 
     @Test
@@ -145,13 +146,13 @@ class AdminAuthFilterTest extends BaseUnitTest {
   }
 
   @Nested
-  @DisplayName("When API key is not configured")
+  @DisplayName("When API key is not configured (non-deployable profile)")
   class WithoutApiKey {
 
     @Test
     @DisplayName("allows admin requests when API key is empty")
     void testAllowsAdminWhenKeyEmpty() throws Exception {
-      AdminAuthFilter filter = new AdminAuthFilter(objectMapper, "");
+      AdminAuthFilter filter = new AdminAuthFilter(objectMapper, "", new MockEnvironment());
       when(request.getRequestURI()).thenReturn("/admin/health");
 
       filter.doFilter(request, response, filterChain);
@@ -162,10 +163,101 @@ class AdminAuthFilterTest extends BaseUnitTest {
     @Test
     @DisplayName("allows admin requests when API key is null")
     void testAllowsAdminWhenKeyNull() throws Exception {
-      AdminAuthFilter filter = new AdminAuthFilter(objectMapper, null);
+      AdminAuthFilter filter = new AdminAuthFilter(objectMapper, null, new MockEnvironment());
       when(request.getRequestURI()).thenReturn("/admin/rules");
 
       filter.doFilter(request, response, filterChain);
+
+      verify(filterChain).doFilter(request, response);
+    }
+  }
+
+  @Nested
+  @DisplayName("Fail-closed in deployable profiles (P1)")
+  class FailClosed {
+
+    private MockEnvironment envWithProfile(String profile) {
+      MockEnvironment env = new MockEnvironment();
+      env.setActiveProfiles(profile);
+      return env;
+    }
+
+    @Test
+    @DisplayName("throws when key is blank in the prod profile")
+    void testFailsClosedProd() {
+      MockEnvironment env = envWithProfile("prod");
+      org.assertj.core.api.Assertions.assertThatThrownBy(
+              () -> new AdminAuthFilter(objectMapper, "", env))
+          .isInstanceOf(IllegalStateException.class)
+          .hasMessageContaining("ADMIN_API_KEY");
+    }
+
+    @Test
+    @DisplayName("throws when key is null in the docker profile")
+    void testFailsClosedDocker() {
+      MockEnvironment env = envWithProfile("docker");
+      org.assertj.core.api.Assertions.assertThatThrownBy(
+              () -> new AdminAuthFilter(objectMapper, null, env))
+          .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("does not throw when key is blank in the local profile")
+    void testOpenInLocal() {
+      // local/dev keep the open-with-WARN behavior — construction must not throw.
+      MockEnvironment env = envWithProfile("local");
+      org.assertj.core.api.Assertions.assertThatCode(
+              () -> new AdminAuthFilter(objectMapper, "", env))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("starts when a key is configured in a deployable profile")
+    void testConfiguredKeyProdStarts() {
+      MockEnvironment env = envWithProfile("prod");
+      org.assertj.core.api.Assertions.assertThatCode(
+              () -> new AdminAuthFilter(objectMapper, "a-key", env))
+          .doesNotThrowAnyException();
+    }
+  }
+
+  @Nested
+  @DisplayName("Path normalization (ADR-024)")
+  class PathNormalization {
+
+    private AdminAuthFilter filter() {
+      return new AdminAuthFilter(objectMapper, "secret-key-123", new MockEnvironment());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest(name = "requires key for {0}")
+    @org.junit.jupiter.params.provider.ValueSource(
+        strings = {
+          "/admin;x/health",
+          "/%61dmin/health",
+          "/admin/health;jsessionid=abc",
+          "//admin/health",
+          "/admin",
+          "/%61dmin/refresh-rules",
+          "/admin;x/memory/gc"
+        })
+    void testEncodedOrParameterisedAdminPathsRequireKey(String uri) throws Exception {
+      when(request.getRequestURI()).thenReturn(uri);
+      when(request.getRemoteAddr()).thenReturn("10.0.0.9");
+      StringWriter stringWriter = new StringWriter();
+      when(response.getWriter()).thenReturn(new PrintWriter(stringWriter));
+
+      filter().doFilter(request, response, filterChain);
+
+      verify(response).setStatus(401);
+      verify(filterChain, never()).doFilter(request, response);
+    }
+
+    @Test
+    @DisplayName("does not require the key for a non-admin path that starts with 'admin'")
+    void testAdministratorPathNotAdmin() throws Exception {
+      when(request.getRequestURI()).thenReturn("/administrator");
+
+      filter().doFilter(request, response, filterChain);
 
       verify(filterChain).doFilter(request, response);
     }

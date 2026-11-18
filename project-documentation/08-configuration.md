@@ -39,8 +39,8 @@ This guide provides comprehensive documentation for configuring the Drools Rule 
 
 | Variable | Description | Default | Examples |
 |----------|-------------|---------|----------|
-| `RULE_SOURCE` | Rule storage backend | `s3` | `s3`, `local`, `memory` |
-| `RULE_BUCKET_NAME` | S3 bucket name | *(required)* | `prod-drools-rules`, `dev-rules` |
+| `RULE_SOURCE` | Rule storage backend | `local` | `s3`, `local`, `memory` |
+| `RULE_BUCKET_NAME` | S3 bucket name | `local-rules` | `prod-drools-rules`, `dev-rules` |
 
 ### AWS Configuration
 
@@ -50,8 +50,10 @@ This guide provides comprehensive documentation for configuring the Drools Rule 
 | `AWS_ACCESS_KEY_ID` | AWS access key | *(auto-detect)* | `AKIAIOSFODNN7EXAMPLE` |
 | `AWS_SECRET_ACCESS_KEY` | AWS secret key | *(auto-detect)* | `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLE` |
 | `AWS_ENDPOINT` | Custom S3 endpoint | *(default)* | `http://localhost:4566` (LocalStack) |
-| `S3_CONNECTION_POOL_MAX_SIZE` | S3 connection pool size | `50` | `20`, `100` |
-| `S3_CONNECTION_TIMEOUT_SECONDS` | S3 connection timeout | `30` | `10`, `60` |
+| `AWS_S3_MAX_CONNECTIONS` | S3 connection pool size | `50` | `25`, `100` |
+| `AWS_S3_MAX_IDLE_TIME` | S3 max connection idle (s) | `60` | `30`, `120` |
+| `AWS_S3_CONNECTION_TIMEOUT` | S3 connection timeout (s) | `10` | `5`, `30` |
+| `AWS_S3_SOCKET_TIMEOUT` | S3 socket/read timeout (s) | `60` | `30` |
 
 ### Redis Configuration (cache + pub/sub)
 
@@ -60,8 +62,7 @@ When `REDIS_ENABLED=true`, `RedisCachedRuleStorage` wraps the base `RuleStorage`
 | Variable | Description | Default | Examples |
 |----------|-------------|---------|----------|
 | `REDIS_ENABLED` | Enable `RedisCachedRuleStorage` decorator | `false` | `true`, `false` |
-| `REDIS_URL` | Redis connection URL | `redis://localhost:6379` | `redis://prod-redis:6379` |
-| `REDIS_PASSWORD` | Redis password | *(none)* | `your-secure-password` |
+| `REDIS_URL` | Redis connection URL (`spring.data.redis.url`). **Credentials and TLS travel in the URL** — there is no separate `REDIS_PASSWORD` var. In the `prod` profile this must be `rediss://user:pass@host` or startup fails (`RedisSecurityValidator`). | `redis://localhost:6379` | `rediss://drools:secret@prod-redis:6379` |
 | `REDIS_DRL_RULES_TTL_MINUTES` | Cache TTL for DRL JSON (minutes) | `15` | `5`, `30`, `60` |
 | `REDIS_DRL_RULES_KEY_PREFIX` | Key prefix for SCAN+MGET bulk path | `drools:rule:` | `myapp:rules:` |
 | `REDIS_PUBSUB_ENABLED` | Enable cross-instance refresh fan-out | `true` (when Redis enabled) | `true`, `false` |
@@ -73,10 +74,14 @@ When `REDIS_ENABLED=true`, `RedisCachedRuleStorage` wraps the base `RuleStorage`
 | Variable | Description | Default | Examples |
 |----------|-------------|---------|----------|
 | `RULE_EXECUTION_TIMEOUT_SECONDS` | Rule execution timeout | `30` | `10`, `60`, `120` |
-| `THREAD_POOL_RULE_EXECUTION_CORE_SIZE` | Rule execution core threads | `10` | `5`, `20`, `50` |
-| `THREAD_POOL_RULE_EXECUTION_MAX_SIZE` | Rule execution max threads | `50` | `20`, `100`, `200` |
-| `THREAD_POOL_STORAGE_CORE_SIZE` | Storage operation core threads | `5` | `3`, `10`, `15` |
-| `THREAD_POOL_STORAGE_MAX_SIZE` | Storage operation max threads | `20` | `10`, `30`, `50` |
+| `DROOLS_THREAD_POOL_CORE_SIZE` | Rule execution core threads | `10` | `5`, `20` |
+| `DROOLS_THREAD_POOL_MAX_SIZE` | Rule execution max threads | `50` | `20`, `100` |
+| `DROOLS_THREAD_POOL_QUEUE_CAPACITY` | Rule execution queue capacity | `100` | `50`, `200` |
+| `DROOLS_THREAD_POOL_KEEP_ALIVE` | Rule execution keep-alive (s) | `60` | `120`, `300` |
+| `DROOLS_STORAGE_THREAD_POOL_CORE_SIZE` | Storage operation core threads | `5` | `4`, `10` |
+| `DROOLS_STORAGE_THREAD_POOL_MAX_SIZE` | Storage operation max threads | `20` | `10`, `50` |
+| `DROOLS_STORAGE_THREAD_POOL_QUEUE_CAPACITY` | Storage queue capacity | `50` | `25`, `100` |
+| `DROOLS_STORAGE_THREAD_POOL_KEEP_ALIVE` | Storage keep-alive (s) | `60` | `120`, `300` |
 
 ### Security Configuration
 
@@ -84,33 +89,38 @@ When `REDIS_ENABLED=true`, `RedisCachedRuleStorage` wraps the base `RuleStorage`
 |----------|-------------|---------|----------|
 | `DROOLS_VALIDATION_RULE_ID_MAX_LENGTH` | Max rule ID length | `255` | `100`, `500` |
 | `DROOLS_VALIDATION_DATA_MAX_FIELDS` | Max data fields per request | `100` | `50`, `200`, `500` |
-| `DROOLS_VALIDATION_STRING_MAX_LENGTH` | Max string field length | `10000` | `1000`, `50000` |
-| `DROOLS_VALIDATION_NUMBER_MAX_VALUE` | Max numeric value | `1000000000` | `1000000`, `10000000000` |
-| `DROOLS_VALIDATION_REQUEST_MAX_SIZE_MB` | Max request size (MB) | `10` | `5`, `20`, `50` |
+| `DROOLS_VALIDATION_DATA_MAX_STRING_LENGTH` | Max string field length | `10000` | `1000`, `50000` |
+| `DROOLS_VALIDATION_DATA_MAX_NUMBER_VALUE` | Max numeric value magnitude | `1000000000` | `1000000`, `10000000000` |
+| `DROOLS_VALIDATION_REQUEST_MAX_SIZE_BYTES` | Max request body (bytes) | `1048576` | `2097152` |
 | `DROOLS_CORS_ALLOWED_ORIGINS` | CORS allowed origins | *(empty)* | `https://app.company.com` |
-| `DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE` | Requests per minute limit (per-client) | `1000` | `100`, `5000`, `10000` |
-| `DROOLS_RATE_LIMITING_REQUESTS_PER_HOUR` | Requests per hour limit (per-client) | `10000` | `5000`, `100000` |
+| `DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE` | Requests per minute limit (per source IP) | `1000` | `100`, `5000`, `10000` |
+| `DROOLS_RATE_LIMITING_REQUESTS_PER_HOUR` | Requests per hour limit (per source IP) | `10000` | `5000`, `100000` |
 | `DROOLS_RATE_LIMITING_BURST_SIZE` | Token-bucket burst size | `100` | `50`, `200` |
-| `DROOLS_RATE_LIMITING_MAX_CLIENTS` | Max tracked rate-limit clients | `10000` | `5000`, `50000` |
-| `ADMIN_API_KEY` | API key for admin endpoint auth | *(empty/disabled)* | `your-secure-api-key` |
+| `DROOLS_RATE_LIMITING_MAX_CLIENTS` | Max tracked source IPs (LRU-evicted at capacity) | `10000` | `5000`, `50000` |
+| `DROOLS_RATE_LIMITING_TRUST_PROXY` | Key on left-most `X-Forwarded-For` (behind a trusted proxy) | `false` | `true` |
+| `ADMIN_API_KEY` | API key for admin endpoint auth. Blank = open in `local`/`dev`, **hard startup failure** in `prod`/`docker`. | *(empty)* | `your-secure-api-key` |
 
 ### Circuit Breaker Configuration
 
 | Variable | Description | Default | Examples |
 |----------|-------------|---------|----------|
-| `RESILIENCE4J_CIRCUITBREAKER_S3_FAILURE_RATE_THRESHOLD` | S3 failure rate threshold (%) | `50` | `30`, `70` |
-| `RESILIENCE4J_CIRCUITBREAKER_S3_WAIT_DURATION_SECONDS` | S3 wait duration when open | `30` | `10`, `60` |
-| `RESILIENCE4J_CIRCUITBREAKER_REDIS_FAILURE_RATE_THRESHOLD` | Redis failure rate threshold (%) | `50` | `30`, `70` |
-| `RESILIENCE4J_CIRCUITBREAKER_REDIS_WAIT_DURATION_SECONDS` | Redis wait duration when open | `10` | `5`, `30` |
+| `DROOLS_CB_S3_FAILURE_RATE` | S3 failure rate threshold (%) | `50` | `40`, `70` |
+| `DROOLS_CB_S3_WAIT_DURATION` | S3 wait duration when open (ms) | `60000` | `45000`, `120000` |
+| `DROOLS_CB_S3_SLIDING_WINDOW` | S3 sliding-window size | `100` | `50`, `200` |
+| `DROOLS_CB_S3_MIN_CALLS` | S3 minimum calls before evaluating | `10` | `5`, `20` |
+| `DROOLS_CB_REDIS_FAILURE_RATE` | Redis failure rate threshold (%) | `60` | `50`, `70` |
+| `DROOLS_CB_REDIS_WAIT_DURATION` | Redis wait duration when open (ms) | `30000` | `15000`, `60000` |
+| `DROOLS_CB_REDIS_SLIDING_WINDOW` | Redis sliding-window size | `50` | `25`, `100` |
+| `DROOLS_CB_REDIS_MIN_CALLS` | Redis minimum calls before evaluating | `5` | `3`, `10` |
 
 ### Logging Configuration
 
 | Variable | Description | Default | Examples |
 |----------|-------------|---------|----------|
-| `LOGGING_LEVEL_ROOT` | Root logging level | `INFO` | `WARN`, `DEBUG`, `ERROR` |
-| `LOGGING_LEVEL_COM_COMPANY_DROOLS` | Application logging level | `INFO` | `DEBUG`, `WARN` |
-| `LOG_FORMAT` | Log format | `JSON` | `JSON`, `CONSOLE` |
-| `LOG_CORRELATION_ENABLED` | Enable correlation IDs | `true` | `true`, `false` |
+| `LOG_LEVEL` | `com.company.drools` logging level | `INFO` | `DEBUG`, `WARN` |
+| `CLOUDWATCH_METRICS_ENABLED` | Export metrics to CloudWatch | `false` | `true` |
+
+> Note: `root`, `org.drools`, and `org.kie` log levels are fixed in `application.yml`; only `com.company.drools` is externalized via `LOG_LEVEL`. The JSON vs console pattern is selected by the logging `pattern` config, not an env var.
 
 ---
 
@@ -118,53 +128,109 @@ When `REDIS_ENABLED=true`, `RedisCachedRuleStorage` wraps the base `RuleStorage`
 
 ### Default Configuration (`application.yml`)
 
+> The block below mirrors the real [`src/main/resources/application.yml`](../src/main/resources/application.yml) (single file with profile documents separated by `---`). Circuit-breaker, thread-pool, and timeout values are under the `drools:` tree — this project does **not** use the `resilience4j.circuitbreaker.instances.*` namespace.
+
 ```yaml
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
   shutdown: graceful
-  tomcat:
-    max-threads: 200
-    accept-count: 100
+  max-http-request-size: ${MAX_HTTP_REQUEST_SIZE:10MB}
 
 management:
   server:
-    port: 8081
+    port: ${ADMIN_PORT:8081}          # Actuator only; /admin/* is on 8080
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus,thread-pools
+        include: health,metrics,info
+      base-path: /actuator
   endpoint:
     health:
       show-details: when-authorized
-  metrics:
-    export:
-      prometheus:
-        enabled: true
+  health:
+    redis:
+      enabled: ${REDIS_ENABLED:false} # only aggregate Redis health when Redis is on
 
 spring:
   application:
     name: drools-rule-engine
   profiles:
-    active: local
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  data:
+    redis:
+      url: ${REDIS_URL:redis://localhost:6379}
+      timeout: ${REDIS_TIMEOUT:500ms}  # Lettuce command timeout (below Redis CB 2s slow-call)
+      lettuce:
+        pool: { max-active: 10, max-idle: 5, min-idle: 1 }
 
-# Rule Storage Configuration
+# Drools Configuration
 drools:
-  rule-source: ${RULE_SOURCE:s3}
-  bucket-name: ${RULE_BUCKET_NAME:local-rules}
-  
-# AWS Configuration
-aws:
-  region: ${AWS_REGION:us-east-1}
+  admin:
+    api-key: ${ADMIN_API_KEY:}         # blank => open (local/dev) or fail-start (prod/docker)
+  rule-source: ${RULE_SOURCE:local}
   s3:
+    bucket-name: ${RULE_BUCKET_NAME:local-rules}
+    region: ${AWS_REGION:us-east-1}
     endpoint: ${AWS_ENDPOINT:}
-    connection-pool-max-size: ${S3_CONNECTION_POOL_MAX_SIZE:50}
-    connection-timeout-seconds: ${S3_CONNECTION_TIMEOUT_SECONDS:30}
+  local:
+    rules-directory: ${LOCAL_RULES_DIRECTORY:src/main/resources/rules}
+  cache:
+    execution-timeout-seconds: ${RULE_EXECUTION_TIMEOUT_SECONDS:30}
+  refresh:
+    auto-enabled: ${AUTO_REFRESH_ENABLED:false}
+    interval-minutes: ${AUTO_REFRESH_INTERVAL_MINUTES:5}
+  timeout:
+    http: { connection: ${DROOLS_HTTP_CONNECTION_TIMEOUT:10}, read: ${DROOLS_HTTP_READ_TIMEOUT:30} }
+    rule-execution: ${DROOLS_RULE_EXECUTION_TIMEOUT:30}
+    storage: { operation: ${DROOLS_STORAGE_OPERATION_TIMEOUT:60} }
+    cache: { operation: ${DROOLS_CACHE_OPERATION_TIMEOUT:5} }
+  circuit-breaker:
+    s3:
+      failure-rate-threshold: ${DROOLS_CB_S3_FAILURE_RATE:50}
+      wait-duration-in-open-state: ${DROOLS_CB_S3_WAIT_DURATION:60000}
+      sliding-window-size: ${DROOLS_CB_S3_SLIDING_WINDOW:100}
+      minimum-number-of-calls: ${DROOLS_CB_S3_MIN_CALLS:10}
+    redis:
+      failure-rate-threshold: ${DROOLS_CB_REDIS_FAILURE_RATE:60}
+      wait-duration-in-open-state: ${DROOLS_CB_REDIS_WAIT_DURATION:30000}
+      sliding-window-size: ${DROOLS_CB_REDIS_SLIDING_WINDOW:50}
+      minimum-number-of-calls: ${DROOLS_CB_REDIS_MIN_CALLS:5}
+  thread-pool:
+    rule-execution:
+      core-size: ${DROOLS_THREAD_POOL_CORE_SIZE:10}
+      max-size: ${DROOLS_THREAD_POOL_MAX_SIZE:50}
+      queue-capacity: ${DROOLS_THREAD_POOL_QUEUE_CAPACITY:100}
+      keep-alive: ${DROOLS_THREAD_POOL_KEEP_ALIVE:60}
+    storage:
+      core-size: ${DROOLS_STORAGE_THREAD_POOL_CORE_SIZE:5}
+      max-size: ${DROOLS_STORAGE_THREAD_POOL_MAX_SIZE:20}
+      queue-capacity: ${DROOLS_STORAGE_THREAD_POOL_QUEUE_CAPACITY:50}
+      keep-alive: ${DROOLS_STORAGE_THREAD_POOL_KEEP_ALIVE:60}
+  validation:
+    rule-id: { max-length: ${DROOLS_VALIDATION_RULE_ID_MAX_LENGTH:255} }
+    data:
+      max-fields: ${DROOLS_VALIDATION_DATA_MAX_FIELDS:100}
+      max-string-length: ${DROOLS_VALIDATION_DATA_MAX_STRING_LENGTH:10000}
+      max-number-value: ${DROOLS_VALIDATION_DATA_MAX_NUMBER_VALUE:1000000000}
+    request: { max-size-bytes: ${DROOLS_VALIDATION_REQUEST_MAX_SIZE_BYTES:1048576} }
+  cors:
+    allowed-origins: ${DROOLS_CORS_ALLOWED_ORIGINS:}      # empty default; wildcard only in local/dev/docker
+    allowed-methods: ${DROOLS_CORS_ALLOWED_METHODS:GET,POST,PUT,DELETE,OPTIONS}
+    allowed-headers: ${DROOLS_CORS_ALLOWED_HEADERS:*}
+    allow-credentials: ${DROOLS_CORS_ALLOW_CREDENTIALS:false}
+    max-age: ${DROOLS_CORS_MAX_AGE:3600}
+  rate-limiting:
+    enabled: ${DROOLS_RATE_LIMITING_ENABLED:true}
+    requests-per-minute: ${DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE:1000}
+    requests-per-hour: ${DROOLS_RATE_LIMITING_REQUESTS_PER_HOUR:10000}
+    burst-size: ${DROOLS_RATE_LIMITING_BURST_SIZE:100}
+    cleanup-interval-minutes: ${DROOLS_RATE_LIMITING_CLEANUP_INTERVAL:5}
+    max-clients: ${DROOLS_RATE_LIMITING_MAX_CLIENTS:10000}
+    trust-proxy: ${DROOLS_RATE_LIMITING_TRUST_PROXY:false}  # key on X-Forwarded-For only behind a trusted proxy
 
-# Redis Configuration (cache decorator + pub/sub fan-out)
+# Redis cache + pub/sub (opt-in)
 redis:
   enabled: ${REDIS_ENABLED:false}
-  url: ${REDIS_URL:redis://localhost:6379}
-  password: ${REDIS_PASSWORD:}
   drl-rules:
     ttl-minutes: ${REDIS_DRL_RULES_TTL_MINUTES:15}
     key-prefix: ${REDIS_DRL_RULES_KEY_PREFIX:drools:rule:}
@@ -172,77 +238,30 @@ redis:
     enabled: ${REDIS_PUBSUB_ENABLED:true}
     channel: ${REDIS_REFRESH_CHANNEL:drools:rule:events}
 
-# Thread Pool Configuration
-thread-pools:
-  rule-execution:
-    core-size: ${THREAD_POOL_RULE_EXECUTION_CORE_SIZE:10}
-    max-size: ${THREAD_POOL_RULE_EXECUTION_MAX_SIZE:50}
-    queue-capacity: 100
-    thread-name-prefix: "rule-exec-"
-  storage:
-    core-size: ${THREAD_POOL_STORAGE_CORE_SIZE:5}
-    max-size: ${THREAD_POOL_STORAGE_MAX_SIZE:20}
-    queue-capacity: 50
-    thread-name-prefix: "storage-"
+# AWS S3 connection pool
+aws:
+  region: ${AWS_REGION:us-east-1}
+  endpoint: ${AWS_ENDPOINT:}
+  s3:
+    connection-pool:
+      max-connections: ${AWS_S3_MAX_CONNECTIONS:50}
+      max-idle-time: ${AWS_S3_MAX_IDLE_TIME:60}
+      connection-timeout: ${AWS_S3_CONNECTION_TIMEOUT:10}
+      socket-timeout: ${AWS_S3_SOCKET_TIMEOUT:60}
 
-# Timeout Configuration
-timeouts:
-  rule-execution: ${RULE_EXECUTION_TIMEOUT_SECONDS:30}
-  s3-operations: ${S3_CONNECTION_TIMEOUT_SECONDS:30}
-  redis-operations: 5
-
-# Security Configuration
-drools:
-  validation:
-    rule-id:
-      max-length: ${DROOLS_VALIDATION_RULE_ID_MAX_LENGTH:255}
-      pattern: "^[a-zA-Z0-9._-]+$"
-    data:
-      max-fields: ${DROOLS_VALIDATION_DATA_MAX_FIELDS:100}
-      string-max-length: ${DROOLS_VALIDATION_STRING_MAX_LENGTH:10000}
-      number-max-value: ${DROOLS_VALIDATION_NUMBER_MAX_VALUE:1000000000}
-    request:
-      max-size-mb: ${DROOLS_VALIDATION_REQUEST_MAX_SIZE_MB:10}
-  cors:
-    allowed-origins: ${DROOLS_CORS_ALLOWED_ORIGINS:}
-    allowed-methods: GET,POST,PUT,DELETE,OPTIONS
-    allowed-headers: "*"
-    allow-credentials: true
-  rate-limiting:
-    enabled: ${DROOLS_RATE_LIMITING_ENABLED:true}
-    requests-per-minute: ${DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE:1000}
-    requests-per-hour: ${DROOLS_RATE_LIMITING_REQUESTS_PER_HOUR:10000}
-    burst-size: ${DROOLS_RATE_LIMITING_BURST_SIZE:100}
-    max-clients: ${DROOLS_RATE_LIMITING_MAX_CLIENTS:10000}
-    cleanup-interval-minutes: ${DROOLS_RATE_LIMITING_CLEANUP_INTERVAL:5}
-
-# Circuit Breaker Configuration
-resilience4j:
-  circuitbreaker:
-    instances:
-      s3:
-        failure-rate-threshold: ${RESILIENCE4J_CIRCUITBREAKER_S3_FAILURE_RATE_THRESHOLD:50}
-        wait-duration-in-open-state: ${RESILIENCE4J_CIRCUITBREAKER_S3_WAIT_DURATION_SECONDS:30}s
-        sliding-window-size: 100
-        minimum-number-of-calls: 10
-        permitted-number-of-calls-in-half-open-state: 5
-      redis:
-        failure-rate-threshold: ${RESILIENCE4J_CIRCUITBREAKER_REDIS_FAILURE_RATE_THRESHOLD:50}
-        wait-duration-in-open-state: ${RESILIENCE4J_CIRCUITBREAKER_REDIS_WAIT_DURATION_SECONDS:10}s
-        sliding-window-size: 50
-        minimum-number-of-calls: 5
-        permitted-number-of-calls-in-half-open-state: 3
-
-# Logging Configuration
+# Logging (only com.company.drools is externalized via LOG_LEVEL)
 logging:
   level:
-    root: ${LOGGING_LEVEL_ROOT:INFO}
-    com.company.drools: ${LOGGING_LEVEL_COM_COMPANY_DROOLS:INFO}
-    org.springframework: WARN
-    com.amazonaws: WARN
-  pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
-  config: classpath:logback-spring.xml
+    root: INFO
+    com.company.drools: ${LOG_LEVEL:INFO}
+    org.drools: WARN
+    org.kie: WARN
+
+management.metrics:
+  export:
+    cloudwatch:
+      namespace: DroolsEngine
+      enabled: ${CLOUDWATCH_METRICS_ENABLED:false}
 ```
 
 ---
@@ -328,21 +347,23 @@ spring:
           max-idle: 10
           min-idle: 2
 
+# prod REQUIRES a TLS + authenticated Redis URL (rediss://user:pass@host) via REDIS_URL,
+# or RedisSecurityValidator fails startup. Set it through the environment, not in YAML.
 redis:
   enabled: true
-  url: redis://prod-redis.company.com:6379
   drl-rules:
     ttl-minutes: 15
   pubsub:
     enabled: true
 
-thread-pools:
-  rule-execution:
-    core-size: 20
-    max-size: 100
-  storage:
-    core-size: 10
-    max-size: 30
+drools:
+  thread-pool:
+    rule-execution:
+      core-size: 20
+      max-size: 100
+    storage:
+      core-size: 10
+      max-size: 50
 
 logging:
   level:
@@ -403,16 +424,19 @@ drools:
 ### Rate Limiting Configuration
 
 ```yaml
-# Multi-tier rate limiting
+# Per-source-IP rate limiting (NOT multi-tier — application headers are never used for bucketing)
 drools:
   rate-limiting:
     enabled: ${DROOLS_RATE_LIMITING_ENABLED:true}
     requests-per-minute: ${DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE:1000}
     requests-per-hour: ${DROOLS_RATE_LIMITING_REQUESTS_PER_HOUR:10000}
     burst-size: ${DROOLS_RATE_LIMITING_BURST_SIZE:100}
-    max-clients: ${DROOLS_RATE_LIMITING_MAX_CLIENTS:10000}
+    max-clients: ${DROOLS_RATE_LIMITING_MAX_CLIENTS:10000}   # LRU-evicts oldest bucket at capacity
     cleanup-interval-minutes: ${DROOLS_RATE_LIMITING_CLEANUP_INTERVAL:5}
-    # Client identification: always uses request.getRemoteAddr() — X-Forwarded-For is ignored for security
+    trust-proxy: ${DROOLS_RATE_LIMITING_TRUST_PROXY:false}
+    # Client identity = request.getRemoteAddr() by default. X-API-Key / Authorization / X-Client-Id
+    # are NOT read. X-Forwarded-For is used (left-most entry) ONLY when trust-proxy=true and the
+    # service sits behind a trusted proxy that overwrites inbound XFF.
 ```
 
 ### Admin Authentication Configuration
@@ -422,15 +446,17 @@ Admin endpoints (`/admin/*`) can be protected with API key authentication:
 ```yaml
 drools:
   admin:
-    api-key: ${ADMIN_API_KEY:}  # Empty = auth disabled (backward compatible)
+    api-key: ${ADMIN_API_KEY:}  # blank => open+WARN in local/dev; FAIL-START in prod/docker
 ```
 
-**Usage**: Clients must send the `X-Admin-API-Key` header with every admin request:
+**Usage**: Clients must send the `X-Admin-API-Key` header with every admin request (the key is compared in constant time). All `/admin/*` paths require it, including `/admin/health`:
 ```bash
 curl -H "X-Admin-API-Key: your-secret-key" http://localhost:8080/admin/health
 ```
 
-When `ADMIN_API_KEY` is empty or not set, admin authentication is disabled (development mode). In production, always set a strong API key via the `ADMIN_API_KEY` environment variable.
+When `ADMIN_API_KEY` is empty or not set:
+- **`local` / `dev` profiles**: admin authentication is disabled (development mode), with a WARN logged at startup.
+- **`prod` / `docker` profiles**: the application **fails to start** (`AdminAuthFilter` throws) — a deployable profile must never serve `/admin/*` unprotected. Always set a strong `ADMIN_API_KEY`.
 
 ### DRL Sandboxing Configuration
 
@@ -486,28 +512,31 @@ JAVA_OPTS="-Xms512m -Xmx2g \
 ### Thread Pool Optimization
 
 ```yaml
-# High-throughput configuration
-thread-pools:
-  rule-execution:
-    core-size: 20        # 2x CPU cores
-    max-size: 100        # 5x core size
-    queue-capacity: 200  # 2x max size
-    keep-alive-time: 60s
-    rejection-policy: CALLER_RUNS
-  storage:
-    core-size: 10        # I/O bound operations
-    max-size: 40         # Higher ratio for I/O
-    queue-capacity: 100
-    keep-alive-time: 30s
+# High-throughput configuration (real keys under drools.thread-pool)
+drools:
+  thread-pool:
+    rule-execution:
+      core-size: 20        # 2x CPU cores
+      max-size: 100        # 5x core size
+      queue-capacity: 200  # 2x max size
+      keep-alive: 300
+    storage:
+      core-size: 10        # I/O bound operations
+      max-size: 50
+      queue-capacity: 100
+      keep-alive: 300
 
 # Memory-optimized configuration
-thread-pools:
-  rule-execution:
-    core-size: 5         # Lower memory footprint
-    max-size: 20
-    queue-capacity: 50
-    keep-alive-time: 30s
+drools:
+  thread-pool:
+    rule-execution:
+      core-size: 5         # Lower memory footprint
+      max-size: 20
+      queue-capacity: 50
+      keep-alive: 60
 ```
+
+> The rule-execution pool's rejection policy is **`AbortPolicy`** (not configurable): when the queue is full and all threads are busy, a submission is rejected and the request returns **HTTP 503** (see [12-error-code-catalog.md](12-error-code-catalog.md)). The storage pool uses `CallerRunsPolicy`.
 
 ### Cache Optimization
 
@@ -543,16 +572,14 @@ Per-environment guidance:
 ### Connection Pool Tuning
 
 ```yaml
-# S3 connection optimization
+# S3 connection optimization (real keys under aws.s3.connection-pool)
 aws:
   s3:
-    connection-pool-max-size: 100    # High throughput
-    connection-timeout-seconds: 10   # Fast failure
-    socket-timeout-seconds: 30       # Read timeout
-    retry-policy:
-      max-attempts: 3
-      backoff-multiplier: 2
-      max-backoff-seconds: 30
+    connection-pool:
+      max-connections: ${AWS_S3_MAX_CONNECTIONS:50}     # raise for high throughput (prod=100)
+      max-idle-time: ${AWS_S3_MAX_IDLE_TIME:60}
+      connection-timeout: ${AWS_S3_CONNECTION_TIMEOUT:10}
+      socket-timeout: ${AWS_S3_SOCKET_TIMEOUT:60}
 
 # Redis connection optimization (Spring data.redis namespace; Lettuce client)
 spring:
@@ -733,34 +760,34 @@ export RULE_SOURCE=s3
 export RULE_BUCKET_NAME=local-rules
 export AWS_ENDPOINT=http://localhost:4566
 export REDIS_ENABLED=true
-export LOGGING_LEVEL_COM_COMPANY_DROOLS=DEBUG
+export LOG_LEVEL=DEBUG
 ```
 
 #### Production Environment
 ```bash
+export SPRING_PROFILES_ACTIVE=prod
 export RULE_SOURCE=s3
 export RULE_BUCKET_NAME=prod-drools-rules
 export REDIS_ENABLED=true
-export REDIS_URL=redis://prod-redis.company.com:6379
+export REDIS_URL=rediss://drools:your-secret@prod-redis.company.com:6379  # prod requires rediss:// + creds
 export REDIS_DRL_RULES_TTL_MINUTES=15
 export REDIS_PUBSUB_ENABLED=true
-export THREAD_POOL_RULE_EXECUTION_CORE_SIZE=20
-export THREAD_POOL_RULE_EXECUTION_MAX_SIZE=100
+export DROOLS_THREAD_POOL_CORE_SIZE=20
+export DROOLS_THREAD_POOL_MAX_SIZE=100
 export DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE=10000
 export DROOLS_CORS_ALLOWED_ORIGINS=https://app.company.com,https://admin.company.com
-export ADMIN_API_KEY=your-secure-api-key
-export LOGGING_LEVEL_ROOT=WARN
+export ADMIN_API_KEY=your-secure-api-key   # prod fails to start if unset
+export LOG_LEVEL=INFO
 ```
 
 #### Testing Environment
 ```bash
 export RULE_SOURCE=memory
 export REDIS_ENABLED=false
-export CACHE_STATISTICS_ENABLED=true
-export LOGGING_LEVEL_COM_COMPANY_DROOLS=DEBUG
+export LOG_LEVEL=DEBUG
 ```
 
 ---
 
-**Last Updated**: 2026-05-24
+**Last Updated**: 2026-08-20
 **Version**: 1.2.0

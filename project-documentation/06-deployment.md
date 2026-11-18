@@ -80,8 +80,9 @@ AWS_SECRET_ACCESS_KEY=your-secret-key     # AWS credentials
 
 # === Redis Configuration (cache decorator + pub/sub fan-out) ===
 REDIS_ENABLED=true                        # Wraps base storage in RedisCachedRuleStorage
-REDIS_URL=redis://localhost:6379          # Redis connection URL
-# REDIS_PASSWORD=your-redis-password      # If authentication required
+# Credentials + TLS travel IN the URL — there is no separate REDIS_PASSWORD var.
+# prod REQUIRES rediss:// + credentials (RedisSecurityValidator) or the app fails to start.
+REDIS_URL=redis://localhost:6379          # dev/docker; prod: rediss://user:pass@host:6379
 REDIS_DRL_RULES_TTL_MINUTES=15            # Cache TTL for DRL JSON
 REDIS_DRL_RULES_KEY_PREFIX=drools:rule:   # Key prefix for SCAN+MGET
 REDIS_PUBSUB_ENABLED=true                 # Cross-instance refresh fan-out (only active when REDIS_ENABLED=true)
@@ -90,24 +91,25 @@ REDIS_TIMEOUT=500ms                       # Lettuce command timeout — override
 
 # === Performance Tuning ===
 RULE_EXECUTION_TIMEOUT_SECONDS=30         # Rule timeout
-THREAD_POOL_RULE_EXECUTION_CORE_SIZE=10   # Thread pool core size
-THREAD_POOL_RULE_EXECUTION_MAX_SIZE=50    # Thread pool max size
+DROOLS_THREAD_POOL_CORE_SIZE=10           # Rule-execution pool core size
+DROOLS_THREAD_POOL_MAX_SIZE=50            # Rule-execution pool max size
 
 # === Security Configuration ===
 DROOLS_VALIDATION_RULE_ID_MAX_LENGTH=255          # Rule ID validation
 DROOLS_VALIDATION_DATA_MAX_FIELDS=100             # Data field limit
-DROOLS_VALIDATION_REQUEST_MAX_SIZE_MB=10          # Request size limit
-DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE=1000     # Rate limit per minute (per-client)
+DROOLS_VALIDATION_REQUEST_MAX_SIZE_BYTES=1048576  # Request body limit (bytes; default 1 MiB)
+DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE=1000     # Rate limit per minute (per source IP)
+DROOLS_RATE_LIMITING_TRUST_PROXY=false            # true only behind a trusted proxy that overwrites X-Forwarded-For
 DROOLS_CORS_ALLOWED_ORIGINS=                         # CORS origins (empty = no CORS; set origins for production)
-ADMIN_API_KEY=                                       # Admin endpoint API key (empty = auth disabled)
+ADMIN_API_KEY=                                       # Admin endpoint API key (empty = open in local/dev; FAILS TO START in prod/docker)
 
-# === Circuit Breaker Configuration ===
-RESILIENCE4J_CIRCUITBREAKER_S3_FAILURE_RATE_THRESHOLD=50
-RESILIENCE4J_CIRCUITBREAKER_REDIS_FAILURE_RATE_THRESHOLD=50
+# === Circuit Breaker Configuration (values are per-profile in application.yml) ===
+DROOLS_CB_S3_FAILURE_RATE=50              # S3 breaker failure-rate threshold (%)
+DROOLS_CB_REDIS_FAILURE_RATE=60          # Redis breaker failure-rate threshold (%)
 
 # === Logging Configuration ===
-LOGGING_LEVEL_ROOT=INFO                   # Root log level
-LOGGING_LEVEL_COM_COMPANY_DROOLS=DEBUG    # Application log level
+LOG_LEVEL=INFO                            # com.company.drools log level (root/org.drools fixed in application.yml)
+CLOUDWATCH_METRICS_ENABLED=false          # Export metrics to CloudWatch
 ```
 
 ### Application Properties Template
@@ -126,7 +128,8 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,thread-pools
+        include: health,metrics,info
+      base-path: /actuator
   endpoint:
     health:
       show-details: when-authorized
@@ -136,54 +139,53 @@ spring:
     name: drools-rule-engine
   profiles:
     active: prod
+  data:
+    redis:
+      url: ${REDIS_URL}          # prod: rediss://user:pass@host:6379 (validated at startup)
+      timeout: ${REDIS_TIMEOUT:500ms}
 
-# Rule Storage
+# Rule Storage, thread pools, circuit breakers, validation, CORS, rate limiting all live
+# under the drools.* tree (this project does NOT use resilience4j.circuitbreaker.instances.*).
 drools:
+  admin:
+    api-key: ${ADMIN_API_KEY:}   # blank under prod => app fails to start
   rule-source: s3
-  bucket-name: ${RULE_BUCKET_NAME}
-  
-# Caching (RedisCachedRuleStorage decorator + pub/sub fan-out)
-redis:
-  enabled: ${REDIS_ENABLED:true}
-  url: ${REDIS_URL:redis://localhost:6379}
-  drl-rules:
-    ttl-minutes: ${REDIS_DRL_RULES_TTL_MINUTES:15}
-    key-prefix: ${REDIS_DRL_RULES_KEY_PREFIX:drools:rule:}
-  pubsub:
-    enabled: ${REDIS_PUBSUB_ENABLED:true}
-    channel: ${REDIS_REFRESH_CHANNEL:drools:rule:events}
-
-# Performance
-thread-pools:
-  rule-execution:
-    core-size: ${THREAD_POOL_RULE_EXECUTION_CORE_SIZE:10}
-    max-size: ${THREAD_POOL_RULE_EXECUTION_MAX_SIZE:50}
-    queue-capacity: 100
-
-# Security
-drools:
+  s3:
+    bucket-name: ${RULE_BUCKET_NAME}
+  thread-pool:
+    rule-execution:
+      core-size: ${DROOLS_THREAD_POOL_CORE_SIZE:20}
+      max-size: ${DROOLS_THREAD_POOL_MAX_SIZE:100}
+      queue-capacity: ${DROOLS_THREAD_POOL_QUEUE_CAPACITY:200}
   validation:
     rule-id:
       max-length: ${DROOLS_VALIDATION_RULE_ID_MAX_LENGTH:255}
     data:
       max-fields: ${DROOLS_VALIDATION_DATA_MAX_FIELDS:100}
     request:
-      max-size-mb: ${DROOLS_VALIDATION_REQUEST_MAX_SIZE_MB:10}
+      max-size-bytes: ${DROOLS_VALIDATION_REQUEST_MAX_SIZE_BYTES:1048576}
   cors:
     allowed-origins: ${DROOLS_CORS_ALLOWED_ORIGINS:}
   rate-limiting:
     requests-per-minute: ${DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE:1000}
+    trust-proxy: ${DROOLS_RATE_LIMITING_TRUST_PROXY:false}
+  circuit-breaker:
+    s3:
+      failure-rate-threshold: ${DROOLS_CB_S3_FAILURE_RATE:40}
+      wait-duration-in-open-state: ${DROOLS_CB_S3_WAIT_DURATION:120000}
+    redis:
+      failure-rate-threshold: ${DROOLS_CB_REDIS_FAILURE_RATE:50}
+      wait-duration-in-open-state: ${DROOLS_CB_REDIS_WAIT_DURATION:60000}
 
-# Circuit Breakers
-resilience4j:
-  circuitbreaker:
-    instances:
-      s3:
-        failure-rate-threshold: ${RESILIENCE4J_CIRCUITBREAKER_S3_FAILURE_RATE_THRESHOLD:50}
-        wait-duration-in-open-state: 30s
-      redis:
-        failure-rate-threshold: ${RESILIENCE4J_CIRCUITBREAKER_REDIS_FAILURE_RATE_THRESHOLD:50}
-        wait-duration-in-open-state: 10s
+# Redis cache + pub/sub (opt-in)
+redis:
+  enabled: ${REDIS_ENABLED:true}
+  drl-rules:
+    ttl-minutes: ${REDIS_DRL_RULES_TTL_MINUTES:15}
+    key-prefix: ${REDIS_DRL_RULES_KEY_PREFIX:drools:rule:}
+  pubsub:
+    enabled: ${REDIS_PUBSUB_ENABLED:true}
+    channel: ${REDIS_REFRESH_CHANNEL:drools:rule:events}
 
 # Logging
 logging:
@@ -316,13 +318,14 @@ AWS_REGION=us-east-1
 
 # Redis Configuration (shared cache + cross-instance fan-out)
 REDIS_ENABLED=true
-REDIS_URL=redis://prod-redis.company.com:6379
+# prod requires TLS (rediss://) + credentials, or the app refuses to start (RedisSecurityValidator)
+REDIS_URL=rediss://drools:REPLACE_WITH_SECRET@prod-redis.company.com:6379
 REDIS_DRL_RULES_TTL_MINUTES=15
 REDIS_PUBSUB_ENABLED=true
 
 # Performance Tuning
-THREAD_POOL_RULE_EXECUTION_CORE_SIZE=20
-THREAD_POOL_RULE_EXECUTION_MAX_SIZE=100
+DROOLS_THREAD_POOL_CORE_SIZE=20
+DROOLS_THREAD_POOL_MAX_SIZE=100
 
 # Security
 DROOLS_RATE_LIMITING_REQUESTS_PER_MINUTE=5000
@@ -586,7 +589,8 @@ The repository ships an actual `Dockerfile` at the repo root. It is **multi-stag
 
 ```dockerfile
 # ── Stage 1: Build ───────────────────────────────────────────
-FROM maven:3.9-eclipse-temurin-25 AS build
+# Base images are pinned by @sha256 digest in the real Dockerfile for reproducible builds.
+FROM maven:3.9-eclipse-temurin-25@sha256:<digest> AS build
 WORKDIR /app
 COPY pom.xml .
 RUN mvn dependency:go-offline -B          # dependency caching layer
@@ -595,7 +599,7 @@ RUN mvn clean package -DskipTests
 # Output: /app/target/drools-rule-engine-*.jar
 
 # ── Stage 2: Runtime ─────────────────────────────────────────
-FROM amazoncorretto:25-alpine-jdk
+FROM amazoncorretto:25-alpine-jdk@sha256:<digest>
 RUN addgroup -g 1000 appgroup && adduser -D -u 1000 -G appgroup appuser
 WORKDIR /app
 COPY --from=build /app/target/drools-rule-engine-*.jar app.jar
@@ -612,8 +616,9 @@ ENV JAVA_OPTS="-XX:+UseContainerSupport \
 
 USER appuser
 
+# /admin/* requires the admin key when set (prod/docker), so the healthcheck sends the header.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/admin/health
+  CMD wget -q --tries=1 --header="X-Admin-API-Key: ${ADMIN_API_KEY}" -O /dev/null http://localhost:8080/admin/health || exit 1
 
 EXPOSE 8080 8081
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
@@ -662,18 +667,21 @@ services:
     image: drools-rule-engine:1.0.0
     ports:
       - "8080:8080"
-      - "8081:8081"
+      - "127.0.0.1:8081:8081"        # Actuator — bind to host loopback only
     environment:
+      - SPRING_PROFILES_ACTIVE=prod
       - RULE_SOURCE=s3
       - RULE_BUCKET_NAME=prod-drools-rules
+      - ADMIN_API_KEY=${ADMIN_API_KEY:?set a strong admin key}   # prod fails to start if blank
       - REDIS_ENABLED=true
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=rediss://drools:${REDIS_PASSWORD}@redis:6379    # prod requires rediss:// + credentials
       - JAVA_OPTS=-Xms2g -Xmx4g -XX:+UseG1GC
     depends_on:
       - redis
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/admin/health"]
+      # /admin/* requires the admin key in prod — send the header
+      test: ["CMD", "wget", "-q", "--tries=1", "--header=X-Admin-API-Key: ${ADMIN_API_KEY}", "-O", "/dev/null", "http://localhost:8080/admin/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -896,5 +904,5 @@ curl http://localhost:8080/admin/rules
 
 ---
 
-**Last Updated**: 2026-05-24
+**Last Updated**: 2026-08-20
 **Version**: 1.2.0
