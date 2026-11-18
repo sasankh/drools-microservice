@@ -1,7 +1,7 @@
 # Memory Monitoring Guide
 
-**Version**: 1.2.1
-**Last Updated**: 2026-08-20
+**Version**: 1.2.0
+**Last Updated**: 2026-05-24
 **Status**: Production Ready
 
 ---
@@ -46,15 +46,13 @@ The Drools Rule Engine Microservice includes comprehensive memory monitoring cap
 
 ## Memory Monitoring Endpoints
 
-> **Admin auth required.** All `/admin/memory/*` endpoints live under `/admin/*`, so when `ADMIN_API_KEY` is set (always in `prod`/`docker` — the app won't start there without it) every request must carry the `X-Admin-API-Key` header, or it returns **HTTP 401**. The examples below pass `-H "X-Admin-API-Key: admin-secret"`; substitute your real key. Export it once — `export ADMIN_API_KEY=admin-secret` — and the `watch`/loop snippets further down that omit the header for brevity still need it in any environment where the key is configured. See [15-admin-authentication.md](15-admin-authentication.md).
-
 ### 1. GET /admin/memory/info
 
 **Purpose**: Get comprehensive memory information including heap, non-heap, memory pools, and garbage collection statistics.
 
 **Usage**:
 ```bash
-curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/info | jq
+curl http://localhost:8080/admin/memory/info | jq
 ```
 
 **Response Structure**:
@@ -134,7 +132,7 @@ curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/info 
 
 **Usage**:
 ```bash
-curl -X POST -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/gc | jq
+curl -X POST http://localhost:8080/admin/memory/gc | jq
 ```
 
 **Response**:
@@ -167,7 +165,7 @@ curl -X POST -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memo
 
 **Usage**:
 ```bash
-curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/snapshot | jq
+curl http://localhost:8080/admin/memory/snapshot | jq
 ```
 
 **Response**:

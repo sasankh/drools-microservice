@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import org.kie.api.builder.KieRepository;
 import org.kie.api.builder.Message;
@@ -50,14 +49,8 @@ public class DroolsEngineService {
   // explicit dispose() / two-container swap. See ADR-003 (2026-05-10 supersession note).
   private final KieContainer kieContainer;
 
-  // Guards the compiled KieBase + loadedRules/ruleMetadata maps. Reads (executeRule) take the read
-  // lock; only the brief updateToVersion + map swap takes the write lock.
+  // Lock for managing rule updates
   private final ReentrantReadWriteLock rulesLock = new ReentrantReadWriteLock();
-
-  // Serializes refreshes so concurrent snapshot+compile sequences can't lose each other's updates.
-  // Separate from rulesLock so the (slow) rule compile happens WITHOUT holding the write lock —
-  // rule-execution reads are not blocked during compilation (finding P7).
-  private final ReentrantLock refreshLock = new ReentrantLock();
 
   public DroolsEngineService(
       RuleCompiler ruleCompiler,
@@ -126,16 +119,10 @@ public class DroolsEngineService {
 
       // Update execution statistics and metrics
       if (result.isSuccess()) {
-        // Atomic read-derive-write so concurrent executions of the same rule don't lose stat
-        // updates (previous get()+put() could interleave and drop counts under load).
-        ruleMetadata.compute(
-            ruleId,
-            (id, current) ->
-                (current != null ? current : metadata).withExecution(result.getExecutionTimeMs()));
+        RuleMetadata updatedMetadata = metadata.withExecution(result.getExecutionTimeMs());
+        ruleMetadata.put(ruleId, updatedMetadata);
 
-        // NOTE: rule_id is a metric tag here — cardinality grows with the rule count. Fine at the
-        // 100s-of-rules scale; at 1000s+ consider dropping the per-rule tag on the high-volume
-        // timers/counters to bound registry/scrape size.
+        // Record successful execution metrics
         meterRegistry.counter("drools.rule.execution.success", TAG_RULE_ID, ruleId).increment();
         sample.stop(
             Timer.builder(METRIC_RULE_EXECUTION_TIME)
@@ -163,17 +150,6 @@ public class DroolsEngineService {
   }
 
   public boolean loadRules(List<Rule> rules) {
-    // Serialize all refreshes. Compile still runs WITHOUT the write lock (see doLoadRules), so
-    // rule-execution reads are not blocked during the (possibly long) compile. (P7)
-    refreshLock.lock();
-    try {
-      return doLoadRules(rules);
-    } finally {
-      refreshLock.unlock();
-    }
-  }
-
-  private boolean doLoadRules(List<Rule> rules) {
     log.info("Loading {} rules", rules.size());
 
     // Compile rules OUTSIDE the write lock so reads are not blocked. The compiler registers a
@@ -265,58 +241,19 @@ public class DroolsEngineService {
    * resulting KieBase contains both the new rule and all the unchanged ones. Fixes the bug where
    * calling loadRules with a single-rule list discarded all other rules.
    *
-   * <p>Serializes with other refreshes via {@code refreshLock}, but does NOT hold the write lock
-   * across the compile. The current rule set is snapshotted under a short read lock, then the
-   * compile + KieBase swap happens via {@link #doLoadRules} (which takes the write lock only
-   * briefly for {@code updateToVersion}). Rule-execution reads are therefore not blocked during
-   * compilation (finding P7).
+   * <p>Holds the write lock for the full snapshot+compile+update sequence so concurrent merges
+   * cannot lose each other's updates. The lock is reentrant, so the inner {@link #loadRules} call
+   * re-acquires it without deadlock. Rule-execution reads block until the merge completes.
    */
   public boolean loadOrReplaceRule(Rule rule) {
-    refreshLock.lock();
+    rulesLock.writeLock().lock();
     try {
-      List<Rule> combined;
-      rulesLock.readLock().lock();
-      try {
-        combined = new ArrayList<>(loadedRules.values());
-      } finally {
-        rulesLock.readLock().unlock();
-      }
+      List<Rule> combined = new ArrayList<>(loadedRules.values());
       combined.removeIf(r -> r.getRuleId().equals(rule.getRuleId()));
       combined.add(rule);
-      return doLoadRules(combined);
+      return loadRules(combined);
     } finally {
-      refreshLock.unlock();
-    }
-  }
-
-  /**
-   * Remove a single rule from the loaded corpus and recompile the remainder, preserving all other
-   * rules. Used by the pub/sub {@code RULE_DELETED} handler so a delete on one instance propagates
-   * to siblings' compiled state (finding S5). Serialized via {@code refreshLock}; the compile
-   * happens off the write lock, same as {@link #loadOrReplaceRule}.
-   *
-   * @return {@code true} if the rule was absent (no-op) or successfully removed+recompiled; {@code
-   *     false} if the recompile failed (the previous KieBase remains in effect).
-   */
-  public boolean removeRule(String ruleId) {
-    refreshLock.lock();
-    try {
-      List<Rule> combined;
-      rulesLock.readLock().lock();
-      try {
-        combined = new ArrayList<>(loadedRules.values());
-      } finally {
-        rulesLock.readLock().unlock();
-      }
-      boolean removed = combined.removeIf(r -> r.getRuleId().equals(ruleId));
-      if (!removed) {
-        log.info("removeRule: {} is not loaded; nothing to remove", ruleId);
-        return true;
-      }
-      log.info("Removing rule {} and recompiling remaining {} rules", ruleId, combined.size());
-      return doLoadRules(combined);
-    } finally {
-      refreshLock.unlock();
+      rulesLock.writeLock().unlock();
     }
   }
 

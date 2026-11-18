@@ -44,11 +44,7 @@ public record RefreshEvent(
     return new RefreshEvent(EventType.RULE_DELETED, ruleId, sourceInstanceId, Instant.now());
   }
 
-  /**
-   * Event type. An unknown value (published by a newer version) fails Jackson deserialization; the
-   * subscriber logs it (with the {@code reason=deserialize} metric) and skips it, staying alive —
-   * so unknown events are tolerated by being ignored rather than by partial mapping.
-   */
+  /** Event type. Subscribers must tolerate unknown values for forward compat. */
   public enum EventType {
     RULE_REFRESHED,
     RULE_REFRESHED_BULK,

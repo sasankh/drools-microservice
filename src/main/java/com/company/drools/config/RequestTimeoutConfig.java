@@ -13,19 +13,11 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-/**
- * Registers a servlet filter that surfaces the configured HTTP timeout values as response headers
- * and logs slow requests. NOTE: this is observational only — it does NOT enforce/abort a request on
- * timeout. Actual enforcement lives at the rule-execution layer ({@code RuleExecutor} timeout +
- * halt) and the servlet container's connection timeouts.
- */
+/** Configuration for HTTP request timeout handling */
 @Configuration
 public class RequestTimeoutConfig {
 
-  /**
-   * Registers {@link RequestTimeoutFilter}, which adds informational {@code X-Request-Timeout} /
-   * {@code X-Connection-Timeout} headers and logs slow requests. It does not enforce a timeout.
-   */
+  /** Filter to add request timeout headers and handling */
   @Bean
   public FilterRegistrationBean<RequestTimeoutFilter> requestTimeoutFilter(
       TimeoutConfig timeoutConfig) {

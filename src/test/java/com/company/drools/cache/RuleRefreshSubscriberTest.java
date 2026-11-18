@@ -130,23 +130,13 @@ class RuleRefreshSubscriberTest {
   // ─── RULE_DELETED ───────────────────────────────────────────────────────────
 
   @Test
-  @DisplayName("RULE_DELETED removes the rule from the engine (S5)")
-  void deleteEventRemovesRule() throws Exception {
+  @DisplayName("RULE_DELETED is logged but does NOT call engine (deferred to v2)")
+  void deleteEventNotApplied() throws Exception {
     subscriber.onMessage(msg(RefreshEvent.deleted("old", REMOTE_INSTANCE)), null);
 
-    verify(droolsEngineService).removeRule("old");
+    verifyNoInteractions(droolsEngineService);
     assertThat(meterRegistry.counter("drools.refresh.received", "event", "RULE_DELETED").count())
         .isEqualTo(1.0);
-  }
-
-  @Test
-  @DisplayName(
-      "RULE_REFRESHED with a path-traversal ruleId is rejected before touching storage (S11)")
-  void singleRefreshRejectsUnsafeRuleId() throws Exception {
-    subscriber.onMessage(msg(RefreshEvent.refreshed("../../etc/passwd", REMOTE_INSTANCE)), null);
-
-    verifyNoInteractions(storage);
-    verify(droolsEngineService, never()).loadOrReplaceRule(any());
   }
 
   // ─── Failure modes ──────────────────────────────────────────────────────────

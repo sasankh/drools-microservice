@@ -19,10 +19,8 @@
 
 This guide helps diagnose and resolve common issues with the Drools Rule Engine Microservice.
 
-> **Admin key required**: every `/admin/*` example below (including `/admin/health`) needs the `-H "X-Admin-API-Key: <key>"` header whenever `ADMIN_API_KEY` is configured — which is mandatory on the `prod`/`docker` profiles (docker-compose sets `admin-secret`). The header is shown on each example; substitute your configured key.
-
 ### Quick Diagnosis Steps
-1. **Check Health Endpoints**: `curl -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/health`
+1. **Check Health Endpoints**: `curl http://localhost:8080/admin/health`
 2. **View Recent Logs**: `tail -f /var/log/drools-rule-engine/application.log`
 3. **Test Basic Functionality**: Try simple rule execution
 4. **Verify Configuration**: Check environment variables and application.yml
@@ -140,10 +138,10 @@ aws s3 ls s3://your-bucket/pricing/discount/
 # Should map to: pricing/discount/vip.drl
 
 # 3. Check rule cache
-curl -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/rules | jq '.rules[] | select(.rule_id == "pricing.discount.vip")'
+curl http://localhost:8080/admin/rules | jq '.rules[] | select(.rule_id == "pricing.discount.vip")'
 
 # 4. Try refreshing the rule
-curl -X POST -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/refresh-rules/pricing.discount.vip
+curl -X POST http://localhost:8080/admin/refresh-rules/pricing.discount.vip
 ```
 
 #### Solutions
@@ -152,7 +150,7 @@ curl -X POST -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/refresh-rul
 aws s3 cp pricing/discount/vip.drl s3://your-bucket/pricing/discount/vip.drl
 
 # 2. Refresh rule cache
-curl -X POST -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/refresh-rules
+curl -X POST http://localhost:8080/admin/refresh-rules
 
 # 3. Check rule file syntax
 # Ensure .drl file has proper Drools syntax
@@ -429,10 +427,10 @@ export REDIS_PASSWORD=your-password
 #### Diagnosis Steps
 ```bash
 # 1. Check thread pool status
-curl -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/thread-pools
+curl http://localhost:8080/admin/thread-pools
 
 # 2. Monitor cache hit rates
-curl -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/health | jq '.components.cache.details.statistics'
+curl http://localhost:8080/admin/health | jq '.components.cache.details.statistics'
 
 # 3. Check JVM memory usage
 curl http://localhost:8081/actuator/metrics/jvm.memory.used
@@ -520,7 +518,7 @@ cache:
 #### Diagnosis
 ```bash
 # Check circuit breaker status
-curl -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/health | jq '.components."circuit-breakers"'
+curl http://localhost:8080/admin/health | jq '.components."circuit-breakers"'
 
 # Check failure rates
 curl http://localhost:8081/actuator/metrics/resilience4j.circuitbreaker.state
@@ -597,7 +595,7 @@ Application uses wrong configuration for environment.
 #### Solution
 ```bash
 # Check active profile
-curl -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/info | jq '.activeProfiles'
+curl http://localhost:8080/admin/info | jq '.activeProfiles'
 
 # Set correct profile
 export SPRING_PROFILES_ACTIVE=prod
@@ -614,12 +612,12 @@ java -Dspring.profiles.active=prod -jar app.jar
 #### Comprehensive Health Check
 ```bash
 # Detailed health information
-curl -s -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/health | jq '.'
+curl -s http://localhost:8080/admin/health | jq '.'
 
 # Check specific components
-curl -s -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/health | jq '.components.drools'
-curl -s -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/health | jq '.components.storage'
-curl -s -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/health | jq '.components.cache'
+curl -s http://localhost:8080/admin/health | jq '.components.drools'
+curl -s http://localhost:8080/admin/health | jq '.components.storage'
+curl -s http://localhost:8080/admin/health | jq '.components.cache'
 ```
 
 #### Health Status Meanings
@@ -724,11 +722,11 @@ curl http://localhost:8081/actuator/metrics/http.server.requests
 #### Rules Not Loading
 1. ✅ Verify S3 connectivity: `aws s3 ls s3://your-bucket`
 2. ✅ Check AWS credentials: `aws sts get-caller-identity`
-3. ✅ Refresh rule cache: `curl -X POST -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/refresh-rules`
+3. ✅ Refresh rule cache: `curl -X POST http://localhost:8080/admin/refresh-rules`
 4. ✅ Validate rule syntax: Check .drl files for errors
 
 #### Poor Performance
-1. ✅ Check thread pool status: `curl -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/thread-pools`
+1. ✅ Check thread pool status: `curl http://localhost:8080/admin/thread-pools`
 2. ✅ Monitor cache hit rate: Check health endpoint
 3. ✅ Increase JVM memory: Adjust `JAVA_OPTS`
 4. ✅ Optimize rule complexity: Simplify rule conditions
@@ -767,7 +765,7 @@ systemctl start drools-rule-engine
 sleep 30
 
 # 7. Test basic functionality
-curl -f -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/health
+curl -f http://localhost:8080/admin/health
 
 echo "Emergency recovery completed"
 ```
@@ -792,29 +790,23 @@ systemctl restart drools-rule-engine
 
 ### Admin Endpoints Returning 401 Unauthorized
 
-**Symptom**: All `/admin/*` requests (including `/admin/health`) return `401 Unauthorized` with the nested error body:
+**Symptom**: All `/admin/*` requests return `401 Unauthorized` with:
 ```json
-{
-  "rule_id": null,
-  "result": null,
-  "error": {
-    "code": "UNAUTHORIZED",
-    "message": "Admin API key required",
-    "details": "Provide a valid API key via the X-Admin-API-Key header",
-    "timestamp": "2026-08-20T12:00:00Z"
-  }
-}
+{"error": "Unauthorized", "message": "Missing or invalid API key"}
 ```
 
-**Cause**: An `ADMIN_API_KEY` is configured, so authentication is required. The key is compared in constant time (`MessageDigest.isEqual`).
+**Cause**: The `ADMIN_API_KEY` environment variable is set, requiring authentication.
 
 **Solution**:
 ```bash
 # Include the X-Admin-API-Key header in all admin requests
 curl -H "X-Admin-API-Key: your-configured-key" http://localhost:8080/admin/health
+
+# Or disable admin auth by unsetting the environment variable
+export ADMIN_API_KEY=
 ```
 
-**Note**: Auth cannot be disabled on the `prod`/`docker` profiles — they **fail to start** if `ADMIN_API_KEY` is blank (fail-closed). Only the `local`/`dev` profiles start with `/admin/*` open when the key is unset, and they log a WARN. Do not rely on unsetting the variable in any production-like environment.
+**Note**: When `ADMIN_API_KEY` is empty or not set, admin authentication is disabled (backward compatible for development).
 
 ### DRL Rules Failing Compilation (Sandboxing Rejections)
 
@@ -848,7 +840,7 @@ DRL content contains blocked class reference: ProcessBuilder
 # Instead of java.io.File, pass file data through the API input
 
 # Refresh the rule after fixing
-curl -X POST -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/refresh-rules/your.rule.id
+curl -X POST http://localhost:8080/admin/refresh-rules/your.rule.id
 ```
 
 ### CORS Errors in Browser
@@ -904,16 +896,16 @@ systemctl restart drools-rule-engine
 tail -f /var/log/drools-rule-engine/application.log
 journalctl -u drools-rule-engine.service -f
 
-# Health checks (all /admin/* need -H "X-Admin-API-Key: <key>")
-curl -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/health
-curl -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/rules
+# Health checks
+curl http://localhost:8080/admin/health
+curl http://localhost:8080/admin/rules
 
 # Cache management
-curl -X POST -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/refresh-rules
-curl -X POST -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/refresh-rules/specific.rule.id
+curl -X POST http://localhost:8080/admin/refresh-rules
+curl -X POST http://localhost:8080/admin/refresh-rules/specific.rule.id
 
 # Performance monitoring
-curl -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/thread-pools
+curl http://localhost:8080/admin/thread-pools
 curl http://localhost:8081/actuator/metrics/jvm.memory.used
 ```
 

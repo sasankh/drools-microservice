@@ -58,9 +58,6 @@ docker-compose.override.yml
 # JaCoCo
 jacoco.exec
 
-# SonarQube scanner working directory (contains .sonar_lock)
-.scannerwork/
-
 # Temporary files
 *.tmp
 *.temp
