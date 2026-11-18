@@ -37,7 +37,7 @@
 | JSON | Jackson | **2.21.8** (pinned above the Boot BOM) |
 | Netty (Lettuce + AWS SDK transport) | Netty | **4.1.141.Final** (pinned above the Boot BOM) |
 | Logging bridge | Log4j API → SLF4J | **2.26.1** (pinned above the Boot BOM) |
-| CVE scan | OWASP dependency-check-maven | **12.2.2** (CI; fails on CVSS ≥ 7) |
+| CVE scan | GitHub Dependabot (alerts + security-update PRs); OWASP dependency-check-maven **12.2.2** for manual runs | — |
 | Async polling | Awaitility | bundled (test scope) |
 
 ---
@@ -241,7 +241,7 @@ Triggered via `@Valid` in controller signatures. Validation failures bubble up a
 | **jacoco-maven-plugin** | 0.8.13 | Coverage instrumentation (`prepare-agent`) and report (`report` in test phase). Output: `target/site/jacoco/`. `jacoco:check` bound to `verify` with a floor of **88% instruction / 74% branch** (ADR-023). |
 | **spotbugs-maven-plugin** | 4.9.8.3 | Static analysis at "Max" effort, "High" threshold. `spotbugs:check` bound to `verify`. |
 | **maven-surefire-plugin** | 3.0.0 | Runs unit tests in the `test` phase. Default include patterns: `**/*Test.java`, `**/*Tests.java`; the 3 Testcontainers ITs are excluded and run in CI via `-Dtest`. |
-| **dependency-check-maven** | 12.2.2 | OWASP CVE scan; `failBuildOnCVSS=7`. Not bound to a phase — CI runs `mvn dependency-check:check` (push to develop/main, weekly, on demand). |
+| **dependency-check-maven** | 12.2.2 | OWASP CVE scan; `failBuildOnCVSS=7`. Not bound to a phase and **not run in CI** since 2026-11-18 (Dependabot covers CVE alerts). Manual: `mvn dependency-check:check -DnvdApiKey=<key>` (push to develop/main, weekly, on demand). |
 
 ---
 

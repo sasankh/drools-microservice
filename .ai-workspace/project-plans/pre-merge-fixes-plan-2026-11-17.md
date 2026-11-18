@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Created** | 2026-11-17 |
-| **Status** | 🟢 Phases 0–7 done and verified (2026-11-17); Phase 8 (push to PR #9, CI + OWASP, PR description) waiting on the user |
+| **Status** | 🟢 Phases 0–8 done (2026-11-18): PR #10 open, CI green; waiting on the user to merge + tag v3.3.0 |
 | **Work branch** | `pre-merge-fixes` (git worktree `.claude/worktrees/pre-merge-fixes`, based on `118f843`) |
 | **Delivered to** | `re-review-fable-4` → updates **PR #9** (`re-review-fable-4` → `develop`); `amd-review-restart-11-17-2026` fast-forwarded to the same commit |
 | **Release target** | v3.3.0 on `develop` (tag created by the user after merge) |
@@ -460,7 +460,7 @@ Found during the 2026-11-17 review and E2E. To be planned after the merge:
 - [x] Gate: `dependency:list` shows the expected versions
 - [x] Gate: `mvn -B clean verify` green
 - [x] Commit
-- [ ] OWASP run (Phase 8 CI dispatch) — residuals triaged with the user per A5.4
+- [x] ~~OWASP run (Phase 8 CI dispatch)~~ — the run failed on NVD rate limiting (HTTP 429, no API key) before scanning anything. **User decision (2026-11-18): remove the OWASP job from CI and rely on GitHub Dependabot.**
 
 ### B4. Phase 4 — F4b–d CI
 - [x] Triggers `push` / `pull_request` on `develop` + `main`
@@ -470,7 +470,7 @@ Found during the 2026-11-17 review and E2E. To be planned after the merge:
 - [x] Gate: 3 Testcontainers ITs pass locally on Docker 29 (20 tests)
 - [x] Gate: `mvn -B clean verify` green
 - [x] Commit
-- [ ] (User, optional) `NVD_API_KEY` repo secret
+- [x] ~~(User, optional) `NVD_API_KEY` repo secret~~ — not needed (OWASP job removed)
 
 ### B5. Phase 5 — F3 test tooling
 - [x] `scripts/lib/e2e_load.py` (keep-alive, value checks, stall detection, exit codes)
@@ -503,15 +503,16 @@ Found during the 2026-11-17 review and E2E. To be planned after the merge:
 - [x] Worktree clean; main checkout unchanged
 
 ### B8. Phase 8 — Deliver
-- [ ] Pushed `pre-merge-fixes` → `re-review-fable-4` (fast-forward)
-- [ ] `amd-review-restart-11-17-2026` fast-forwarded + pushed
-- [ ] CI `build` job green (unit + gates + 20 ITs)
-- [ ] CI OWASP job (dispatch) green, or residuals accepted by the user
-- [ ] PR #9 title/description updated (scope, evidence, residual risks, backlog link)
+- [x] Delivered as a **new PR #10** (`amd-review-restart-11-17-2026` → `develop`) instead of updating PR #9 (user decision). Commits re-authored to the GitHub noreply email (GH007 email-privacy block)
+- [x] `amd-review-restart-11-17-2026` fast-forwarded + pushed
+- [x] CI `build` job green (unit + gates + 20 ITs)
+- [x] ~~CI OWASP job~~ — removed from CI by user decision (2026-11-18); Dependabot alerts + security updates are on
+- [x] PR #10 title/description written (scope, evidence, residual risks, backlog link)
+- [ ] (User) close PR #9 (superseded by #10)
 - [ ] (User) merged to `develop`
 - [ ] (User) tag v3.3.0
 - [ ] Worktree removed
 
 ---
 
-_Plan created: 2026-11-17 · Last updated: 2026-11-17 (Phases 0–7 complete and verified; Phase 8 — push, CI/OWASP, PR description — pending user permission)_
+_Plan created: 2026-11-17 · Last updated: 2026-11-18 (PR #10 open; OWASP job removed from CI in favor of Dependabot; waiting on merge + tag)_

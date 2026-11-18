@@ -1002,7 +1002,7 @@ Quality tooling (Spotless, SpotBugs, JaCoCo, OWASP dependency-check) existed in 
 
 ### Decision
 
-- **Bind the checks to `verify`.** `spotless:check`, `spotbugs:check`, and `jacoco:check` execute in the `verify` phase, so `mvn verify` fails on formatting drift, static-analysis findings, or coverage below floor. The JaCoCo floor is **0.88 instruction / 0.74 branch**. OWASP dependency-check runs in CI.
+- **Bind the checks to `verify`.** `spotless:check`, `spotbugs:check`, and `jacoco:check` execute in the `verify` phase, so `mvn verify` fails on formatting drift, static-analysis findings, or coverage below floor. The JaCoCo floor is **0.88 instruction / 0.74 branch**. OWASP dependency-check ran in CI until 2026-11-18 (see the addendum below).
 - **Add `.github/workflows/ci.yml`.** On Linux (`ubuntu-latest`, which has a Docker daemon) it runs `mvn -B clean verify` (unit suite + the verify-bound gates) and then the three Testcontainers integration test classes (`S3StorageIntegrationTest`, `RedisCachedStorageIntegrationTest`, `RedisPubSubIntegrationTest`) that are excluded from the default local run.
 
 ### Alternatives considered
@@ -1013,7 +1013,8 @@ Quality tooling (Spotless, SpotBugs, JaCoCo, OWASP dependency-check) existed in 
 
 ### Consequences
 
-- **Positive**: formatting, static analysis, coverage, dependency CVEs, and the integration suite are all enforced on every push.
+- **Positive**: formatting, static analysis, coverage, and the integration suite are all enforced on every push.
+- **Addendum (2026-11-18): OWASP job removed from CI.** Without an `NVD_API_KEY` secret, the NVD API rate-limited the job (HTTP 429) and it failed without scanning anything. CVE monitoring moved to GitHub Dependabot (alerts + security-update PRs, enabled on the repo). The `dependency-check-maven` plugin stays in `pom.xml` for manual runs.
 - **Positive**: the coverage floor is a real gate, not documentation.
 - **Negative**: `mvn verify` is slower and stricter than `mvn test`; contributors run `spotless:apply` before pushing (documented in CONTRIBUTING.md).
 

@@ -35,6 +35,7 @@ Found by a full end-to-end run on Linux with Docker Engine 29.10. Plan and check
   - Micrometer CloudWatch is now Boot-managed (1.15.12; the old version skew is gone).
   - dependency-check 12.2.2.
 - **CI.** `ci.yml` now triggers on `develop` (plus `main`) and has `permissions: contents: read`. A missing IT now fails the build.
+  - **OWASP dependency-check job removed from CI (2026-11-18).** Without an NVD API key it was rate-limited (HTTP 429) and never scanned anything. CVE monitoring is now GitHub **Dependabot** (alerts + security-update PRs, both on for the repo). CI runs build + tests + quality gates only. The plugin stays in `pom.xml` for manual runs: `mvn dependency-check:check -DnvdApiKey=<key>`.
   - Testcontainers **1.21.4** (Boot-managed) works with Docker Engine 29; 1.21.2 couldn't find Docker on the ubuntu-26.04 runner.
   - The Redis IT now uses the production serializer (`RedisConfig.createRuleJsonSerializer()`).
 - **Test tooling.** `scripts/e2e-load-test.sh` gave a false PASS on Linux: per-request `curl` connections exhausted the ephemeral ports in ~30 s, and the workers died silently.
