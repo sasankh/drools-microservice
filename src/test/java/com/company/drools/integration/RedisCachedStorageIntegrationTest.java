@@ -1,7 +1,6 @@
 package com.company.drools.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
@@ -9,15 +8,12 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.company.drools.config.RedisConfig;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
 import com.company.drools.core.model.RuleMetadata.RuleStatus;
 import com.company.drools.storage.RedisCachedRuleStorage;
 import com.company.drools.storage.RuleStorage;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
-import com.fasterxml.jackson.databind.jsontype.PolymorphicTypeValidator;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -308,29 +304,12 @@ class RedisCachedStorageIntegrationTest {
     template.setConnectionFactory(factory);
     template.setKeySerializer(new StringRedisSerializer());
     template.setHashKeySerializer(new StringRedisSerializer());
-    Jackson2JsonRedisSerializer<Rule> jsonSerializer = buildJsonSerializer();
+    // Use the production serializer (no Jackson default typing, ADR-021) so this IT verifies the
+    // real Redis wire format rather than a lookalike.
+    Jackson2JsonRedisSerializer<Rule> jsonSerializer = RedisConfig.createRuleJsonSerializer();
     template.setValueSerializer(jsonSerializer);
     template.setHashValueSerializer(jsonSerializer);
     template.afterPropertiesSet();
     return template;
-  }
-
-  private static Jackson2JsonRedisSerializer<Rule> buildJsonSerializer() {
-    ObjectMapper objectMapper = new ObjectMapper();
-    objectMapper.registerModule(new JavaTimeModule());
-    PolymorphicTypeValidator ptv =
-        BasicPolymorphicTypeValidator.builder()
-            .allowIfBaseType("com.company.drools.core.model")
-            .allowIfBaseType("java.util")
-            .allowIfBaseType("java.time")
-            .build();
-    objectMapper.activateDefaultTyping(ptv, ObjectMapper.DefaultTyping.NON_FINAL);
-    return new Jackson2JsonRedisSerializer<>(objectMapper, Rule.class);
-  }
-
-  // Silence Awaitility unused-import warning if we add a polling test later
-  @SuppressWarnings("unused")
-  private void awaitNoop() {
-    await().atMost(Duration.ofMillis(1));
   }
 }

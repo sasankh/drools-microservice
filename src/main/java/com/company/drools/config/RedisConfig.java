@@ -56,8 +56,11 @@ public class RedisConfig {
     return template;
   }
 
-  /** Creates a Jackson2JsonRedisSerializer for Rule objects. */
-  private Jackson2JsonRedisSerializer<Rule> createRuleJsonSerializer() {
+  /**
+   * Creates the Jackson2JsonRedisSerializer for Rule objects — the production Redis wire format.
+   * Public and static so integration tests exercise exactly this format instead of a lookalike.
+   */
+  public static Jackson2JsonRedisSerializer<Rule> createRuleJsonSerializer() {
     // Rule is a flat, fixed-shape POJO (ruleId/content/metadata — all concrete types: String,
     // LocalDateTime, enum, primitives), and the serializer already pins the root type to
     // Rule.class.
