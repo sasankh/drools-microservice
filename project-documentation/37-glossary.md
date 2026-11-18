@@ -250,7 +250,7 @@ HTTP authentication scheme: `Authorization: Bearer <token>`. The rate limiter re
 ## Observability terms
 
 ### Heap dump (`.hprof`)
-A snapshot of the JVM heap. Triggered by `-XX:+HeapDumpOnOutOfMemoryError` on OOM, or manually via `jmap`/`jcmd`. Analyzed with Eclipse MAT or VisualVM. The project mounts `./heap-dumps/` to capture them.
+A snapshot of the JVM heap. Triggered by `-XX:+HeapDumpOnOutOfMemoryError` on OOM, or manually via `jmap`/`jcmd`. Analyzed with Eclipse MAT or VisualVM. In docker-compose they are written to `/tmp/heap-dumps` on the named volume `heap-dumps` (copy out with `docker compose cp app:/tmp/heap-dumps ./heap-dumps`).
 
 ### Thread dump
 A snapshot of every thread's call stack. `jcmd <pid> Thread.print`. Useful for diagnosing deadlocks and hung threads.

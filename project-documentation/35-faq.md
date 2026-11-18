@@ -292,7 +292,7 @@ Faster than full refresh.
 
 ### Where do heap dumps and GC logs go?
 
-In docker-compose: bind-mounted to `./heap-dumps/` and `./gc-logs/` on the host. In production: mount to a container volume that survives crashes.
+In docker-compose: `/tmp/heap-dumps` and `/tmp/gc-logs` inside the container, on the named volumes `heap-dumps` and `gc-logs` (copy out with `docker compose cp app:/tmp/heap-dumps ./heap-dumps`; tail with `docker compose exec app tail -f /tmp/gc-logs/gc.log`). In production: mount to a container volume that survives crashes.
 
 Configured by `JAVA_OPTS` in compose: `-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heap-dumps/heapdump.hprof`.
 

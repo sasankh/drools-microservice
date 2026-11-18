@@ -19,9 +19,14 @@ services:
         reservations:
           memory: 2G
           cpus: '1.0'
+    # Named volumes (not host bind mounts): Docker on Linux would create ./heap-dumps and ./gc-logs
+    # root-owned and the non-root JVM could not write gc.log -> it refuses to start. Named volumes
+    # inherit the appuser ownership set in the Dockerfile. Read them with e.g.
+    #   docker compose exec app tail -f /tmp/gc-logs/gc.log
+    #   docker compose cp app:/tmp/heap-dumps ./heap-dumps
     volumes:
-      - ./heap-dumps:/tmp/heap-dumps
-      - ./gc-logs:/tmp/gc-logs
+      - heap-dumps:/tmp/heap-dumps
+      - gc-logs:/tmp/gc-logs
     environment:
       # JVM Memory & GC Configuration
       - JAVA_OPTS=-Xms512m -Xmx2048m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+UseStringDeduplication -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heap-dumps/heapdump.hprof -Xlog:gc*:file=/tmp/gc-logs/gc.log:time,uptime,level,tags
@@ -136,4 +141,8 @@ volumes:
   localstack-data:
     driver: local
   redis-data:
+    driver: local
+  heap-dumps:
+    driver: local
+  gc-logs:
     driver: local

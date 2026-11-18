@@ -558,13 +558,13 @@ JAVA_OPTS=-XX:MaxMetaspaceSize=512m
 **Investigation**:
 ```bash
 # Check heap dumps (if configured)
-ls -lh heap-dumps/
+docker compose cp app:/tmp/heap-dumps ./heap-dumps && ls -lh heap-dumps/
 
 # Analyze heap dump with jhat or VisualVM
-jhat heap-dumps/heapdump.hprof
+# open heap-dumps/heapdump.hprof in Eclipse MAT or VisualVM (jhat was removed in JDK 9)
 
 # Check GC logs
-tail -100 gc-logs/gc.log
+docker compose exec app tail -100 /tmp/gc-logs/gc.log
 ```
 
 **Solution**:
@@ -615,7 +615,7 @@ JAVA_OPTS=-Xlog:gc*:file=/tmp/gc-logs/gc.log:time,uptime,level,tags
 **Analysis**:
 ```bash
 # Check GC activity
-tail -f gc-logs/gc.log
+docker compose exec app tail -f /tmp/gc-logs/gc.log
 
 # Look for patterns:
 # - Frequent full GCs
@@ -735,8 +735,8 @@ done
 - CAUTION: > 70% heap
 
 **Files**:
-- Heap dumps: `./heap-dumps/`
-- GC logs: `./gc-logs/`
+- Heap dumps: `/tmp/heap-dumps/` in the container (named volume `heap-dumps`; `docker compose cp app:/tmp/heap-dumps ./heap-dumps`)
+- GC logs: `/tmp/gc-logs/gc.log` in the container (named volume `gc-logs`)
 
 ---
 

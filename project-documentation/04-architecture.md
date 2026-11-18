@@ -1517,7 +1517,7 @@ Response:
 │                    APPLICATION                               │
 │  Build: ./Dockerfile                                         │
 │  Ports: 8080 (API + Admin), 8081 (Actuator)                   │
-│  Volumes: ./heap-dumps, ./gc-logs                            │
+│  Volumes: heap-dumps, gc-logs (named)                        │
 │  Environment: Docker profile, AWS endpoint override          │
 └─────────────────────────────────────────────────────────────┘
 ```

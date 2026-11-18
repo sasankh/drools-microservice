@@ -367,10 +367,10 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
    # Memory should NOT grow by 10-100MB each refresh
 
    # Check GC logs
-   tail -f gc-logs/gc.log
+   docker compose exec app tail -f /tmp/gc-logs/gc.log
 
    # Check heap dumps (if OOM occurred)
-   ls -lh heap-dumps/
+   docker compose cp app:/tmp/heap-dumps ./heap-dumps && ls -lh heap-dumps/
    ```
 
 ## Implementation Status
@@ -409,7 +409,7 @@ For the canonical narrative — phase history, ADRs, performance targets, testin
 - [`scripts/docker-build-test.sh`](scripts/docker-build-test.sh) — automated Docker build and validation
 - [`scripts/e2e-load-test.sh`](scripts/e2e-load-test.sh) — one-command E2E + 5-min load test with hot reload
 - [`scripts/run-load-test.sh`](scripts/run-load-test.sh) — full load-test orchestrator (Phase 0–8, 1000 rules, JMeter)
-- `gc-logs/`, `heap-dumps/` — runtime diagnostics output (gitignored content)
+- GC log + heap dumps — written inside the container to `/tmp/gc-logs` / `/tmp/heap-dumps` on **named volumes** (`gc-logs`, `heap-dumps`); read with `docker compose exec app tail -f /tmp/gc-logs/gc.log` or `docker compose cp app:/tmp/heap-dumps ./heap-dumps`
 - [`.ai-workspace/snap-memory/`](.ai-workspace/snap-memory/) — session memory files for `snap-memory` AI workflow
 
 ## Quick development setup

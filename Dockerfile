@@ -23,6 +23,13 @@ WORKDIR /app
 RUN addgroup -g 1000 appgroup && \
     adduser -u 1000 -G appgroup -s /bin/sh -D appuser
 
+# Diagnostics dirs (GC log + heap dumps) owned by appuser. docker-compose mounts NAMED volumes here;
+# a named volume is initialised from the image directory, so it inherits this ownership and the
+# non-root JVM can write to it on any host. (A host bind mount would be created root-owned on
+# Linux, and -Xlog:gc*:file=... then makes the JVM refuse to start.)
+RUN mkdir -p /tmp/gc-logs /tmp/heap-dumps && \
+    chown appuser:appgroup /tmp/gc-logs /tmp/heap-dumps
+
 # Copy the built JAR from build stage
 COPY --from=build /app/target/drools-rule-engine-*.jar app.jar
 
@@ -58,5 +65,6 @@ USER appuser
 # Expose application ports
 EXPOSE 8080 8081
 
-# Start the application
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+# Start the application. `exec` replaces the shell with the JVM (PID 1) so SIGTERM from
+# `docker stop` reaches Spring Boot and graceful shutdown (server.shutdown: graceful) runs.
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]

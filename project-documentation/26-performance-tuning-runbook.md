@@ -362,7 +362,7 @@ The container was OOM-killed by the kernel.
 docker compose logs --tail 100 app
 
 # Check if heap dump was written (configured in JAVA_OPTS)
-ls -la heap-dumps/
+docker compose cp app:/tmp/heap-dumps ./heap-dumps && ls -la heap-dumps/
 ```
 
 ### Decision tree

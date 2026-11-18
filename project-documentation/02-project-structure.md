@@ -21,8 +21,6 @@ drools-microservice/
 ├── .ai-workspace/                    # AI planning artifacts (excluded from doc corpus)
 ├── .claude/                          # Claude Code config (settings.json tracked; *.lock + settings.local.json gitignored)
 ├── .vscode/                          # IDE settings (excluded)
-├── gc-logs/                          # Mounted GC log dir for container (runtime data)
-├── heap-dumps/                       # Mounted heap dump dir (runtime data)
 ├── target/                           # Maven build output (gitignored)
 │
 ├── pom.xml                           # Maven build configuration (deps, plugins, enforcer)
@@ -359,8 +357,7 @@ The following directories exist in the repo but are **intentionally excluded** f
 | `.ai-workspace/` | AI planning artifacts (this overhaul's plan/checklist/findings) | Workspace, not deliverable docs |
 | `.claude/` | Claude Code session config (`settings.json` is tracked as shared config; per-session `*.lock` and per-user `settings.local.json` are gitignored) | Mostly local Claude state |
 | `.vscode/` | VS Code editor settings | IDE config |
-| `gc-logs/` | Mounted runtime GC log directory | Runtime data |
-| `heap-dumps/` | Mounted heap dump directory (populated on OOM) | Runtime data |
+| `gc-logs/`, `heap-dumps/` | Gitignored; only created if you `docker compose cp` diagnostics out (the container writes to named volumes) | Runtime data |
 | `target/` | Maven build output | Generated artifacts |
 
 If you are an AI agent considering whether to read those folders: don't, unless the user explicitly asks. They are not source-of-truth for project behavior.

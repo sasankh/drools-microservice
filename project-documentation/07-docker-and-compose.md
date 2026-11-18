@@ -190,8 +190,8 @@ app:
       limits:    { memory: 4G, cpus: '2.0' }
       reservations: { memory: 2G, cpus: '1.0' }
   volumes:
-    - ./heap-dumps:/tmp/heap-dumps
-    - ./gc-logs:/tmp/gc-logs
+    - heap-dumps:/tmp/heap-dumps   # named volume
+    - gc-logs:/tmp/gc-logs         # named volume
   environment:
     # JVM Memory & GC Configuration  ← OVERRIDES Dockerfile JAVA_OPTS
     - JAVA_OPTS=-Xms512m -Xmx2048m -XX:+UseG1GC -XX:MaxGCPauseMillis=200
@@ -267,10 +267,10 @@ app:
 **Resource limits (4G mem, 2 vCPU)**: matches a typical "medium" dev workstation. The `reservations` (2G/1.0 cpu) tell Docker the *minimum* the container needs — important for fair scheduling when multiple containers compete.
 
 **JAVA_OPTS override**: the Dockerfile sets percentage-based heap (50%/75% of cgroup limit). The compose override switches to **explicit `-Xms512m -Xmx2048m`** — predictable for dev. It also adds:
-- `-XX:+HeapDumpOnOutOfMemoryError` + `HeapDumpPath` → on OOM, a `.hprof` is written to the host-mounted `./heap-dumps/` dir for post-mortem analysis.
-- `-Xlog:gc*` → GC log written to the host-mounted `./gc-logs/`. Persists across container restarts.
+- `-XX:+HeapDumpOnOutOfMemoryError` + `HeapDumpPath` → on OOM, a `.hprof` is written to `/tmp/heap-dumps/` (named volume `heap-dumps`) for post-mortem analysis.
+- `-Xlog:gc*` → GC log written to `/tmp/gc-logs/gc.log` (named volume `gc-logs`). Persists across container restarts.
 
-**Volume mounts**: `./heap-dumps` and `./gc-logs` are bind-mounted from the host. After a crash, the developer can inspect them on the host filesystem without `docker cp`. (Both directories must exist on the host before compose starts; they're committed to the repo as empty dirs — see `.gitkeep` if needed.)
+**Volume mounts**: `heap-dumps` and `gc-logs` are **named volumes** (changed 2026-11-17). Host bind mounts broke on Linux: Docker created `./heap-dumps` / `./gc-logs` root-owned, the non-root JVM (uid 1000) couldn't open `gc.log`, and `-Xlog:gc*:file=…` made it refuse to start (crash loop). The Dockerfile now creates `/tmp/gc-logs` and `/tmp/heap-dumps` owned by `appuser`, and a named volume inherits that ownership on first use. Read them with `docker compose exec app tail -f /tmp/gc-logs/gc.log` and `docker compose cp app:/tmp/heap-dumps ./heap-dumps`. `docker compose down -v` deletes them.
 
 **`AWS_ENDPOINT=http://localstack:4566`**: this URL works because `localstack` is a service name on `drools-network`. Docker's built-in DNS resolves it to the LocalStack container's IP. The same URL would NOT work outside the compose network — outside, you'd use `http://localhost:4566`.
 
@@ -370,7 +370,7 @@ volumes:
 
 - `drools-network` is a bridge network created by compose. All 3 services join it. Container-to-container DNS works (`http://localstack:4566`, `redis://redis:6379`).
 - Named volumes (`localstack-data`, `redis-data`) live in Docker's volume directory; they're not bind-mounted to the host. Use `docker volume inspect` to find their on-disk path.
-- The host bind-mounts (`./heap-dumps`, `./gc-logs`, `./init-localstack.sh`, `./sample-rules`) are **not** named volumes — they map directly to host paths.
+- The host bind-mounts (`./init-localstack.sh`, `./sample-rules`) map directly to host paths; `heap-dumps` and `gc-logs` are named volumes (see above).
 
 ---
 
