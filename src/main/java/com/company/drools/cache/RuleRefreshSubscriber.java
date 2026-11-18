@@ -1,14 +1,10 @@
 package com.company.drools.cache;
 
 import com.company.drools.common.RuleIds;
-import com.company.drools.core.engine.DroolsEngineService;
-import com.company.drools.core.model.Rule;
-import com.company.drools.storage.RuleStorage;
+import com.company.drools.core.engine.RuleRefreshService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
-import java.util.List;
-import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -19,7 +15,9 @@ import org.springframework.stereotype.Component;
 
 /**
  * Subscribes to the Redis pub/sub channel published by {@link RuleRefreshPublisher} and refreshes
- * this task's local {@code kieContainer} when another task notifies it of a rule change.
+ * this instance's compiled rules (via {@link RuleRefreshService}) when another instance notifies it
+ * of a rule change. Pub/sub is fire-and-forget; a missed event is repaired by the scheduled
+ * reconcile ({@code drools.refresh.auto-enabled}).
  *
  * <p>Active only when {@code redis.enabled=true && redis.pubsub.enabled=true}. The {@code
  * RedisMessageListenerContainer} bean wires this listener to the channel (see {@code RedisConfig}).
@@ -28,9 +26,9 @@ import org.springframework.stereotype.Component;
  * refreshed locally before publishing). Detection uses the {@code sourceInstanceId} field on the
  * event compared against the local {@code droolsInstanceId} bean.
  *
- * <p>Error handling: any exception during event processing is logged at ERROR and the metric {@code
- * drools.refresh.failed{layer=subscriber}} is incremented. The subscriber stays alive — a single
- * bad event does not poison the listener.
+ * <p>Error handling: a failed refresh (storage unreadable, compile error, refused empty set) and
+ * any exception are logged at ERROR and counted in {@code drools.refresh.failed{layer=subscriber}}.
+ * The subscriber stays alive — a single bad event does not poison the listener.
  */
 @Component
 @ConditionalOnExpression("${redis.enabled:false} and ${redis.pubsub.enabled:true}")
@@ -46,30 +44,21 @@ public class RuleRefreshSubscriber implements MessageListener {
   private static final String TAG_LAYER = "layer";
   private static final String LAYER_SUBSCRIBER = "subscriber";
 
-  // Coalesce a burst of bulk-refresh events: skip a bulk recompile if one completed within this
-  // window. Each bulk refresh reloads the full corpus from storage, so back-to-back ones are
-  // redundant; anything missed inside the window is reconciled by the next event or auto-refresh.
-  private static final long BULK_COALESCE_WINDOW_MS = 500L;
+  // No bulk-event coalescing: the old 500 ms window could drop an event whose change landed after
+  // the previous read started. Unchanged rules are skipped by digest, so a repeated bulk refresh
+  // only costs a storage read.
 
-  private final RuleStorage storage;
-  private final DroolsEngineService droolsEngineService;
+  private final RuleRefreshService refreshService;
   private final String instanceId;
   private final ObjectMapper objectMapper;
   private final MeterRegistry meterRegistry;
 
-  // Handling runs on the single-thread rule-refresh executor (see RedisConfig), so this is only
-  // ever
-  // read/written by one thread; volatile guards visibility if that ever changes.
-  private volatile long lastBulkRefreshAtMs = 0L;
-
   public RuleRefreshSubscriber(
-      RuleStorage storage,
-      DroolsEngineService droolsEngineService,
+      RuleRefreshService refreshService,
       @Qualifier("droolsInstanceId") String instanceId,
       ObjectMapper objectMapper,
       MeterRegistry meterRegistry) {
-    this.storage = storage;
-    this.droolsEngineService = droolsEngineService;
+    this.refreshService = refreshService;
     this.instanceId = instanceId;
     this.objectMapper = objectMapper;
     this.meterRegistry = meterRegistry;
@@ -147,25 +136,37 @@ public class RuleRefreshSubscriber implements MessageListener {
       log.warn("RULE_REFRESHED event with invalid/unsafe ruleId, skipping: {}", ruleId);
       return;
     }
-    Optional<Rule> rule = storage.getRule(ruleId);
-    if (rule.isEmpty()) {
-      log.warn("RULE_REFRESHED for {} but rule not found in storage, skipping", ruleId);
-      return;
+    // The publisher already invalidated the shared Redis entry before publishing.
+    RuleRefreshService.SingleResult result =
+        refreshService.refreshOne(ruleId, RuleRefreshService.Source.PUBSUB, false);
+    switch (result.status()) {
+      case INSTALLED, UNCHANGED, REMOVED -> {
+        // applied
+      }
+      case NOT_FOUND -> log.warn("RULE_REFRESHED for {} but rule not found in storage", ruleId);
+      case FAILED, STORAGE_FAILED ->
+          throw new IllegalStateException(
+              "Refresh of " + ruleId + " failed (" + result.status() + "): " + result.error());
     }
-    droolsEngineService.loadOrReplaceRule(rule.get());
   }
 
   private void handleBulkRefresh() {
-    long now = System.currentTimeMillis();
-    long since = now - lastBulkRefreshAtMs;
-    if (since < BULK_COALESCE_WINDOW_MS) {
-      log.debug(
-          "Bulk refresh {}ms ago (< {}ms) — coalescing event", since, BULK_COALESCE_WINDOW_MS);
-      return;
+    RuleRefreshService.BulkResult result =
+        refreshService.refreshAll(
+            RuleRefreshService.Source.PUBSUB, RuleRefreshService.ReadMode.CACHED);
+    if (result.status() != RuleRefreshService.BulkStatus.LOADED) {
+      throw new IllegalStateException(
+          "Bulk refresh failed (" + result.status() + "): " + result.error());
     }
-    lastBulkRefreshAtMs = now;
-    List<Rule> rules = storage.getAllRules();
-    droolsEngineService.loadRules(rules);
+    if (!result.report().allSucceeded()) {
+      meterRegistry
+          .counter(METRIC_FAILED, TAG_LAYER, LAYER_SUBSCRIBER, "reason", "compile")
+          .increment(result.report().failed().size());
+      log.error(
+          "Bulk refresh: {} rule(s) failed to compile (previous versions keep serving): {}",
+          result.report().failed().size(),
+          result.report().failed().keySet());
+    }
   }
 
   private void handleDelete(String ruleId) {
@@ -174,8 +175,7 @@ public class RuleRefreshSubscriber implements MessageListener {
       log.warn("RULE_DELETED event with invalid/unsafe ruleId, skipping: {}", ruleId);
       return;
     }
-    // Propagate the delete to this instance's compiled corpus so a rule deleted on one task stops
-    // firing on siblings. (S5)
-    droolsEngineService.removeRule(ruleId);
+    // Propagate the delete so a rule deleted on one instance stops serving on siblings. (S5)
+    refreshService.removeOne(ruleId, RuleRefreshService.Source.PUBSUB);
   }
 }

@@ -505,6 +505,24 @@ curl -s -X POST http://localhost:8080/admin/refresh-rules -H "X-Admin-API-Key: a
 
 ---
 
+## Step 13: Refresh safety, readiness and reconcile (2026-11-18)
+
+Automated by `scripts/run-docker-test-plan.sh` (runs after Step 10, because it provokes storage errors on purpose). Every storage read is all-or-nothing: a failed or incomplete read changes nothing, and an empty read never removes loaded rules unless `drools.refresh.allow-empty=true`.
+
+| # | What it does | Expected |
+|---|---|---|
+| 13.1 | `GET http://localhost:8081/actuator/health/readiness` | 200 UP (the `rules` indicator is part of readiness) |
+| 13.2 | `docker compose stop localstack`, then `POST /admin/refresh-rules` | HTTP 500, `status: "failed"`; still 17 rules; `pricing.discount.simple` $100 → 90 |
+| 13.3 | Start LocalStack (its ready hook re-uploads the rules), refresh again | 200 `completed`, `rules_loaded: 17`, `rules_unchanged: 17` (same DRL → not recompiled) |
+| 13.4 | Move every object to another bucket, refresh | HTTP 409 `rejected_empty`; still 17 rules |
+| 13.5 | Restart the app against the empty bucket (`AUTO_REFRESH_ENABLED=true`, `AUTO_REFRESH_INTERVAL_MINUTES=1`) | `/admin/health` 503 and readiness 503 (no rules → not ready) |
+| 13.6 | Move the rules back, no admin call | Within ~2 min the scheduled reconcile loads 17 rules; readiness and `/admin/health` back to 200 |
+| 13.7 | Edit `simple.drl` directly in S3 (10% → 20%), no admin call | Within ~2 min `pricing.discount.simple` $100 → 80 (reconcile reads S3 directly, bypassing Redis); then restored |
+| 13.8 | Delete `vip.drl` in S3, `POST /admin/refresh-rules/pricing.discount.vip` | 200 `status: "removed"`, 16 rules; after re-upload + refresh: `success`, 17 |
+| 13.9 | Refresh `pricing.discount.vip` again | 200 `status: "unchanged"` |
+
+---
+
 ## Pass/Fail Summary
 
 | Step | Test | Pass Criteria | Result |
@@ -558,6 +576,15 @@ curl -s -X POST http://localhost:8080/admin/refresh-rules -H "X-Admin-API-Key: a
 | 12.5 | Exec timeout (P3/P7) | runaway rule → 408, service responsive; saturation → 503 | |
 | 12.6 | RULE_DELETED (S5) | pub/sub delete removes rule (17→16), refresh restores 17 | |
 | 12.7 | Path bypass (ADR-024) | `/admin;x/…`, `/%61dmin/…`, `/%65xecute-rule` → 400 | |
+| 13.1 | Readiness probe | `/actuator/health/readiness` 200 | |
+| 13.2 | S3 down during refresh | 500 `failed`, no rule lost | |
+| 13.3 | S3 back | 200, 17 unchanged | |
+| 13.4 | Empty bucket | 409 `rejected_empty`, 17 kept | |
+| 13.5 | Start with 0 rules | readiness + `/admin/health` 503 | |
+| 13.6 | Reconcile restores | 17 rules, ready, no admin call | |
+| 13.7 | Direct S3 edit | picked up by reconcile | |
+| 13.8 | Deleted in S3 | single refresh → `removed` | |
+| 13.9 | Same DRL again | `unchanged` | |
 
 ---
 

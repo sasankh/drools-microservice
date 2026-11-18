@@ -163,23 +163,29 @@ public class DroolsEngineService {
       }
 
       List<String> loaded = new ArrayList<>();
+      List<String> unchanged = new ArrayList<>();
       Map<String, String> failed = new LinkedHashMap<>();
       for (Rule rule : byId.values()) {
-        Optional<String> error = compileAndInstall(rule);
-        if (error.isPresent()) {
-          failed.put(rule.getRuleId(), error.get());
-        } else {
-          loaded.add(rule.getRuleId());
+        InstallOutcome outcome = compileAndInstall(rule);
+        switch (outcome.status()) {
+          case INSTALLED -> loaded.add(rule.getRuleId());
+          case UNCHANGED -> unchanged.add(rule.getRuleId());
+          case FAILED -> failed.put(rule.getRuleId(), outcome.error());
         }
       }
 
-      LoadReport report = new LoadReport(loaded, failed, removed);
+      LoadReport report = new LoadReport(loaded, unchanged, failed, removed);
       if (failed.isEmpty()) {
-        log.info("Loaded {} rules ({} removed)", loaded.size(), removed.size());
+        log.info(
+            "Loaded {} rules ({} unchanged, {} removed)",
+            loaded.size(),
+            unchanged.size(),
+            removed.size());
       } else {
         log.error(
-            "Loaded {} rules, {} failed to compile ({} removed): {}",
+            "Loaded {} rules, {} unchanged, {} failed to compile ({} removed): {}",
             loaded.size(),
+            unchanged.size(),
             failed.size(),
             removed.size(),
             failed.keySet());
@@ -192,14 +198,20 @@ public class DroolsEngineService {
 
   /**
    * Replace (or add) one rule ID. Only that ID is recompiled; every other rule ID is untouched. If
-   * the new version fails to compile, the previous version (if any) keeps serving.
+   * the new version fails to compile, the previous version (if any) keeps serving. If the DRL is
+   * byte-identical to the version already serving (same SHA-256), nothing is recompiled.
    *
-   * @return {@code true} if the new version compiled and is now serving
+   * @return {@code true} if the given version is now serving (newly compiled or unchanged)
    */
   public boolean loadOrReplaceRule(Rule rule) {
+    return replaceRule(rule).status() != InstallStatus.FAILED;
+  }
+
+  /** Same as {@link #loadOrReplaceRule} but returns the detailed outcome. */
+  public InstallOutcome replaceRule(Rule rule) {
     refreshLock.lock();
     try {
-      return compileAndInstall(rule).isEmpty();
+      return compileAndInstall(rule);
     } finally {
       refreshLock.unlock();
     }
@@ -227,12 +239,24 @@ public class DroolsEngineService {
   }
 
   /**
-   * Compile one rule and, on success, install it. Caller holds {@code refreshLock}.
-   *
-   * @return the error message if it failed
+   * Compile one rule and, on success, install it. Skips the compile when the same DRL (same digest)
+   * is already serving cleanly. Caller holds {@code refreshLock}.
    */
-  private Optional<String> compileAndInstall(Rule rule) {
+  private InstallOutcome compileAndInstall(Rule rule) {
     String ruleId = rule.getRuleId();
+    String digest = rule.contentDigest();
+    Optional<CompiledRuleset> current = registry.get(ruleId);
+    RuleMetadata currentMeta = ruleMetadata.get(ruleId);
+    if (current.isPresent()
+        && current.get().contentDigest().equals(digest)
+        && currentMeta != null
+        && currentMeta.getStatus() == RuleMetadata.RuleStatus.ACTIVE
+        && currentMeta.getErrorMessage() == null) {
+      log.debug(
+          "Rule {} unchanged (digest {}), not recompiled", ruleId, current.get().shortDigest());
+      return InstallOutcome.unchanged();
+    }
+
     Timer.Sample sample = Timer.start();
     RuleCompiler.RuleCompilation compilation = ruleCompiler.compileRule(rule);
     sample.stop(
@@ -243,26 +267,31 @@ public class DroolsEngineService {
     if (compilation.isSuccess()) {
       CompiledRuleset ruleset = compilation.ruleset();
       registry.install(ruleset);
+      java.time.LocalDateTime sourceModified =
+          rule.getMetadata() != null ? rule.getMetadata().getLastModified() : null;
       ruleMetadata.compute(
           ruleId,
-          (id, current) -> (current != null ? current : RuleMetadata.createNew()).withCompiled());
+          (id, existing) ->
+              (existing != null ? existing : RuleMetadata.createNew())
+                  .withCompiled(sourceModified));
       log.debug("Installed rule {} (digest {})", ruleId, ruleset.shortDigest());
-      return Optional.empty();
+      return InstallOutcome.installed();
     }
 
     meterRegistry.counter(METRIC_RULE_COMPILE_ERROR, TAG_RULE_ID, ruleId).increment();
     String error = compilation.errorMessage();
     if (registry.contains(ruleId)) {
       // Previous version keeps serving; record the rejected update.
-      ruleMetadata.computeIfPresent(ruleId, (id, current) -> current.withFailedUpdate(error));
+      ruleMetadata.computeIfPresent(ruleId, (id, existing) -> existing.withFailedUpdate(error));
       log.error("Rule {} update rejected; previous version keeps serving: {}", ruleId, error);
     } else {
       ruleMetadata.compute(
           ruleId,
-          (id, current) -> (current != null ? current : RuleMetadata.createNew()).withError(error));
+          (id, existing) ->
+              (existing != null ? existing : RuleMetadata.createNew()).withError(error));
       log.error("Rule {} failed to compile and has no previous version: {}", ruleId, error);
     }
-    return Optional.of(error);
+    return InstallOutcome.failed(error);
   }
 
   private void stopTimer(Timer.Sample sample, String ruleId, String status) {
@@ -286,6 +315,18 @@ public class DroolsEngineService {
     return ruleMetadata.containsKey(ruleId);
   }
 
+  /** SHA-256 of the DRL currently serving for {@code ruleId}, if any. */
+  public Optional<String> getServingDigest(String ruleId) {
+    return registry.get(ruleId).map(CompiledRuleset::contentDigest);
+  }
+
+  /** Rule ID → SHA-256 of the DRL currently serving, for every compiled rule ID. */
+  public Map<String, String> getServingDigests() {
+    Map<String, String> digests = new LinkedHashMap<>();
+    registry.snapshot().forEach((id, handle) -> digests.put(id, handle.contentDigest()));
+    return digests;
+  }
+
   /** Number of rule IDs with a compiled version able to serve requests. */
   public int getLoadedRulesCount() {
     return registry.size();
@@ -298,17 +339,57 @@ public class DroolsEngineService {
         .count();
   }
 
-  /** Per-ID outcome of a bulk load. */
-  public record LoadReport(List<String> loaded, Map<String, String> failed, List<String> removed) {
+  /**
+   * Per-ID outcome of a bulk load.
+   *
+   * @param loaded newly compiled and now serving
+   * @param unchanged same DRL as the version already serving (not recompiled)
+   * @param failed rule ID → compile error (a previous version, if any, keeps serving)
+   * @param removed no longer present in the set, removed
+   */
+  public record LoadReport(
+      List<String> loaded,
+      List<String> unchanged,
+      Map<String, String> failed,
+      List<String> removed) {
 
     public LoadReport {
       loaded = List.copyOf(loaded);
+      unchanged = List.copyOf(unchanged);
       failed = Map.copyOf(failed);
       removed = List.copyOf(removed);
     }
 
     public boolean allSucceeded() {
       return failed.isEmpty();
+    }
+
+    /** {@code true} if anything changed (installed or removed). */
+    public boolean changedAnything() {
+      return !loaded.isEmpty() || !removed.isEmpty();
+    }
+  }
+
+  /** Outcome of installing one rule ID. */
+  public enum InstallStatus {
+    INSTALLED,
+    UNCHANGED,
+    FAILED
+  }
+
+  /** Install outcome plus the compile error when {@link InstallStatus#FAILED}. */
+  public record InstallOutcome(InstallStatus status, String error) {
+
+    static InstallOutcome installed() {
+      return new InstallOutcome(InstallStatus.INSTALLED, null);
+    }
+
+    static InstallOutcome unchanged() {
+      return new InstallOutcome(InstallStatus.UNCHANGED, null);
+    }
+
+    static InstallOutcome failed(String error) {
+      return new InstallOutcome(InstallStatus.FAILED, error);
     }
   }
 }

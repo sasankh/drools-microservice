@@ -40,7 +40,7 @@ docker run -d \
   --name drools-test \
   -p 9080:8080 \
   -p 9081:8081 \
-  -e RULE_SOURCE=memory \
+  -e RULE_SOURCE=local \
   -e LOG_LEVEL=INFO \
   drools-rule-engine:latest || {
     echo -e "${RED}❌ Container failed to start${NC}"

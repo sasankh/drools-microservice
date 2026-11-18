@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # =============================================================================
-# run-docker-test-plan.sh — automated full-docker-test-plan.md (Steps 1–12)
+# run-docker-test-plan.sh — automated full-docker-test-plan.md (Steps 1–13)
 #
 # Builds and starts the docker-compose stack, then runs every step of
 # full-docker-test-plan.md plus value checks for all 17 sample rules, a live
 # rate-limit spoofing test, the runaway-rule timeout (408), RULE_DELETED
-# propagation and the request-path bypass check (ADR-024). Prints a PASS/FAIL/INFO
+# propagation, the request-path bypass check (ADR-024) and refresh safety / readiness /
+# reconcile (Step 13: S3 down, empty bucket, start with 0 rules, direct S3 edit). Prints a PASS/FAIL/INFO
 # table and exits non-zero if any check FAILs. INFO rows document known issues
 # (they never fail the run).
 #
@@ -14,7 +15,7 @@
 #   ./scripts/run-docker-test-plan.sh --keep-stack # leave the stack running
 #   ./scripts/run-docker-test-plan.sh --skip-build # reuse the existing image
 #
-# Requirements: docker (Engine + Compose v2), curl, jq. ~8–10 minutes.
+# Requirements: docker (Engine + Compose v2), curl, jq. ~12–15 minutes.
 # Linux note: if Podman is also installed and DOCKER_HOST points at it, run with
 #   DOCKER_HOST=unix:///var/run/docker.sock ./scripts/run-docker-test-plan.sh
 # No tracked file is modified (Redis-off mode uses a temporary compose override).
@@ -97,7 +98,7 @@ rec 3.1 "List rules = 17, all ACTIVE" "$(ok jq -e '.total_rules==17 and ([.rules
 j=$(curl -s -X POST "$A/admin/refresh-rules" "${K[@]}")
 rec 3.2 "Refresh all" "$(ok jq -e '.status=="completed" and .rules_loaded==17 and .rules_failed==0' <<<"$j")" "$(jq -c '{status,rules_loaded,rules_failed,duration_ms}' <<<"$j")"
 j=$(curl -s -X POST "$A/admin/refresh-rules/pricing.discount.simple" "${K[@]}")
-rec 3.3 "Refresh single rule" "$(ok jq -e '.status=="success"' <<<"$j")" "$(jq -c '{rule_id,status,compilation_time_ms}' <<<"$j")"
+rec 3.3 "Refresh single rule" "$(ok jq -e '.status=="success" or .status=="unchanged"' <<<"$j")" "$(jq -c '{rule_id,status,compilation_time_ms}' <<<"$j")"
 t=$(curl -s "$A/admin/rules" "${K[@]}" | jq .total_rules); rec 3.4 "Still 17 after refresh" "$([ "$t" = 17 ] && echo 1 || echo 0)" "total=$t"
 
 # ── Step 4 + X1: execution with VALUE checks ──────────────────────────────────
@@ -220,6 +221,61 @@ echo "=== Step 10: app log errors"
 "${DC[@]}" logs --no-log-prefix app 2>&1 | grep -E '"level":"ERROR"| ERROR ' | grep -v stack_trace | grep -v 'test.runaway.loop' > "$TMP/errors.txt"
 n=$(grep -c . "$TMP/errors.txt"); rec 10 "No unexpected ERROR lines in app log" "$([ "$n" = 0 ] && echo 1 || echo 0)" "$n lines"
 [ "$n" = 0 ] || head -5 "$TMP/errors.txt" | cut -c1-200
+
+# ── Step 13: refresh safety, readiness, reconcile (engine-isolation Phase 3) ─────
+# Runs after Step 10 because it provokes storage/refresh errors on purpose.
+echo "=== Step 13: refresh safety / readiness / reconcile"
+aws() { "${DC[@]}" exec -T localstack awslocal "$@"; }
+total() { curl -s "$A/admin/rules" "${K[@]}" | jq -r .total_rules; }
+ready() { code "$ACT/actuator/health/readiness"; }
+rd=$(ready); rec 13.1 "Readiness probe UP (rules loaded)" "$([ "$rd" = 200 ] && echo 1 || echo 0)" "/actuator/health/readiness=$rd"
+
+"${DC[@]}" stop localstack >/dev/null 2>&1
+j=$(curl -s -m 120 -w '\n%{http_code}' -X POST "$A/admin/refresh-rules" "${K[@]}"); hc=$(tail -1 <<<"$j"); st=$(head -1 <<<"$j" | jq -r .status)
+t=$(total); v=$(ex '{"rule_id":"pricing.discount.simple","data":{"amount":100}}' | jq '.result.amount|round')
+rec 13.2 "S3 down: refresh 500 'failed', no rule lost" "$([ "$hc" = 500 ] && [ "$st" = failed ] && [ "$t" = 17 ] && [ "$v" = 90 ] && echo 1 || echo 0)" "http=$hc status=$st total=$t simple=$v"
+"${DC[@]}" up -d localstack >/dev/null 2>&1
+for i in $(seq 1 40); do [ "$(aws s3 ls s3://local-rules/ --recursive 2>/dev/null | grep -c '\.drl$')" -ge 17 ] && break; sleep 3; done
+# The S3 circuit breaker opened during the outage; retry until it lets calls through again.
+for i in $(seq 1 30); do j=$(curl -s -X POST "$A/admin/refresh-rules" "${K[@]}"); [ "$(jq -r .status <<<"$j")" = completed ] && break; sleep 5; done
+rec 13.3 "S3 back: refresh completed, 17 unchanged" "$(ok jq -e '.status=="completed" and .rules_loaded==17 and .rules_unchanged==17' <<<"$j")" "$(jq -c '{status,rules_loaded,rules_unchanged,rules_removed}' <<<"$j")"
+
+aws s3 mb s3://rules-bak >/dev/null 2>&1; aws s3 mv s3://local-rules s3://rules-bak --recursive >/dev/null
+j=$(curl -s -w '\n%{http_code}' -X POST "$A/admin/refresh-rules" "${K[@]}"); hc=$(tail -1 <<<"$j"); st=$(head -1 <<<"$j" | jq -r .status)
+rec 13.4 "Empty bucket: refresh refused (409), 17 kept" "$([ "$hc" = 409 ] && [ "$st" = rejected_empty ] && [ "$(total)" = 17 ] && echo 1 || echo 0)" "http=$hc status=$st total=$(total)"
+
+# Restart the app against the empty bucket with a 1-minute reconcile.
+cat > "$TMP/reconcile.yml" <<'YML'
+services:
+  app:
+    environment:
+      - AUTO_REFRESH_ENABLED=true
+      - AUTO_REFRESH_INTERVAL_MINUTES=1
+YML
+"${DC[@]}" -f docker-compose.yml -f "$TMP/reconcile.yml" up -d app >/dev/null 2>&1
+for i in $(seq 1 60); do c=$(code "$A/admin/health" "${K[@]}"); [ "$c" = 200 ] || [ "$c" = 503 ] && break; sleep 3; done
+hh=$(code "$A/admin/health" "${K[@]}"); rd=$(ready); ec=$(code -X POST "$A/execute-rule" -H 'Content-Type: application/json' -d '{"rule_id":"pricing.discount.simple","data":{"amount":100}}')
+rec 13.5 "Start with 0 rules: NOT ready, /admin/health 503" "$([ "$hh" = 503 ] && [ "$rd" = 503 ] && echo 1 || echo 0)" "admin/health=$hh readiness=$rd execute=$ec"
+
+aws s3 mv s3://rules-bak s3://local-rules --recursive >/dev/null
+t0=$(date +%s); for i in $(seq 1 30); do [ "$(total)" = 17 ] && break; sleep 5; done; dt=$(( $(date +%s) - t0 ))
+rec 13.6 "Reconcile loads restored rules, no admin call" "$([ "$(total)" = 17 ] && [ "$(ready)" = 200 ] && [ "$(code "$A/admin/health" "${K[@]}")" = 200 ] && echo 1 || echo 0)" "total=$(total) after ${dt}s readiness=$(ready)"
+
+"${DC[@]}" exec -T localstack sh -c 'awslocal s3 cp s3://local-rules/pricing/discount/simple.drl /tmp/s.drl >/dev/null && sed -i "s/amount \* 0.90/amount * 0.80/" /tmp/s.drl && awslocal s3 cp /tmp/s.drl s3://local-rules/pricing/discount/simple.drl >/dev/null'
+t0=$(date +%s); v=0; for i in $(seq 1 30); do v=$(ex '{"rule_id":"pricing.discount.simple","data":{"amount":100}}' | jq '.result.amount|round'); [ "$v" = 80 ] && break; sleep 5; done; dt=$(( $(date +%s) - t0 ))
+rec 13.7 "Direct S3 edit picked up by reconcile" "$([ "$v" = 80 ] && echo 1 || echo 0)" "simple \$100 -> $v after ${dt}s"
+"${DC[@]}" exec -T localstack sh -c 'sed -i "s/amount \* 0.80/amount * 0.90/" /tmp/s.drl && awslocal s3 cp /tmp/s.drl s3://local-rules/pricing/discount/simple.drl >/dev/null'
+curl -s -X POST "$A/admin/refresh-rules" "${K[@]}" >/dev/null   # invalidate Redis + reload the restored DRL
+
+aws s3 cp s3://local-rules/pricing/discount/vip.drl s3://rules-bak/vip.drl >/dev/null; aws s3 rm s3://local-rules/pricing/discount/vip.drl >/dev/null
+j=$(curl -s -X POST "$A/admin/refresh-rules/pricing.discount.vip" "${K[@]}"); st=$(jq -r .status <<<"$j"); t=$(total)
+aws s3 cp s3://rules-bak/vip.drl s3://local-rules/pricing/discount/vip.drl >/dev/null
+j2=$(curl -s -X POST "$A/admin/refresh-rules/pricing.discount.vip" "${K[@]}"); st2=$(jq -r .status <<<"$j2")
+rec 13.8 "Deleted in S3: single refresh removes it" "$([ "$st" = removed ] && [ "$t" = 16 ] && [ "$st2" = success ] && [ "$(total)" = 17 ] && echo 1 || echo 0)" "status=$st total=$t; restored status=$st2 total=$(total)"
+j=$(curl -s -X POST "$A/admin/refresh-rules/pricing.discount.vip" "${K[@]}")
+rec 13.9 "Same DRL again: 'unchanged' (not recompiled)" "$(ok jq -e '.status=="unchanged"' <<<"$j")" "$(jq -c '{status}' <<<"$j")"
+
+"${DC[@]}" up -d app >/dev/null 2>&1; wait_healthy >/dev/null || true   # back to the default app config
 
 # ── Known issues (INFO only; tracked in the post-merge backlog) ───────────────
 for spec in "GET /execute-rule|GET|$A/execute-rule|" "POST text/plain /execute-rule|POST|$A/execute-rule|Content-Type: text/plain"; do

@@ -16,6 +16,17 @@ public class RefreshRulesResponse {
   @JsonProperty("rules_failed")
   private int rulesFailed;
 
+  /**
+   * Of {@code rules_loaded}, how many were identical to the version already serving and so were not
+   * recompiled. {@code rules_loaded} counts every rule ID serving from this snapshot.
+   */
+  @JsonProperty("rules_unchanged")
+  private int rulesUnchanged;
+
+  /** Rule IDs no longer in storage, removed from the engine. */
+  @JsonProperty("rules_removed")
+  private int rulesRemoved;
+
   @JsonProperty("duration_ms")
   private long durationMs;
 
@@ -66,6 +77,22 @@ public class RefreshRulesResponse {
 
   public void setRulesFailed(int rulesFailed) {
     this.rulesFailed = rulesFailed;
+  }
+
+  public int getRulesUnchanged() {
+    return rulesUnchanged;
+  }
+
+  public void setRulesUnchanged(int rulesUnchanged) {
+    this.rulesUnchanged = rulesUnchanged;
+  }
+
+  public int getRulesRemoved() {
+    return rulesRemoved;
+  }
+
+  public void setRulesRemoved(int rulesRemoved) {
+    this.rulesRemoved = rulesRemoved;
   }
 
   public long getDurationMs() {

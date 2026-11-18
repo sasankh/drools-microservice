@@ -2,10 +2,7 @@ package com.company.drools.core.engine;
 
 import com.company.drools.core.model.Rule;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -122,12 +119,7 @@ public class RuleCompiler {
 
   /** SHA-256 hex digest of DRL source text (UTF-8). */
   public static String sha256(String content) {
-    try {
-      MessageDigest md = MessageDigest.getInstance("SHA-256");
-      return HexFormat.of().formatHex(md.digest(content.getBytes(StandardCharsets.UTF_8)));
-    } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("SHA-256 not available", e);
-    }
+    return com.company.drools.common.ContentDigest.sha256(content);
   }
 
   /** Result of compiling one rule ID. */

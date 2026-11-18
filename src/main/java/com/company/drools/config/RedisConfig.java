@@ -4,7 +4,6 @@ import com.company.drools.cache.RuleRefreshSubscriber;
 import com.company.drools.core.model.Rule;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import java.util.concurrent.ThreadPoolExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -107,19 +106,32 @@ public class RedisConfig {
   }
 
   /**
-   * Dedicated single-thread executor for pub/sub message handling (rule recompiles). Bounded queue
-   * + caller-runs so nothing is silently dropped, but the (possibly long) recompile never runs on
-   * the Lettuce dispatch thread. Spring manages init/shutdown. (S6)
+   * Dedicated single-thread executor for pub/sub message handling (rule recompiles), so a recompile
+   * never runs on the Lettuce dispatch thread. Spring manages init/shutdown. (S6)
+   *
+   * <p>If the bounded queue overflows, the event is dropped, logged and counted ({@code
+   * drools.refresh.failed{layer=listener,reason=queue_full}}). The previous caller-runs policy ran
+   * the handler on the Redis dispatch thread, which both blocked dispatch and broke the
+   * one-handler-at-a-time assumption. A dropped event is repaired by the scheduled reconcile.
    */
   @Bean
   @ConditionalOnProperty(name = "redis.pubsub.enabled", havingValue = "true", matchIfMissing = true)
-  public ThreadPoolTaskExecutor ruleRefreshListenerExecutor() {
+  public ThreadPoolTaskExecutor ruleRefreshListenerExecutor(
+      io.micrometer.core.instrument.MeterRegistry meterRegistry) {
     ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
     executor.setCorePoolSize(1);
     executor.setMaxPoolSize(1);
     executor.setQueueCapacity(50);
     executor.setThreadNamePrefix("rule-refresh-");
-    executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+    executor.setRejectedExecutionHandler(
+        (task, pool) -> {
+          log.error(
+              "Rule refresh event queue full (50); dropping an event. The scheduled reconcile will"
+                  + " repair any missed change.");
+          meterRegistry
+              .counter("drools.refresh.failed", "layer", "listener", "reason", "queue_full")
+              .increment();
+        });
     return executor;
   }
 }

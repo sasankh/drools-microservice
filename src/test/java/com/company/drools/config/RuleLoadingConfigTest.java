@@ -1,17 +1,19 @@
 package com.company.drools.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.Mockito.never;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.company.drools.core.engine.DroolsEngineService;
-import com.company.drools.core.model.Rule;
-import com.company.drools.core.model.RuleMetadata;
-import com.company.drools.storage.RuleStorage;
-import com.company.drools.storage.StorageFactory;
+import com.company.drools.core.engine.RuleRefreshService;
+import com.company.drools.core.engine.RuleRefreshService.BulkResult;
+import com.company.drools.core.engine.RuleRefreshService.BulkStatus;
+import com.company.drools.core.engine.RuleRefreshService.ReadMode;
+import com.company.drools.core.engine.RuleRefreshService.Source;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -27,9 +29,7 @@ class RuleLoadingConfigTest {
 
   private RuleLoadingConfig ruleLoadingConfig;
 
-  @Mock private DroolsEngineService droolsEngineService;
-  @Mock private StorageFactory storageFactory;
-  @Mock private RuleStorage ruleStorage;
+  @Mock private RuleRefreshService refreshService;
   @Mock private ApplicationArguments applicationArguments;
 
   @BeforeEach
@@ -37,78 +37,87 @@ class RuleLoadingConfigTest {
     ruleLoadingConfig = new RuleLoadingConfig();
   }
 
+  private static BulkResult loaded(List<String> ok, Map<String, String> failed) {
+    return new BulkResult(
+        BulkStatus.LOADED,
+        new DroolsEngineService.LoadReport(ok, List.of(), failed, List.of()),
+        null);
+  }
+
   @Test
   @DisplayName("loadRulesOnStartup returns a non-null ApplicationRunner bean")
   void testLoadRulesOnStartupReturnsApplicationRunner() {
-    ApplicationRunner runner =
-        ruleLoadingConfig.loadRulesOnStartup(droolsEngineService, storageFactory);
+    ApplicationRunner runner = ruleLoadingConfig.loadRulesOnStartup(refreshService, false);
     assertThat(runner).isNotNull();
   }
 
   @Test
-  @DisplayName("runner loads rules successfully from storage")
+  @DisplayName("runner performs a STARTUP refresh with a normal (cached) read")
   void testRunnerSuccess() throws Exception {
-    List<Rule> rules =
-        List.of(
-            new Rule("rule-1", "content-1", RuleMetadata.createNew()),
-            new Rule("rule-2", "content-2", RuleMetadata.createNew()));
+    when(refreshService.refreshAll(Source.STARTUP, ReadMode.CACHED))
+        .thenReturn(loaded(List.of("rule-1", "rule-2"), Map.of()));
 
-    when(storageFactory.createRuleStorage()).thenReturn(ruleStorage);
-    when(ruleStorage.getAllRules()).thenReturn(rules);
-    when(droolsEngineService.loadRules(rules)).thenReturn(true);
-    when(droolsEngineService.getActiveRulesCount()).thenReturn(2L);
+    ruleLoadingConfig.loadRulesOnStartup(refreshService, true).run(applicationArguments);
 
-    ApplicationRunner runner =
-        ruleLoadingConfig.loadRulesOnStartup(droolsEngineService, storageFactory);
-    runner.run(applicationArguments);
-
-    verify(storageFactory).createRuleStorage();
-    verify(ruleStorage).getAllRules();
-    verify(droolsEngineService).loadRules(rules);
+    verify(refreshService).refreshAll(Source.STARTUP, ReadMode.CACHED);
   }
 
   @Test
-  @DisplayName("runner logs error when loadRules returns false (does not crash)")
-  void testRunnerLoadRulesFails() throws Exception {
-    List<Rule> rules = List.of(new Rule("rule-1", "content-1", RuleMetadata.createNew()));
+  @DisplayName("per-ID compile failures never fail startup, even with fail-on-load-error")
+  void testRunnerCompileFailuresDoNotThrow() {
+    when(refreshService.refreshAll(Source.STARTUP, ReadMode.CACHED))
+        .thenReturn(loaded(List.of("rule-1"), Map.of("rule-2", "syntax error")));
 
-    when(storageFactory.createRuleStorage()).thenReturn(ruleStorage);
-    when(ruleStorage.getAllRules()).thenReturn(rules);
-    when(droolsEngineService.loadRules(rules)).thenReturn(false);
+    ApplicationRunner runner = ruleLoadingConfig.loadRulesOnStartup(refreshService, true);
 
-    ApplicationRunner runner =
-        ruleLoadingConfig.loadRulesOnStartup(droolsEngineService, storageFactory);
-    runner.run(applicationArguments);
-
-    verify(droolsEngineService).loadRules(rules);
+    assertThatCode(() -> runner.run(applicationArguments)).doesNotThrowAnyException();
   }
 
   @Test
-  @DisplayName("runner catches exception from storageFactory and does not crash")
-  void testRunnerExceptionFromStorageFactory() throws Exception {
-    when(storageFactory.createRuleStorage())
-        .thenThrow(new RuntimeException("S3 connection failed"));
+  @DisplayName("storage failure without fail-on-load-error: logs, does not crash")
+  void testRunnerStorageFailedDoesNotThrowByDefault() {
+    when(refreshService.refreshAll(Source.STARTUP, ReadMode.CACHED))
+        .thenReturn(new BulkResult(BulkStatus.STORAGE_FAILED, null, "S3 connection failed"));
 
-    ApplicationRunner runner =
-        ruleLoadingConfig.loadRulesOnStartup(droolsEngineService, storageFactory);
+    ApplicationRunner runner = ruleLoadingConfig.loadRulesOnStartup(refreshService, false);
 
-    runner.run(applicationArguments);
-
-    verify(storageFactory).createRuleStorage();
-    verify(droolsEngineService, never()).loadRules(anyList());
+    assertThatCode(() -> runner.run(applicationArguments)).doesNotThrowAnyException();
   }
 
   @Test
-  @DisplayName("runner catches exception from getAllRules and does not crash")
-  void testRunnerExceptionFromGetAllRules() throws Exception {
-    when(storageFactory.createRuleStorage()).thenReturn(ruleStorage);
-    when(ruleStorage.getAllRules()).thenThrow(new RuntimeException("Storage read failure"));
+  @DisplayName("storage failure with fail-on-load-error=true: startup fails")
+  void testRunnerStorageFailedThrowsWhenConfigured() {
+    when(refreshService.refreshAll(Source.STARTUP, ReadMode.CACHED))
+        .thenReturn(new BulkResult(BulkStatus.STORAGE_FAILED, null, "S3 connection failed"));
 
-    ApplicationRunner runner =
-        ruleLoadingConfig.loadRulesOnStartup(droolsEngineService, storageFactory);
+    ApplicationRunner runner = ruleLoadingConfig.loadRulesOnStartup(refreshService, true);
 
-    runner.run(applicationArguments);
+    assertThatThrownBy(() -> runner.run(applicationArguments))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("S3 connection failed");
+  }
 
-    verify(droolsEngineService, never()).loadRules(anyList());
+  @Test
+  @DisplayName("rejected-empty with fail-on-load-error=true: startup fails")
+  void testRunnerRejectedEmptyThrowsWhenConfigured() {
+    when(refreshService.refreshAll(Source.STARTUP, ReadMode.CACHED))
+        .thenReturn(new BulkResult(BulkStatus.REJECTED_EMPTY, null, "Storage returned 0 rules"));
+
+    ApplicationRunner runner = ruleLoadingConfig.loadRulesOnStartup(refreshService, true);
+
+    assertThatThrownBy(() -> runner.run(applicationArguments))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("0 rules");
+  }
+
+  @Test
+  @DisplayName("rejected-empty without fail-on-load-error: logs, does not crash")
+  void testRunnerRejectedEmptyDoesNotThrowByDefault() {
+    when(refreshService.refreshAll(Source.STARTUP, ReadMode.CACHED))
+        .thenReturn(new BulkResult(BulkStatus.REJECTED_EMPTY, null, "Storage returned 0 rules"));
+
+    ApplicationRunner runner = ruleLoadingConfig.loadRulesOnStartup(refreshService, false);
+
+    assertThatCode(() -> runner.run(applicationArguments)).doesNotThrowAnyException();
   }
 }

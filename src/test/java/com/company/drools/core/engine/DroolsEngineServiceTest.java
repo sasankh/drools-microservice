@@ -724,8 +724,11 @@ class DroolsEngineServiceTest {
       DroolsEngineService.LoadReport report = service.loadRulesReport(List.of(keep));
 
       assertThat(report.allSucceeded()).isTrue();
-      assertThat(report.loaded()).containsExactly("set.keep");
+      // set.keep is byte-identical to the version serving → skipped by digest, not recompiled
+      assertThat(report.loaded()).isEmpty();
+      assertThat(report.unchanged()).containsExactly("set.keep");
       assertThat(report.removed()).containsExactlyInAnyOrder("set.gone", "set.broken");
+      assertThat(report.changedAnything()).isTrue();
       assertThat(registry.ruleIds()).containsExactly("set.keep");
       assertThat(service.getAllRuleMetadata()).containsOnlyKeys("set.keep");
     }

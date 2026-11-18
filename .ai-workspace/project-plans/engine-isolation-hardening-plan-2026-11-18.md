@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Created** | 2026-11-18 |
-| **Status** | 🟡 Phases 1–2 complete (rule_id isolation shipped on the branch); Phase 3 (refresh/storage/startup) in progress |
+| **Status** | 🟡 Phases 1–3 complete; Phase 4 (execution limits & security) in progress |
 | **Work branch** | `engine-isolation` (git worktree `.claude/worktrees/engine-isolation`, based on `improvements-1-11-18-2026` @ `e1dd059` = `develop` after PR #10) |
 | **Delivered to** | `improvements-1-11-18-2026`, then one PR to `develop` (opened when the user asks) |
 | **Release target** | Next minor after v3.3.0. This contains a **breaking semantic change**: rule stacking is removed. |
@@ -303,6 +303,17 @@ The spike tests pass (except the documented red test), ADR-025 is written, and `
 - Admin status codes and the `not_found` body.
 - Subscriber failure metric.
 
+### A5.11 Implementation notes / deviations (2026-11-18)
+- **One refresh owner.** New `RuleRefreshService` (startup, admin, pub/sub, reconcile) reads storage and applies under one lock. `RuleLoadState` records the phase and the last refresh, for health.
+- **Per-ID compile failures don't make the instance DOWN.** The `rules` indicator is DOWN only when the startup load hasn't succeeded or 0 rules are compiled. Failed IDs are listed in the details. Reason: one bad file must not take every replica out of rotation.
+- **`/admin/health`: UP / DEGRADED / DOWN.** HTTP 503 only for DOWN (can't serve rules). Storage unreachable while rules serve → DEGRADED (200), so an S3 blip doesn't fail container health checks.
+- **Empty-set refusal → HTTP 409 `rejected_empty`** (storage failure → 500 `failed`).
+- **`rules_loaded` keeps its meaning.** It counts every rule ID serving from the snapshot (recompiled + unchanged). The new `rules_unchanged` / `rules_removed` give the split.
+- **Pub/sub bulk coalescing removed.** The digest skip makes repeats cheap, and the 500 ms window could drop a real change.
+- **Reconcile reads the source directly** (`RuleStorage.getAllRulesFromSource()`, bypassing Redis). Startup and pub/sub reads may still be answered by the Redis DRL cache (15-min TTL, ADR-016). Direct S3 edits are picked up by reconcile, or by an admin refresh (which invalidates Redis first).
+- **No `RuleMetadata` digest field.** `RuleMetadata` is part of the Redis JSON, so the digest lives on `CompiledRuleset` (`getServingDigest`); this avoids mixed-version JSON issues during a rolling deploy.
+- `StorageFactory` builds the storage once; the health check no longer re-wires it per call.
+
 ### A5.10 Gate
 Same as A4.8, plus live: kill LocalStack during a refresh → all rules still loaded; start with an empty bucket → readiness DOWN and `/admin/health` 503.
 
@@ -463,19 +474,19 @@ Same as A4.8, plus live: a runaway rule → 408 and the stuck gauge = 1; a cap-l
 - [x] Commit
 
 ### B3. Phase 3 — Refresh / storage / startup
-- [ ] `getAllRules()` complete-or-throw contract (S3, Local, Redis decorator); CB counts failures
-- [ ] Incomplete snapshot → no change, no bulk event; empty-set guard + `drools.refresh.allow-empty`
-- [ ] SHA-256 digest on `Rule`/`RuleMetadata`; real `lastModified`; unchanged → skip
-- [ ] Storage read inside `refreshLock` on every path
-- [ ] Scheduled reconcile (`auto-enabled` / `interval-minutes`) + metrics; no pub/sub from reconcile
-- [ ] Subscriber acts on the report; missing ID → remove; listener reject policy + metric
-- [ ] `RulesHealthIndicator`; readiness/liveness probes; `/admin/health` 503; injected storage (no per-call creation)
-- [ ] `drools.startup.fail-on-load-error`; readiness waits for the first load
-- [ ] Unknown `RULE_SOURCE` fails startup; profiles use `${RULE_SOURCE:…}`
-- [ ] Admin refresh codes (500 total / 200 partial with per-ID errors); `not_found` body
-- [ ] Tests (A5.9)
-- [ ] Gate: A4.8 + live S3-kill mid-refresh + empty-bucket readiness
-- [ ] Commit
+- [x] `getAllRules()` complete-or-throw contract (S3, Local, Redis decorator); CB counts failures
+- [x] Incomplete snapshot → no change, no bulk event; empty-set guard + `drools.refresh.allow-empty`
+- [x] SHA-256 digest on `Rule`/`RuleMetadata`; real `lastModified`; unchanged → skip
+- [x] Storage read inside `refreshLock` on every path
+- [x] Scheduled reconcile (`auto-enabled` / `interval-minutes`) + metrics; no pub/sub from reconcile
+- [x] Subscriber acts on the report; missing ID → remove; listener reject policy + metric
+- [x] `RulesHealthIndicator`; readiness/liveness probes; `/admin/health` 503; injected storage (no per-call creation)
+- [x] `drools.startup.fail-on-load-error`; readiness waits for the first load
+- [x] Unknown `RULE_SOURCE` fails startup; profiles use `${RULE_SOURCE:…}`
+- [x] Admin refresh codes (500 total / 200 partial with per-ID errors); `not_found` body
+- [x] Tests (A5.9)
+- [x] Gate: `mvn verify` 695 tests / 0 failures, coverage 93.5 % / 85.4 %; Testcontainers 22/22; docker test plan **69 PASS / 0 FAIL** incl. Step 13 (S3 down → 500 no loss; empty bucket → 409; start with 0 rules → not ready/503; reconcile restores in 60 s; direct S3 edit picked up in 55 s; S3 delete → removed); e2e 60 s 311,404 req, 0 errors
+- [x] Commit
 
 ### B4. Phase 4 — Limits / security
 - [ ] `drools.execution.max-rule-firings`; `fireAllRules(cap+1)`; `RuleLimitExceededException` → 422 `RULE_LIMIT_EXCEEDED`; metric
@@ -510,4 +521,4 @@ Same as A4.8, plus live: a runaway rule → 408 and the stuck gauge = 1; a cap-l
 
 ---
 
-_Plan created: 2026-11-18 · Last updated: 2026-11-18 (Phase 2 complete — isolation; Phase 3 in progress)_
+_Plan created: 2026-11-18 · Last updated: 2026-11-18 (Phase 3 complete — refresh/storage/startup; Phase 4 in progress)_

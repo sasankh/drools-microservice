@@ -8,6 +8,7 @@ import static org.mockito.Mockito.*;
 
 import com.company.drools.api.exception.CircuitBreakerException;
 import com.company.drools.api.exception.RuleNotFoundException;
+import com.company.drools.api.exception.RuleStorageException;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
@@ -583,12 +584,15 @@ class S3RuleStorageTest {
     }
 
     @Test
-    @DisplayName("returns empty list on S3 error")
-    void testReturnsEmptyOnError() {
+    @DisplayName("throws RuleStorageException on S3 error (an empty list would look like 0 rules)")
+    void testThrowsOnError() {
       when(s3Client.listObjectsV2(any(ListObjectsV2Request.class)))
           .thenThrow(SdkException.builder().message("Access denied").build());
 
-      assertThat(s3RuleStorage.getRuleIds()).isEmpty();
+      assertThatThrownBy(() -> s3RuleStorage.getRuleIds())
+          .isInstanceOf(RuleStorageException.class)
+          .hasMessageContaining("test-bucket")
+          .hasCauseInstanceOf(SdkException.class);
     }
   }
 
@@ -681,8 +685,8 @@ class S3RuleStorageTest {
   class GetAllRulesPartialFailures {
 
     @Test
-    @DisplayName("continues loading when individual rule fails")
-    void testContinuesOnIndividualFailure() {
+    @DisplayName("aborts the whole read when one object read fails (never a partial list)")
+    void testThrowsOnIndividualFailure() {
       List<S3Object> objects =
           List.of(createS3Object("rules/rule1.drl"), createS3Object("rules/rule2.drl"));
 
@@ -697,9 +701,31 @@ class S3RuleStorageTest {
           .thenReturn(responseBytes)
           .thenThrow(SdkException.builder().message("Timeout").build());
 
+      assertThatThrownBy(() -> s3RuleStorage.getAllRules())
+          .isInstanceOf(RuleStorageException.class)
+          .hasMessageContaining("rules.rule2")
+          .hasRootCauseMessage("Timeout");
+    }
+
+    @Test
+    @DisplayName("skips an object deleted between list and get (NoSuchKey)")
+    void testSkipsObjectDeletedDuringRead() {
+      List<S3Object> objects =
+          List.of(createS3Object("rules/rule1.drl"), createS3Object("rules/rule2.drl"));
+
+      ListObjectsV2Response response =
+          ListObjectsV2Response.builder().contents(objects).isTruncated(false).build();
+
+      when(s3Client.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(response);
+
+      ResponseBytes<GetObjectResponse> responseBytes = createMockResponseBytes(SAMPLE_DRL);
+      when(s3Client.getObjectAsBytes(any(GetObjectRequest.class)))
+          .thenReturn(responseBytes)
+          .thenThrow(NoSuchKeyException.builder().message("gone").build());
+
       List<Rule> rules = s3RuleStorage.getAllRules();
 
-      assertThat(rules).hasSize(1);
+      assertThat(rules).extracting(Rule::getRuleId).containsExactly("rules.rule1");
     }
   }
 

@@ -10,10 +10,13 @@ import com.company.drools.cache.RefreshEvent;
 import com.company.drools.cache.RuleRefreshPublisher;
 import com.company.drools.cache.RuleRefreshSubscriber;
 import com.company.drools.core.engine.DroolsEngineService;
+import com.company.drools.core.engine.RuleLoadState;
+import com.company.drools.core.engine.RuleRefreshService;
 import com.company.drools.core.model.Rule;
 import com.company.drools.core.model.RuleMetadata;
 import com.company.drools.core.model.RuleMetadata.RuleStatus;
 import com.company.drools.storage.RuleStorage;
+import com.company.drools.storage.StorageFactory;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -23,6 +26,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -114,7 +118,11 @@ class RedisPubSubIntegrationTest {
     storageA = Mockito.mock(RuleStorage.class);
     engineA = Mockito.mock(DroolsEngineService.class);
     subscriberA =
-        new RuleRefreshSubscriber(storageA, engineA, INSTANCE_A, objectMapper, meterRegistryA);
+        new RuleRefreshSubscriber(
+            refreshService(engineA, storageA, meterRegistryA),
+            INSTANCE_A,
+            objectMapper,
+            meterRegistryA);
     listenerContainerA = newListenerContainer(subscriberA);
 
     // Instance B — subscriber only (the "sibling task")
@@ -122,13 +130,25 @@ class RedisPubSubIntegrationTest {
     storageB = Mockito.mock(RuleStorage.class);
     engineB = Mockito.mock(DroolsEngineService.class);
     subscriberB =
-        new RuleRefreshSubscriber(storageB, engineB, INSTANCE_B, objectMapper, meterRegistryB);
+        new RuleRefreshSubscriber(
+            refreshService(engineB, storageB, meterRegistryB),
+            INSTANCE_B,
+            objectMapper,
+            meterRegistryB);
     listenerContainerB = newListenerContainer(subscriberB);
 
     // Wait briefly for the subscribers to actually attach to the channel
     await()
         .atMost(Duration.ofSeconds(2))
         .until(() -> listenerContainerA.isRunning() && listenerContainerB.isRunning());
+  }
+
+  /** A real RuleRefreshService per instance, over that instance's (mocked) engine + storage. */
+  private static RuleRefreshService refreshService(
+      DroolsEngineService engine, RuleStorage storage, SimpleMeterRegistry meterRegistry) {
+    StorageFactory factory = Mockito.mock(StorageFactory.class);
+    when(factory.createRuleStorage()).thenReturn(storage);
+    return new RuleRefreshService(engine, factory, new RuleLoadState(), meterRegistry, false);
   }
 
   private RedisMessageListenerContainer newListenerContainer(RuleRefreshSubscriber subscriber) {
@@ -156,6 +176,10 @@ class RedisPubSubIntegrationTest {
   void singleRuleRefreshFansOutToSiblings() {
     Rule expected = rule("pricing.simple");
     when(storageB.getRule("pricing.simple")).thenReturn(Optional.of(expected));
+    when(engineB.replaceRule(expected))
+        .thenReturn(
+            new DroolsEngineService.InstallOutcome(
+                DroolsEngineService.InstallStatus.INSTALLED, null));
 
     publisherA.publishRefresh("pricing.simple");
 
@@ -165,7 +189,7 @@ class RedisPubSubIntegrationTest {
         .untilAsserted(
             () -> {
               verify(storageB, atLeastOnce()).getRule("pricing.simple");
-              verify(engineB).loadOrReplaceRule(expected);
+              verify(engineB).replaceRule(expected);
             });
 
     // Verify B's metrics show the event was received
@@ -177,7 +201,14 @@ class RedisPubSubIntegrationTest {
         .atMost(Duration.ofSeconds(5))
         .until(() -> meterRegistryA.counter("drools.refresh.skipped_self").count() >= 1.0);
 
-    verify(engineA, Mockito.never()).loadOrReplaceRule(Mockito.any());
+    verify(engineA, Mockito.never()).replaceRule(Mockito.any());
+    // The publisher already invalidated the shared entry; the sibling must not invalidate again
+    verify(storageB, Mockito.never()).refreshRule(Mockito.anyString());
+    assertThat(
+            meterRegistryB
+                .counter("drools.refresh.failed", "layer", "subscriber", "reason", "process_error")
+                .count())
+        .isZero();
   }
 
   // ─── Bulk fan-out ───────────────────────────────────────────────────────────
@@ -187,6 +218,10 @@ class RedisPubSubIntegrationTest {
   void bulkRefreshFansOut() {
     List<Rule> all = List.of(rule("a"), rule("b"), rule("c"));
     when(storageB.getAllRules()).thenReturn(all);
+    when(engineB.loadRulesReport(all))
+        .thenReturn(
+            new DroolsEngineService.LoadReport(
+                List.of("a", "b", "c"), List.of(), Map.of(), List.of()));
 
     publisherA.publishBulkRefresh();
 
@@ -195,7 +230,7 @@ class RedisPubSubIntegrationTest {
         .untilAsserted(
             () -> {
               verify(storageB, atLeastOnce()).getAllRules();
-              verify(engineB).loadRules(all);
+              verify(engineB).loadRulesReport(all);
             });
 
     assertThat(
@@ -208,25 +243,25 @@ class RedisPubSubIntegrationTest {
     await()
         .atMost(Duration.ofSeconds(5))
         .until(() -> meterRegistryA.counter("drools.refresh.skipped_self").count() >= 1.0);
-    verify(engineA, Mockito.never()).loadRules(Mockito.any());
+    verify(engineA, Mockito.never()).loadRulesReport(Mockito.any());
   }
 
   // ─── Delete event ───────────────────────────────────────────────────────────
 
   @Test
-  @DisplayName("Delete event: B records receipt, engine NOT auto-called (deferred to v2)")
+  @DisplayName("Delete event: B removes that rule ID from its engine (S5), nothing reloaded")
   void deleteEventReachesSibling() {
     publisherA.publishDelete("retired.rule");
 
     await()
         .atMost(Duration.ofSeconds(5))
-        .until(
-            () ->
-                meterRegistryB.counter("drools.refresh.received", "event", "RULE_DELETED").count()
-                    >= 1.0);
+        .untilAsserted(() -> verify(engineB).removeRule("retired.rule"));
 
-    verify(engineB, Mockito.never()).loadRules(Mockito.any());
-    verify(engineB, Mockito.never()).loadOrReplaceRule(Mockito.any());
+    assertThat(meterRegistryB.counter("drools.refresh.received", "event", "RULE_DELETED").count())
+        .isEqualTo(1.0);
+    verify(engineB, Mockito.never()).loadRulesReport(Mockito.any());
+    verify(engineB, Mockito.never()).replaceRule(Mockito.any());
+    verify(engineA, Mockito.never()).removeRule(Mockito.anyString());
   }
 
   // ─── Wire-format compatibility ─────────────────────────────────────────────
@@ -237,7 +272,7 @@ class RedisPubSubIntegrationTest {
     publisherA.publishRefresh("pricing.simple");
 
     // Capture B's "received" before any handling logic, by inspecting Redis channel directly is
-    // tricky — but we already proved end-to-end deserialise via the engineB.loadOrReplaceRule
+    // tricky — but we already proved end-to-end deserialise via the engineB.replaceRule
     // path in singleRuleRefreshFansOutToSiblings. Here we just make sure both directions
     // (publisher emit + subscriber decode) work over real Redis without throwing.
     await()

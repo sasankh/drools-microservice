@@ -159,8 +159,17 @@ class RuleRefreshIntegrationTest {
     CompiledRuleset handleB = registry.get("test.refresh.ruleB").orElseThrow();
     CompiledRuleset handleC = registry.get("test.refresh.ruleC").orElseThrow();
 
-    // Single-rule refresh of ruleB. Bug behaviour was: ruleA and ruleC stop firing.
-    Rule ruleBv2 = markerRule("test.refresh.ruleB", "com.company.rules.refresh.b", "bravo");
+    // Refresh of ruleB with byte-identical DRL: skipped by digest, nothing recompiled.
+    Rule ruleBSame = markerRule("test.refresh.ruleB", "com.company.rules.refresh.b", "bravo");
+    assertThat(droolsEngineService.replaceRule(ruleBSame).status())
+        .isEqualTo(DroolsEngineService.InstallStatus.UNCHANGED);
+    assertThat(registry.get("test.refresh.ruleB")).containsSame(handleB);
+
+    // Single-rule refresh of ruleB with changed DRL (same behaviour, extra comment).
+    // Bug behaviour was: ruleA and ruleC stop firing.
+    Rule ruleBv2 =
+        new Rule(
+            "test.refresh.ruleB", ruleBSame.getContent() + "// v2\n", RuleMetadata.createNew());
     boolean refresh = droolsEngineService.loadOrReplaceRule(ruleBv2);
     assertThat(refresh).isTrue();
 
@@ -169,8 +178,9 @@ class RuleRefreshIntegrationTest {
     assertThat(registry.get("test.refresh.ruleC")).containsSame(handleC);
     CompiledRuleset newHandleB = registry.get("test.refresh.ruleB").orElseThrow();
     assertThat(newHandleB).isNotSameAs(handleB);
-    // Same DRL text -> same content digest, even though it is a fresh compile.
-    assertThat(newHandleB.contentDigest()).isEqualTo(handleB.contentDigest());
+    assertThat(newHandleB.contentDigest())
+        .isNotEqualTo(handleB.contentDigest())
+        .isEqualTo(RuleCompiler.sha256(ruleBv2.getContent()));
     assertThat(registry.size()).isEqualTo(3);
 
     // Fix: all three rules MUST still fire after the single-rule refresh.
@@ -232,6 +242,15 @@ class RuleRefreshIntegrationTest {
     assertThat(metadata.getErrorMessage()).isNotBlank();
     assertThat(executeAndGetMarker("test.refresh.ruleB", "bravo")).isTrue();
     assertThat(executeAndGetMarker("test.refresh.ruleA", "alpha")).isTrue();
+
+    // Re-applying the (identical) good DRL is NOT skipped while an error is recorded: it
+    // recompiles and clears the error.
+    assertThat(droolsEngineService.replaceRule(ruleB).status())
+        .isEqualTo(DroolsEngineService.InstallStatus.INSTALLED);
+    assertThat(droolsEngineService.getRuleMetadata("test.refresh.ruleB").getErrorMessage())
+        .isNull();
+    assertThat(droolsEngineService.replaceRule(ruleB).status())
+        .isEqualTo(DroolsEngineService.InstallStatus.UNCHANGED);
   }
 
   @Test
@@ -256,8 +275,10 @@ class RuleRefreshIntegrationTest {
     assertThat(report.removed()).containsExactly("test.refresh.ruleB");
     assertThat(registry.ruleIds()).containsExactly("test.refresh.ruleA");
     assertThat(executeAndGetMarker("test.refresh.ruleA", "alpha")).isTrue();
-    // A full reload recompiles the IDs it contains.
-    assertThat(registry.get("test.refresh.ruleA").orElseThrow()).isNotSameAs(handleA);
+    // A full reload skips IDs whose DRL is unchanged (same digest): ruleA keeps its handle.
+    assertThat(report.unchanged()).containsExactly("test.refresh.ruleA");
+    assertThat(report.loaded()).isEmpty();
+    assertThat(registry.get("test.refresh.ruleA")).containsSame(handleA);
   }
 
   /** Executes the named rule with a single-key map and returns whether the rule's marker fired. */

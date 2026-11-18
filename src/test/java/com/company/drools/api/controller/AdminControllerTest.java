@@ -7,9 +7,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.company.drools.cache.RuleRefreshPublisher;
+import com.company.drools.config.RulesHealthIndicator;
 import com.company.drools.config.ThreadPoolConfig;
 import com.company.drools.core.engine.DroolsEngineService;
-import com.company.drools.core.model.Rule;
+import com.company.drools.core.engine.RuleLoadState;
+import com.company.drools.core.engine.RuleRefreshService;
 import com.company.drools.core.model.RuleMetadata;
 import com.company.drools.storage.RuleStorage;
 import com.company.drools.storage.S3RuleStorage;
@@ -23,7 +25,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
@@ -45,27 +46,21 @@ class AdminControllerTest {
   @Mock private RuleRefreshPublisher refreshPublisher;
   @Mock private ThreadPoolConfig threadPoolConfig;
   @Mock private RuleStorage mockStorage;
+  @Mock private RuleRefreshService refreshService;
+  @Mock private RuleLoadState loadState;
 
+  private SimpleMeterRegistry meterRegistry;
+  private LocalValidatorFactoryBean validatorFactory;
   private AdminController adminController;
 
   @BeforeEach
   void setUp() {
     // Use SimpleMeterRegistry to avoid complex Timer/Counter mocking
-    SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+    meterRegistry = new SimpleMeterRegistry();
 
-    adminController =
-        new AdminController(
-            droolsEngineService,
-            storageFactory,
-            meterRegistry,
-            threadPoolConfig,
-            null,
-            null,
-            null,
-            null,
-            refreshPublisher);
-    // Default: redis disabled — cache section in /admin/health reports "off"
-    ReflectionTestUtils.setField(adminController, "redisEnabled", false);
+    // Default: the startup load has succeeded. The real RulesHealthIndicator then decides UP/DOWN
+    // from droolsEngineService.getLoadedRulesCount() (and error metadata).
+    lenient().when(loadState.getPhase()).thenReturn(RuleLoadState.Phase.LOADED);
 
     // Create a Spring context with ValidationConfig so @ValidRuleId validator works.
     // The SpringConstraintValidatorFactory allows Hibernate Validator to inject Spring beans
@@ -77,18 +72,40 @@ class AdminControllerTest {
         ValidationConfigTestHelper::createTestValidationConfig);
     appContext.refresh();
 
-    LocalValidatorFactoryBean validatorFactory = new LocalValidatorFactoryBean();
+    validatorFactory = new LocalValidatorFactoryBean();
     validatorFactory.setApplicationContext(appContext);
     // afterPropertiesSet() automatically configures SpringConstraintValidatorFactory when app
     // context is set
     validatorFactory.afterPropertiesSet();
 
-    // Build MockMvc with validator
-    mockMvc =
-        MockMvcBuilders.standaloneSetup(adminController).setValidator(validatorFactory).build();
+    adminController = newController(refreshPublisher);
+    mockMvc = buildMockMvc(adminController);
 
     // Default: storageFactory returns our mock storage
     lenient().when(storageFactory.createRuleStorage()).thenReturn(mockStorage);
+  }
+
+  private AdminController newController(RuleRefreshPublisher publisher) {
+    AdminController controller =
+        new AdminController(
+            droolsEngineService,
+            storageFactory,
+            meterRegistry,
+            threadPoolConfig,
+            null,
+            null,
+            null,
+            null,
+            publisher,
+            refreshService,
+            new RulesHealthIndicator(droolsEngineService, loadState, false));
+    // Default: redis disabled — cache section in /admin/health reports "off"
+    ReflectionTestUtils.setField(controller, "redisEnabled", false);
+    return controller;
+  }
+
+  private MockMvc buildMockMvc(AdminController controller) {
+    return MockMvcBuilders.standaloneSetup(controller).setValidator(validatorFactory).build();
   }
 
   // ===== Health Check Tests (6) =====
@@ -114,9 +131,9 @@ class AdminControllerTest {
   }
 
   @Test
-  @DisplayName("Health: drools DOWN returns overall DOWN")
+  @DisplayName("Health: no rules loaded → drools DOWN, overall DOWN, HTTP 503")
   void testHealth_DroolsDown_ReturnsDown() throws Exception {
-    // Given - no rules loaded means drools is DOWN
+    // Given - startup load succeeded but no rule ID compiled
     when(droolsEngineService.getLoadedRulesCount()).thenReturn(0);
     when(droolsEngineService.getActiveRulesCount()).thenReturn(0L);
     when(mockStorage.getTotalRuleCount()).thenReturn(0L);
@@ -124,15 +141,37 @@ class AdminControllerTest {
     // When/Then
     mockMvc
         .perform(get("/admin/health"))
-        .andExpect(status().isOk())
+        .andExpect(status().isServiceUnavailable())
         .andExpect(jsonPath("$.status").value("DOWN"))
         .andExpect(jsonPath("$.components.drools.status").value("DOWN"))
-        .andExpect(jsonPath("$.components.drools.details.error").value("No rules loaded"));
+        .andExpect(jsonPath("$.components.drools.details.error").value("no rules loaded"));
   }
 
   @Test
-  @DisplayName("Health: storage DOWN returns overall DOWN")
-  void testHealth_StorageDown_ReturnsDown() throws Exception {
+  @DisplayName("Health: startup load not succeeded (NOT_LOADED / FAILED) → DOWN, HTTP 503")
+  void testHealth_StartupLoadNotSucceeded_ReturnsDown() throws Exception {
+    for (RuleLoadState.Phase phase :
+        List.of(RuleLoadState.Phase.NOT_LOADED, RuleLoadState.Phase.FAILED)) {
+      when(loadState.getPhase()).thenReturn(phase);
+      // Even with rules compiled, a not-yet-successful startup load is not ready
+      when(droolsEngineService.getLoadedRulesCount()).thenReturn(3);
+      when(mockStorage.getTotalRuleCount()).thenReturn(3L);
+
+      mockMvc
+          .perform(get("/admin/health"))
+          .andExpect(status().isServiceUnavailable())
+          .andExpect(jsonPath("$.status").value("DOWN"))
+          .andExpect(jsonPath("$.components.drools.status").value("DOWN"))
+          .andExpect(jsonPath("$.components.drools.details.phase").value(phase.name()))
+          .andExpect(
+              jsonPath("$.components.drools.details.error")
+                  .value(containsString("startup rule load has not succeeded")));
+    }
+  }
+
+  @Test
+  @DisplayName("Health: storage DOWN while rules serve → DEGRADED, HTTP 200")
+  void testHealth_StorageDown_ReturnsDegraded() throws Exception {
     // Given - drools is healthy
     when(droolsEngineService.getLoadedRulesCount()).thenReturn(3);
     when(droolsEngineService.getActiveRulesCount()).thenReturn(3L);
@@ -140,13 +179,55 @@ class AdminControllerTest {
     when(storageFactory.createRuleStorage())
         .thenThrow(new RuntimeException("S3 connection refused"));
 
-    // When/Then
+    // When/Then - compiled rules keep serving, so the instance stays in rotation
     mockMvc
         .perform(get("/admin/health"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("DOWN"))
+        .andExpect(jsonPath("$.status").value("DEGRADED"))
+        .andExpect(jsonPath("$.components.drools.status").value("UP"))
         .andExpect(jsonPath("$.components.storage.status").value("DOWN"))
         .andExpect(jsonPath("$.components.storage.details.error").value("S3 connection refused"));
+  }
+
+  @Test
+  @DisplayName("Health: storage DOWN and startup load failed → DOWN (not DEGRADED), HTTP 503")
+  void testHealth_StorageDownAndLoadFailed_ReturnsDown() throws Exception {
+    when(loadState.getPhase()).thenReturn(RuleLoadState.Phase.FAILED);
+    when(storageFactory.createRuleStorage()).thenThrow(new RuntimeException("S3 down"));
+
+    mockMvc
+        .perform(get("/admin/health"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.status").value("DOWN"))
+        .andExpect(jsonPath("$.components.storage.status").value("DOWN"));
+  }
+
+  @Test
+  @DisplayName("Health: per-ID compile errors are listed but the instance stays UP")
+  void testHealth_RuleErrors_ListedButUp() throws Exception {
+    when(droolsEngineService.getLoadedRulesCount()).thenReturn(1);
+    when(mockStorage.getTotalRuleCount()).thenReturn(2L);
+    Map<String, RuleMetadata> meta = new LinkedHashMap<>();
+    meta.put(
+        "ok.rule",
+        new RuleMetadata(
+            "1",
+            LocalDateTime.now(),
+            LocalDateTime.now(),
+            RuleMetadata.RuleStatus.ACTIVE,
+            null,
+            0,
+            0.0));
+    meta.put("bad.rule", RuleMetadata.createNew().withError("compile error"));
+    when(droolsEngineService.getAllRuleMetadata()).thenReturn(meta);
+
+    mockMvc
+        .perform(get("/admin/health"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("UP"))
+        .andExpect(jsonPath("$.components.drools.status").value("UP"))
+        .andExpect(jsonPath("$.components.drools.details.rules_with_errors").value(1))
+        .andExpect(jsonPath("$.components.drools.details.error_rule_ids[0]").value("bad.rule"));
   }
 
   @Test
@@ -208,128 +289,308 @@ class AdminControllerTest {
         .andExpect(jsonPath("$.components.cache.details.mode").value("off"));
   }
 
-  // ===== Rule Management Tests (5) =====
+  // ===== Refresh-all Tests =====
+
+  private static RuleRefreshService.BulkResult bulkLoaded(
+      List<String> loaded,
+      List<String> unchanged,
+      Map<String, String> failed,
+      List<String> removed) {
+    return new RuleRefreshService.BulkResult(
+        RuleRefreshService.BulkStatus.LOADED,
+        new DroolsEngineService.LoadReport(loaded, unchanged, failed, removed),
+        null);
+  }
+
+  private void givenBulk(RuleRefreshService.BulkResult result) {
+    when(refreshService.refreshAll(
+            RuleRefreshService.Source.ADMIN, RuleRefreshService.ReadMode.INVALIDATE_THEN_READ))
+        .thenReturn(result);
+  }
 
   @Test
-  @DisplayName("Refresh all rules: success reloads all rules and warms cache")
-  void testRefreshAllRules_Success_ReloadsAllRules() throws Exception {
-    // Given
-    Rule rule1 = createTestRule("pricing.discount.simple");
-    Rule rule2 = createTestRule("pricing.discount.vip");
-    when(mockStorage.getAllRules()).thenReturn(List.of(rule1, rule2));
-    when(droolsEngineService.loadRules(anyList())).thenReturn(true);
+  @DisplayName("Refresh all: invalidate-then-read ADMIN refresh; counts reported; bulk event sent")
+  void testRefreshAllRules_Success_ReportsCountsAndPublishes() throws Exception {
+    givenBulk(bulkLoaded(List.of("a", "b"), List.of("c"), Map.of(), List.of("d")));
 
-    // When/Then
+    mockMvc
+        .perform(post("/admin/refresh-rules"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("completed"))
+        // rules_loaded = every rule ID serving from this snapshot (recompiled or unchanged)
+        .andExpect(jsonPath("$.rules_loaded").value(3))
+        .andExpect(jsonPath("$.rules_unchanged").value(1))
+        .andExpect(jsonPath("$.rules_removed").value(1))
+        .andExpect(jsonPath("$.rules_failed").value(0))
+        .andExpect(jsonPath("$.errors", hasSize(0)));
+
+    verify(refreshService)
+        .refreshAll(
+            RuleRefreshService.Source.ADMIN, RuleRefreshService.ReadMode.INVALIDATE_THEN_READ);
+    verify(refreshPublisher, times(1)).publishBulkRefresh();
+  }
+
+  @Test
+  @DisplayName(
+      "Refresh all: nothing changed here → 200, bulk event still sent (siblings may be stale)")
+  void testRefreshAllRules_AllUnchanged_StillPublishes() throws Exception {
+    givenBulk(bulkLoaded(List.of(), List.of("a", "b"), Map.of(), List.of()));
+
     mockMvc
         .perform(post("/admin/refresh-rules"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.status").value("completed"))
         .andExpect(jsonPath("$.rules_loaded").value(2))
-        .andExpect(jsonPath("$.rules_failed").value(0))
-        .andExpect(jsonPath("$.errors", hasSize(0)));
+        .andExpect(jsonPath("$.rules_unchanged").value(2))
+        .andExpect(jsonPath("$.rules_removed").value(0));
 
-    // Verify storage cache was invalidated before reload (decorator no-op when Redis off)
-    verify(mockStorage).refreshCache();
-    // Verify pub/sub fan-out (no-op when publisher null, but here it's mocked)
     verify(refreshPublisher).publishBulkRefresh();
   }
 
   @Test
-  @DisplayName("Refresh all rules: compilation failure returns errors")
-  void testRefreshAllRules_CompilationFailure_ReturnsErrors() throws Exception {
-    // Given
-    Rule rule1 = createTestRule("pricing.discount.broken");
-    when(mockStorage.getAllRules()).thenReturn(List.of(rule1));
-    when(droolsEngineService.loadRules(anyList())).thenReturn(false);
+  @DisplayName("Refresh all: per-ID compile failure → completed_with_errors listing that ID")
+  void testRefreshAllRules_CompilationFailure_ListsPerIdErrors() throws Exception {
+    givenBulk(
+        bulkLoaded(
+            List.of("pricing.discount.ok"),
+            List.of(),
+            Map.of("pricing.discount.broken", "Rule Compilation error"),
+            List.of()));
 
-    // When/Then
     mockMvc
         .perform(post("/admin/refresh-rules"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.status").value("completed_with_errors"))
-        .andExpect(jsonPath("$.rules_loaded").value(0))
+        .andExpect(jsonPath("$.rules_loaded").value(1))
         .andExpect(jsonPath("$.rules_failed").value(1))
         .andExpect(jsonPath("$.errors", hasSize(1)))
-        .andExpect(jsonPath("$.errors[0].rule_id").value("ALL"))
-        .andExpect(jsonPath("$.errors[0].error").value("Failed to load rules into engine"));
+        .andExpect(jsonPath("$.errors[0].rule_id").value("pricing.discount.broken"))
+        .andExpect(jsonPath("$.errors[0].error").value(containsString("Compilation error")));
+
+    // The rule IDs that compiled are serving here, so siblings are told
+    verify(refreshPublisher).publishBulkRefresh();
   }
 
   @Test
-  @DisplayName("Refresh rule: success updates rule in engine and cache")
-  void testRefreshRule_Success_UpdatesRule() throws Exception {
-    // Given
-    String ruleId = "pricing.discount.simple";
-    Rule rule = createTestRule(ruleId);
-    RuleMetadata metadata =
-        new RuleMetadata(
-            "1.0",
-            LocalDateTime.now().minusHours(1),
-            LocalDateTime.now().minusMinutes(30),
-            RuleMetadata.RuleStatus.ACTIVE,
-            null,
-            50,
-            12.5);
-    when(droolsEngineService.getRuleMetadata(ruleId)).thenReturn(metadata);
-    when(mockStorage.getRule(ruleId)).thenReturn(Optional.of(rule));
-    when(droolsEngineService.loadOrReplaceRule(org.mockito.ArgumentMatchers.any(Rule.class)))
-        .thenReturn(true);
+  @DisplayName("Refresh all: only failures here → bulk event still sent")
+  void testRefreshAllRules_OnlyFailures_StillPublishes() throws Exception {
+    givenBulk(bulkLoaded(List.of(), List.of("a"), Map.of("b", "bad"), List.of()));
 
-    // When/Then
+    mockMvc
+        .perform(post("/admin/refresh-rules"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("completed_with_errors"))
+        .andExpect(jsonPath("$.rules_loaded").value(1))
+        .andExpect(jsonPath("$.rules_failed").value(1));
+
+    verify(refreshPublisher).publishBulkRefresh();
+  }
+
+  @Test
+  @DisplayName("Refresh all: storage read failed → 500 failed, SYSTEM error, nothing published")
+  void testRefreshAllRules_StorageFailed_Returns500() throws Exception {
+    givenBulk(
+        new RuleRefreshService.BulkResult(
+            RuleRefreshService.BulkStatus.STORAGE_FAILED,
+            null,
+            "Storage read failed; nothing changed: S3 connection timeout"));
+
+    mockMvc
+        .perform(post("/admin/refresh-rules"))
+        .andExpect(status().isInternalServerError())
+        .andExpect(jsonPath("$.status").value("failed"))
+        .andExpect(jsonPath("$.rules_loaded").value(0))
+        .andExpect(jsonPath("$.errors", hasSize(1)))
+        .andExpect(jsonPath("$.errors[0].rule_id").value("SYSTEM"))
+        .andExpect(jsonPath("$.errors[0].error").value(containsString("S3 connection timeout")));
+
+    verify(refreshPublisher, never()).publishBulkRefresh();
+  }
+
+  @Test
+  @DisplayName("Refresh all: empty storage while rules loaded → 409 rejected_empty")
+  void testRefreshAllRules_RejectedEmpty_Returns409() throws Exception {
+    givenBulk(
+        new RuleRefreshService.BulkResult(
+            RuleRefreshService.BulkStatus.REJECTED_EMPTY,
+            null,
+            "Storage returned 0 rules while 5 are loaded"));
+
+    mockMvc
+        .perform(post("/admin/refresh-rules"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.status").value("rejected_empty"))
+        .andExpect(jsonPath("$.errors[0].rule_id").value("SYSTEM"))
+        .andExpect(jsonPath("$.errors[0].error").value(containsString("0 rules")));
+
+    verify(refreshPublisher, never()).publishBulkRefresh();
+  }
+
+  @Test
+  @DisplayName("Refresh all: no publisher (pub/sub off) still succeeds")
+  void testRefreshAllRules_NoPublisher_Succeeds() throws Exception {
+    MockMvc noPubSub = buildMockMvc(newController(null));
+    givenBulk(bulkLoaded(List.of("a"), List.of(), Map.of(), List.of()));
+
+    noPubSub
+        .perform(post("/admin/refresh-rules"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("completed"));
+    verifyNoInteractions(refreshPublisher);
+  }
+
+  // ===== Refresh-one Tests =====
+
+  private void givenSingle(String ruleId, RuleRefreshService.SingleStatus status, String error) {
+    when(refreshService.refreshOne(ruleId, RuleRefreshService.Source.ADMIN, true))
+        .thenReturn(new RuleRefreshService.SingleResult(status, "olddigest", error));
+  }
+
+  private static RuleMetadata metadataModifiedAt(LocalDateTime modified) {
+    return new RuleMetadata(
+        "1.0", LocalDateTime.now(), modified, RuleMetadata.RuleStatus.ACTIVE, null, 0, 0.0);
+  }
+
+  @Test
+  @DisplayName("Refresh rule: INSTALLED → 200 success with versions; single-rule event sent")
+  void testRefreshRule_Installed_PublishesRefresh() throws Exception {
+    String ruleId = "pricing.discount.simple";
+    when(droolsEngineService.getRuleMetadata(ruleId))
+        .thenReturn(metadataModifiedAt(LocalDateTime.of(2026, 1, 1, 0, 0)))
+        .thenReturn(metadataModifiedAt(LocalDateTime.of(2026, 2, 1, 0, 0)));
+    givenSingle(ruleId, RuleRefreshService.SingleStatus.INSTALLED, null);
+
     mockMvc
         .perform(post("/admin/refresh-rules/{ruleId}", ruleId))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.rule_id").value(ruleId))
-        .andExpect(jsonPath("$.status").value("success"));
+        .andExpect(jsonPath("$.status").value("success"))
+        // Instants serialize as epoch seconds in this standalone MockMvc: 2026-01-01Z / 2026-02-01Z
+        .andExpect(jsonPath("$.previous_version", closeTo(1767225600.0, 0.001), Double.class))
+        .andExpect(jsonPath("$.current_version", closeTo(1769904000.0, 0.001), Double.class));
 
-    // Verify the merge primitive was used, not the full-replace loadRules.
-    verify(droolsEngineService).loadOrReplaceRule(rule);
-    verify(droolsEngineService, never()).loadRules(anyList());
-    // Verify storage cache was invalidated (decorator no-op when Redis off)
-    verify(mockStorage).refreshRule(ruleId);
-    // Verify pub/sub fan-out
+    // invalidateCache=true: an operator refresh must bypass the shared Redis entry
+    verify(refreshService).refreshOne(ruleId, RuleRefreshService.Source.ADMIN, true);
     verify(refreshPublisher).publishRefresh(ruleId);
   }
 
   @Test
-  @DisplayName("Refresh rule: not found returns 404")
-  void testRefreshRule_NotFound_Returns404() throws Exception {
-    // Given
-    String ruleId = "nonexistent.rule";
-    when(droolsEngineService.getRuleMetadata(ruleId)).thenReturn(null);
-    when(mockStorage.getRule(ruleId)).thenReturn(Optional.empty());
+  @DisplayName("Refresh rule: UNCHANGED → 200 unchanged; event still sent (siblings may be stale)")
+  void testRefreshRule_Unchanged_StillPublishes() throws Exception {
+    String ruleId = "pricing.discount.simple";
+    when(droolsEngineService.getRuleMetadata(ruleId))
+        .thenReturn(metadataModifiedAt(LocalDateTime.now()));
+    givenSingle(ruleId, RuleRefreshService.SingleStatus.UNCHANGED, null);
 
-    // When/Then
-    mockMvc.perform(post("/admin/refresh-rules/{ruleId}", ruleId)).andExpect(status().isNotFound());
+    mockMvc
+        .perform(post("/admin/refresh-rules/{ruleId}", ruleId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("unchanged"));
+
+    verify(refreshPublisher).publishRefresh(ruleId);
   }
 
   @Test
-  @DisplayName("Refresh rule: invalidates cache in correct order")
-  void testRefreshRule_InvalidatesCache() throws Exception {
-    // Given
-    String ruleId = "pricing.discount.vip";
-    Rule rule = createTestRule(ruleId);
-    RuleMetadata metadata =
-        new RuleMetadata(
-            "1.0",
-            LocalDateTime.now(),
-            LocalDateTime.now(),
-            RuleMetadata.RuleStatus.ACTIVE,
-            null,
-            0,
-            0.0);
-    when(droolsEngineService.getRuleMetadata(ruleId)).thenReturn(metadata);
-    when(mockStorage.getRule(ruleId)).thenReturn(Optional.of(rule));
-    when(droolsEngineService.loadOrReplaceRule(org.mockito.ArgumentMatchers.any(Rule.class)))
-        .thenReturn(true);
+  @DisplayName("Refresh rule: null metadata (new rule) → success, previous_version empty")
+  void testRefreshRule_NullMetadata_RuleFoundInStorage_Succeeds() throws Exception {
+    String ruleId = "pricing.discount.simple";
+    when(droolsEngineService.getRuleMetadata(ruleId)).thenReturn(null);
+    givenSingle(ruleId, RuleRefreshService.SingleStatus.INSTALLED, null);
 
-    // When
-    mockMvc.perform(post("/admin/refresh-rules/{ruleId}", ruleId)).andExpect(status().isOk());
+    mockMvc
+        .perform(post("/admin/refresh-rules/{ruleId}", ruleId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.rule_id").value(ruleId))
+        .andExpect(jsonPath("$.status").value("success"))
+        .andExpect(jsonPath("$.previous_version").isEmpty())
+        .andExpect(jsonPath("$.current_version").isEmpty());
+  }
 
-    // Then - storage invalidate → engine merge → publisher fan-out, in that order
-    InOrder inOrder = inOrder(mockStorage, droolsEngineService, refreshPublisher);
-    inOrder.verify(mockStorage).refreshRule(ruleId);
-    inOrder.verify(droolsEngineService).loadOrReplaceRule(rule);
-    inOrder.verify(refreshPublisher).publishRefresh(ruleId);
+  @Test
+  @DisplayName("Refresh rule: REMOVED (gone from storage) → 200 removed; delete event sent")
+  void testRefreshRule_Removed_PublishesDelete() throws Exception {
+    String ruleId = "pricing.discount.gone";
+    givenSingle(ruleId, RuleRefreshService.SingleStatus.REMOVED, null);
+
+    mockMvc
+        .perform(post("/admin/refresh-rules/{ruleId}", ruleId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("removed"))
+        .andExpect(jsonPath("$.error").value(containsString("no longer exists")));
+
+    verify(refreshPublisher).publishDelete(ruleId);
+    verify(refreshPublisher, never()).publishRefresh(anyString());
+  }
+
+  @Test
+  @DisplayName("Refresh rule: NOT_FOUND → 404 with a body")
+  void testRefreshRule_NotFound_Returns404() throws Exception {
+    String ruleId = "nonexistent.rule";
+    givenSingle(ruleId, RuleRefreshService.SingleStatus.NOT_FOUND, null);
+
+    mockMvc
+        .perform(post("/admin/refresh-rules/{ruleId}", ruleId))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.rule_id").value(ruleId))
+        .andExpect(jsonPath("$.status").value("not_found"))
+        .andExpect(jsonPath("$.error").value("Rule not found in storage"));
+
+    verifyNoInteractions(refreshPublisher);
+  }
+
+  @Test
+  @DisplayName("Refresh rule: compile FAILED → 500 error; previous keeps serving; no event")
+  void testRefreshRule_CompileFailed_Returns500() throws Exception {
+    String ruleId = "pricing.discount.simple";
+    givenSingle(ruleId, RuleRefreshService.SingleStatus.FAILED, "Unable to resolve ObjectType");
+
+    mockMvc
+        .perform(post("/admin/refresh-rules/{ruleId}", ruleId))
+        .andExpect(status().isInternalServerError())
+        .andExpect(jsonPath("$.rule_id").value(ruleId))
+        .andExpect(jsonPath("$.status").value("error"))
+        .andExpect(
+            jsonPath("$.error").value(org.hamcrest.Matchers.startsWith("Failed to compile rule")))
+        .andExpect(jsonPath("$.error").value(containsString("Unable to resolve ObjectType")));
+
+    verify(refreshPublisher, never()).publishRefresh(anyString());
+  }
+
+  @Test
+  @DisplayName("Refresh rule: STORAGE_FAILED → 500 error with the storage message; no event")
+  void testRefreshRule_StorageFailed_Returns500() throws Exception {
+    String ruleId = "pricing.discount.simple";
+    givenSingle(
+        ruleId,
+        RuleRefreshService.SingleStatus.STORAGE_FAILED,
+        "Storage read failed; nothing changed: S3 down");
+
+    mockMvc
+        .perform(post("/admin/refresh-rules/{ruleId}", ruleId))
+        .andExpect(status().isInternalServerError())
+        .andExpect(jsonPath("$.status").value("error"))
+        .andExpect(jsonPath("$.error").value(containsString("S3 down")))
+        .andExpect(jsonPath("$.error").value(not(containsString("compile"))));
+
+    verifyNoInteractions(refreshPublisher);
+  }
+
+  @Test
+  @DisplayName("Refresh rule: no publisher (pub/sub off) — INSTALLED and REMOVED still 200")
+  void testRefreshRule_NoPublisher_Succeeds() throws Exception {
+    MockMvc noPubSub = buildMockMvc(newController(null));
+    givenSingle("a.b", RuleRefreshService.SingleStatus.INSTALLED, null);
+    givenSingle("c.d", RuleRefreshService.SingleStatus.REMOVED, null);
+
+    noPubSub
+        .perform(post("/admin/refresh-rules/{ruleId}", "a.b"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("success"));
+    noPubSub
+        .perform(post("/admin/refresh-rules/{ruleId}", "c.d"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("removed"));
+    verifyNoInteractions(refreshPublisher);
   }
 
   // ===== Listing & Info Tests (4) =====
@@ -677,12 +938,12 @@ class AdminControllerTest {
     } finally {
       ReflectionTestUtils.setField(adminController, "s3Client", null);
       ReflectionTestUtils.setField(adminController, "s3BucketName", "");
-      ReflectionTestUtils.setField(adminController, "ruleSource", "memory");
+      ReflectionTestUtils.setField(adminController, "ruleSource", "local");
     }
   }
 
   @Test
-  @DisplayName("Health: S3 headBucket throws exception shows DOWN with s3_accessible=false")
+  @DisplayName("Health: S3 headBucket fails → storage DOWN, overall DEGRADED")
   void testHealth_S3HeadBucketFails_ShowsDownWithS3Error() throws Exception {
     // Given - healthy drools
     when(droolsEngineService.getLoadedRulesCount()).thenReturn(5);
@@ -698,13 +959,14 @@ class AdminControllerTest {
         .thenThrow(new RuntimeException("Bucket not found"));
     ReflectionTestUtils.setField(adminController, "s3Client", mockS3Client);
     ReflectionTestUtils.setField(adminController, "s3BucketName", "nonexistent-bucket");
+    ReflectionTestUtils.setField(adminController, "ruleSource", "s3");
 
     try {
       // When/Then
       mockMvc
           .perform(get("/admin/health"))
           .andExpect(status().isOk())
-          .andExpect(jsonPath("$.status").value("DOWN"))
+          .andExpect(jsonPath("$.status").value("DEGRADED"))
           .andExpect(jsonPath("$.components.storage.status").value("DOWN"))
           .andExpect(jsonPath("$.components.storage.details.s3_bucket").value("nonexistent-bucket"))
           .andExpect(jsonPath("$.components.storage.details.s3_accessible").value(false))
@@ -712,6 +974,7 @@ class AdminControllerTest {
     } finally {
       ReflectionTestUtils.setField(adminController, "s3Client", null);
       ReflectionTestUtils.setField(adminController, "s3BucketName", "");
+      ReflectionTestUtils.setField(adminController, "ruleSource", "local");
     }
   }
 
@@ -731,119 +994,6 @@ class AdminControllerTest {
         .andExpect(jsonPath("$.components.storage.details.total_rules").value(3))
         .andExpect(jsonPath("$.components.storage.details.s3_bucket").doesNotExist())
         .andExpect(jsonPath("$.components.storage.details.s3_accessible").doesNotExist());
-  }
-
-  // ===== Refresh Rule Error Path Tests =====
-
-  @Test
-  @DisplayName("Refresh rule: loadRules returns false returns 500 with error status")
-  void testRefreshRule_LoadRulesFails_Returns500() throws Exception {
-    // Given
-    String ruleId = "pricing.discount.simple";
-    Rule rule = createTestRule(ruleId);
-    RuleMetadata metadata =
-        new RuleMetadata(
-            "1.0",
-            LocalDateTime.now(),
-            LocalDateTime.now(),
-            RuleMetadata.RuleStatus.ACTIVE,
-            null,
-            0,
-            0.0);
-    when(droolsEngineService.getRuleMetadata(ruleId)).thenReturn(metadata);
-    when(mockStorage.getRule(ruleId)).thenReturn(Optional.of(rule));
-    when(droolsEngineService.loadOrReplaceRule(org.mockito.ArgumentMatchers.any(Rule.class)))
-        .thenReturn(false);
-
-    // When/Then
-    mockMvc
-        .perform(post("/admin/refresh-rules/{ruleId}", ruleId))
-        .andExpect(status().isInternalServerError())
-        .andExpect(jsonPath("$.rule_id").value(ruleId))
-        .andExpect(jsonPath("$.status").value("error"))
-        .andExpect(jsonPath("$.error").value("Failed to compile rule"));
-
-    // Verify storage cache was invalidated but pub/sub NOT fired (refresh failed)
-    verify(mockStorage).refreshRule(ruleId);
-    verify(refreshPublisher, never()).publishRefresh(anyString());
-  }
-
-  @Test
-  @DisplayName("Refresh rule: exception thrown returns 500 with error message")
-  void testRefreshRule_ExceptionThrown_Returns500() throws Exception {
-    // Given
-    String ruleId = "pricing.discount.simple";
-    when(droolsEngineService.getRuleMetadata(ruleId))
-        .thenThrow(new RuntimeException("Engine unavailable"));
-
-    // When/Then
-    mockMvc
-        .perform(post("/admin/refresh-rules/{ruleId}", ruleId))
-        .andExpect(status().isInternalServerError())
-        .andExpect(jsonPath("$.rule_id").value(ruleId))
-        .andExpect(jsonPath("$.status").value("error"))
-        .andExpect(jsonPath("$.error").value("Engine unavailable"));
-  }
-
-  @Test
-  @DisplayName("Refresh rule: null metadata but rule found in storage succeeds")
-  void testRefreshRule_NullMetadata_RuleFoundInStorage_Succeeds() throws Exception {
-    // Given
-    String ruleId = "pricing.discount.simple";
-    Rule rule = createTestRule(ruleId);
-    when(droolsEngineService.getRuleMetadata(ruleId)).thenReturn(null);
-    when(mockStorage.getRule(ruleId)).thenReturn(Optional.of(rule));
-    when(droolsEngineService.loadOrReplaceRule(org.mockito.ArgumentMatchers.any(Rule.class)))
-        .thenReturn(true);
-
-    // When/Then
-    mockMvc
-        .perform(post("/admin/refresh-rules/{ruleId}", ruleId))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.rule_id").value(ruleId))
-        .andExpect(jsonPath("$.status").value("success"))
-        .andExpect(jsonPath("$.previous_version").isEmpty());
-  }
-
-  // ===== Refresh All Rules Error Path Tests =====
-
-  @Test
-  @DisplayName("Refresh all rules: storage exception returns error with SYSTEM rule_id")
-  void testRefreshAllRules_StorageException_ReturnsSystemError() throws Exception {
-    // Given - storage throws an exception
-    when(storageFactory.createRuleStorage())
-        .thenThrow(new RuntimeException("S3 connection timeout"));
-
-    // When/Then
-    mockMvc
-        .perform(post("/admin/refresh-rules"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("completed_with_errors"))
-        .andExpect(jsonPath("$.rules_loaded").value(0))
-        .andExpect(jsonPath("$.rules_failed").value(1))
-        .andExpect(jsonPath("$.errors", hasSize(1)))
-        .andExpect(jsonPath("$.errors[0].rule_id").value("SYSTEM"))
-        .andExpect(jsonPath("$.errors[0].error").value("S3 connection timeout"));
-  }
-
-  @Test
-  @DisplayName("Refresh all rules: storage.refreshCache called once before reload")
-  void testRefreshAllRules_InvalidatesCacheOnce() throws Exception {
-    // Given
-    Rule rule1 = createTestRule("pricing.discount.simple");
-    when(mockStorage.getAllRules()).thenReturn(List.of(rule1));
-    when(droolsEngineService.loadRules(anyList())).thenReturn(true);
-
-    // When/Then
-    mockMvc
-        .perform(post("/admin/refresh-rules"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("completed"))
-        .andExpect(jsonPath("$.rules_loaded").value(1));
-
-    // Verify storage.refreshCache() called once and refreshPublisher fired
-    verify(mockStorage, times(1)).refreshCache();
-    verify(refreshPublisher, times(1)).publishBulkRefresh();
   }
 
   // ===== List Rules Error Tests =====
@@ -905,7 +1055,7 @@ class AdminControllerTest {
     // When/Then
     mockMvc
         .perform(get("/admin/health"))
-        .andExpect(status().isOk())
+        .andExpect(status().isServiceUnavailable())
         .andExpect(jsonPath("$.status").value("DOWN"))
         .andExpect(jsonPath("$.components.drools.status").value("DOWN"))
         .andExpect(jsonPath("$.components.drools.details.error").value("Engine crashed"));
@@ -929,30 +1079,5 @@ class AdminControllerTest {
         .andExpect(jsonPath("$.components.cache.details.enabled").value(false))
         .andExpect(jsonPath("$.components.cache.details.mode").value("off"))
         .andExpect(jsonPath("$.components.cache.details.statistics").doesNotExist());
-  }
-
-  // ===== Helper Methods =====
-
-  private Rule createTestRule(String ruleId) {
-    RuleMetadata metadata =
-        new RuleMetadata(
-            "1.0",
-            LocalDateTime.now(),
-            LocalDateTime.now(),
-            RuleMetadata.RuleStatus.ACTIVE,
-            null,
-            0,
-            0.0);
-    String content =
-        "package com.company.rules\n"
-            + "rule \""
-            + ruleId
-            + "\"\n"
-            + "when\n"
-            + "    $data : java.util.Map()\n"
-            + "then\n"
-            + "    // test rule\n"
-            + "end";
-    return new Rule(ruleId, content, metadata);
   }
 }

@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -164,6 +165,84 @@ class RedisCachedRuleStorageTest {
                 .counter()
                 .count())
         .isEqualTo(1.0);
+  }
+
+  @Test
+  @DisplayName("getAllRules partial miss: fresh delegate values win over stale cached ones")
+  @SuppressWarnings("unchecked") // any(RedisCallback.class) — generic erasure in Mockito
+  void getAllRulesPartialMissFreshWinsOverStale() {
+    Rule staleA = new Rule("a", "rule \"a\" when then end // OLD", rule("a").getMetadata());
+    Rule freshA = new Rule("a", "rule \"a\" when then end // NEW", rule("a").getMetadata());
+    Rule freshB = rule("b");
+    // Redis has a stale "a" and no "b" → partial miss
+    when(redisTemplate.execute(any(RedisCallback.class))).thenReturn(Set.of(KEY_PREFIX + "a"));
+    when(valueOps.multiGet(List.of(KEY_PREFIX + "a"))).thenReturn(List.of(staleA));
+    when(delegate.getRuleIds()).thenReturn(List.of("a", "b"));
+    when(delegate.getAllRules()).thenReturn(List.of(freshA, freshB));
+
+    List<Rule> result = storage.getAllRules();
+
+    assertThat(result).containsExactlyInAnyOrder(freshA, freshB);
+    assertThat(result).extracting(Rule::getContent).doesNotContain(staleA.getContent());
+    // Every fresh value is re-cached, including the one that was stale
+    verify(valueOps).set(KEY_PREFIX + "a", freshA, Duration.ofMinutes(TTL_MINUTES));
+    verify(valueOps).set(KEY_PREFIX + "b", freshB, Duration.ofMinutes(TTL_MINUTES));
+  }
+
+  @Test
+  @DisplayName(
+      "getAllRules warm cache (no miss): served from Redis, delegate.getAllRules not called")
+  @SuppressWarnings("unchecked")
+  void getAllRulesFullHitServedFromRedis() {
+    Rule a = rule("a");
+    when(redisTemplate.execute(any(RedisCallback.class))).thenReturn(Set.of(KEY_PREFIX + "a"));
+    when(valueOps.multiGet(List.of(KEY_PREFIX + "a"))).thenReturn(List.of(a));
+    when(delegate.getRuleIds()).thenReturn(List.of("a"));
+
+    assertThat(storage.getAllRules()).containsExactly(a);
+    verify(delegate, never()).getAllRules();
+  }
+
+  @Test
+  @DisplayName("getAllRules: delegate failure on the miss path propagates (never a partial set)")
+  void getAllRulesDelegateFailurePropagates() {
+    when(delegate.getRuleIds()).thenReturn(List.of("a", "b"));
+    when(delegate.getAllRules())
+        .thenThrow(
+            new com.company.drools.api.exception.RuleStorageException("S3 read failed", null));
+
+    assertThatThrownBy(() -> storage.getAllRules())
+        .isInstanceOf(com.company.drools.api.exception.RuleStorageException.class)
+        .hasMessageContaining("S3 read failed");
+    verify(valueOps, never()).set(anyString(), any(Rule.class), any(Duration.class));
+  }
+
+  @Test
+  @DisplayName("getAllRulesFromSource bypasses the Redis read and re-caches what the source says")
+  @SuppressWarnings("unchecked")
+  void getAllRulesFromSourceBypassesRedisRead() {
+    Rule a = rule("a");
+    when(delegate.getAllRulesFromSource()).thenReturn(List.of(a));
+
+    List<Rule> result = storage.getAllRulesFromSource();
+
+    assertThat(result).containsExactly(a);
+    verify(delegate).getAllRulesFromSource();
+    verify(delegate, never()).getAllRules();
+    verify(delegate, never()).getRuleIds();
+    verify(valueOps, never()).multiGet(any());
+    verify(redisTemplate, never()).execute(any(RedisCallback.class));
+    verify(valueOps).set(KEY_PREFIX + "a", a, Duration.ofMinutes(TTL_MINUTES));
+  }
+
+  @Test
+  @DisplayName("getAllRulesFromSource: delegate failure propagates, nothing cached")
+  void getAllRulesFromSourceFailurePropagates() {
+    when(delegate.getAllRulesFromSource()).thenThrow(new IllegalStateException("source down"));
+
+    assertThatThrownBy(() -> storage.getAllRulesFromSource())
+        .isInstanceOf(IllegalStateException.class);
+    verify(valueOps, never()).set(anyString(), any(Rule.class), any(Duration.class));
   }
 
   // ─── saveRule (write-through) ───────────────────────────────────────────────

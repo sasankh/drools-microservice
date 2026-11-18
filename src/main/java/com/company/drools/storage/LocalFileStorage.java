@@ -57,22 +57,23 @@ public class LocalFileStorage implements RuleStorage {
     List<Rule> rules = new ArrayList<>();
     Path rulesPath = Paths.get(rulesDirectory);
 
-    if (!Files.exists(rulesPath)) {
-      log.warn("Rules directory does not exist: {}", rulesPath);
-      return rules;
+    // A missing or unreadable directory is an error, not "zero rules": returning an empty list
+    // would make a refresh remove every loaded rule.
+    if (!Files.isDirectory(rulesPath)) {
+      throw new com.company.drools.api.exception.RuleStorageException(
+          "Rules directory does not exist or is not a directory: " + rulesPath, null);
     }
 
     try (Stream<Path> paths = Files.walk(rulesPath)) {
-      paths
-          .filter(Files::isRegularFile)
-          .filter(path -> path.toString().endsWith(".drl"))
-          .forEach(
-              path -> {
-                String ruleId = pathToRuleId(path);
-                getRule(ruleId).ifPresent(rules::add);
-              });
-    } catch (IOException e) {
-      log.error("Failed to list rules in directory: {}", rulesPath, e);
+      for (Path path :
+          paths.filter(Files::isRegularFile).filter(p -> p.toString().endsWith(".drl")).toList()) {
+        String ruleId = pathToRuleId(path);
+        rules.add(new Rule(ruleId, Files.readString(path), createMetadata(path)));
+      }
+    } catch (IOException | java.io.UncheckedIOException e) {
+      // UncheckedIOException: an error while Files.walk traverses the tree.
+      throw new com.company.drools.api.exception.RuleStorageException(
+          "Failed to read rules from directory " + rulesPath + "; aborting the full read", e);
     }
 
     log.info("Loaded {} rules from local file storage", rules.size());

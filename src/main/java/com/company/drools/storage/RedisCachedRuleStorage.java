@@ -170,16 +170,22 @@ public class RedisCachedRuleStorage implements RuleStorage {
         .counter(METRIC_BULK_MISS, "missing_count", String.valueOf(missing.size()))
         .increment();
 
+    // Any miss → read the full set from the source of truth. Fresh values win over cached ones,
+    // and a delegate failure propagates (never return a partial set — see RuleStorage).
     List<Rule> all = delegate.get().getAllRules();
-    for (Rule r : all) {
-      if (!existing.containsKey(r.getRuleId())) {
-        cachePut(r);
-        existing.put(r.getRuleId(), r);
-      }
-    }
+    all.forEach(this::cachePut);
     sample.stop(
         meterRegistry.timer(METRIC_READ_DURATION, TAG_LAYER, LAYER_REDIS, TAG_RESULT, "bulk_miss"));
-    return new ArrayList<>(existing.values());
+    return new ArrayList<>(all);
+  }
+
+  /** Reads the delegate directly (no cache read) and refreshes the cache with what it returns. */
+  @Override
+  public List<Rule> getAllRulesFromSource() {
+    requireDelegate();
+    List<Rule> all = delegate.get().getAllRulesFromSource();
+    all.forEach(this::cachePut);
+    return all;
   }
 
   // S4276: BooleanSupplier can't be used here — CircuitBreaker.decorateSupplier returns a

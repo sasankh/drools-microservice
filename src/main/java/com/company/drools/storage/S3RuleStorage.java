@@ -311,7 +311,7 @@ public class S3RuleStorage implements RuleStorage {
 
     } catch (SdkException e) {
       log.error("Failed to list rule IDs from S3 bucket: {}", bucketName, e);
-      return new ArrayList<>();
+      throw new RuleStorageException("Failed to list rule IDs from S3 bucket " + bucketName, e);
     }
   }
 
@@ -328,8 +328,9 @@ public class S3RuleStorage implements RuleStorage {
   }
 
   /**
-   * Transforms S3 key path to rule ID. Example: "pricing/discount/simple.drl" ->
-   * "pricing.discount.simple"
+   * Read one listed object into {@code rules}. An object deleted between the listing and the read
+   * ({@code NoSuchKey}) is skipped — it really is gone. Any other failure aborts the whole read:
+   * returning a partial list would make a refresh drop healthy rules.
    */
   private void tryLoadAndAddRule(String ruleId, S3Object s3Object, List<Rule> rules) {
     try {
@@ -340,11 +341,23 @@ public class S3RuleStorage implements RuleStorage {
               .asUtf8String();
       RuleMetadata metadata = createMetadataFromS3Object(s3Object);
       rules.add(new Rule(ruleId, content, metadata));
+    } catch (NoSuchKeyException _) {
+      log.info("Rule {} was deleted while listing (S3 key {}), skipping", ruleId, s3Object.key());
     } catch (Exception e) {
-      log.warn("Failed to load rule: {} from S3 key: {}", ruleId, s3Object.key(), e);
+      throw new RuleStorageException(
+          "Failed to read rule "
+              + ruleId
+              + " from S3 key "
+              + s3Object.key()
+              + "; aborting the full read so no rule is dropped",
+          e);
     }
   }
 
+  /**
+   * Transforms S3 key path to rule ID. Example: "pricing/discount/simple.drl" ->
+   * "pricing.discount.simple"
+   */
   private String s3KeyToRuleId(String s3Key) {
     String ruleId = s3Key;
     if (ruleId.endsWith(FILE_EXT_DRL)) {

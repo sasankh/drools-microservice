@@ -8,12 +8,12 @@ import com.company.drools.api.dto.RuleListResponse;
 import com.company.drools.api.validation.ValidRuleId;
 import com.company.drools.cache.RuleRefreshPublisher;
 import com.company.drools.common.LogSanitizer;
+import com.company.drools.config.RulesHealthIndicator;
 import com.company.drools.config.ThreadPoolConfig;
 import com.company.drools.core.engine.DroolsEngineService;
-import com.company.drools.core.model.Rule;
+import com.company.drools.core.engine.RuleRefreshService;
 import com.company.drools.core.model.RuleMetadata;
 import com.company.drools.storage.RuleStorage;
-import com.company.drools.storage.S3RuleStorage;
 import com.company.drools.storage.StorageFactory;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -25,7 +25,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.actuate.health.Health;
+import org.springframework.boot.actuate.health.Status;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.lang.Nullable;
 import org.springframework.web.bind.annotation.*;
@@ -48,6 +51,7 @@ public class AdminController {
   private static final String TAG_ERROR_TYPE = "error_type";
   private static final String STATUS_UP = "UP";
   private static final String STATUS_DOWN = "DOWN";
+  private static final String STATUS_DEGRADED = "DEGRADED";
   private static final String STATUS_SUCCESS = "success";
   private static final String STATUS_ERROR = "error";
   private static final String ENDPOINT_ADMIN_HEALTH = "/admin/health";
@@ -62,15 +66,17 @@ public class AdminController {
   private final StorageFactory storageFactory;
   private final MeterRegistry meterRegistry;
   private final ThreadPoolConfig threadPoolConfig;
+  private final RuleRefreshService refreshService;
+  private final RulesHealthIndicator rulesHealthIndicator;
 
   /**
    * Optional pub/sub publisher; present only when {@code redis.enabled=true &&
-   * redis.pubsub.enabled=true}. After a successful refresh, we publish an event so sibling ECS
-   * tasks update their kieContainer.
+   * redis.pubsub.enabled=true}. After a refresh that changed something, we publish an event so
+   * sibling instances refresh too.
    */
   @Nullable private final RuleRefreshPublisher refreshPublisher;
 
-  @Value("${drools.rule-source:memory}")
+  @Value("${drools.rule-source:local}")
   private String ruleSource;
 
   @Value("${redis.enabled:false}")
@@ -97,8 +103,12 @@ public class AdminController {
       @Nullable S3Client s3Client,
       @Nullable @Qualifier("s3CircuitBreaker") CircuitBreaker s3CircuitBreaker,
       @Nullable @Qualifier("redisCircuitBreaker") CircuitBreaker redisCircuitBreaker,
-      @Nullable RuleRefreshPublisher refreshPublisher) {
+      @Nullable RuleRefreshPublisher refreshPublisher,
+      RuleRefreshService refreshService,
+      RulesHealthIndicator rulesHealthIndicator) {
     this.droolsEngineService = droolsEngineService;
+    this.refreshService = refreshService;
+    this.rulesHealthIndicator = rulesHealthIndicator;
     this.storageFactory = storageFactory;
     this.meterRegistry = meterRegistry;
     this.threadPoolConfig = threadPoolConfig;
@@ -109,7 +119,12 @@ public class AdminController {
     this.refreshPublisher = refreshPublisher;
   }
 
-  /** Enhanced health check endpoint with component status. */
+  /**
+   * Component health. {@code status}: UP; DEGRADED (storage unreachable but compiled rules keep
+   * serving); DOWN (this instance can't serve rules: startup load not succeeded, or no rules). HTTP
+   * 503 only when DOWN, so a storage blip doesn't fail container health checks on instances that
+   * are serving fine.
+   */
   @GetMapping("/health")
   public ResponseEntity<HealthCheckResponse> health() {
     // Start timing the health check
@@ -122,18 +137,18 @@ public class AdminController {
       Map<String, ComponentHealth> components = new HashMap<>();
       String overallStatus = STATUS_UP;
 
-      // Check Drools engine health
+      // Can this instance serve rules? (same logic as the actuator readiness indicator "rules")
       ComponentHealth droolsHealth = checkDroolsHealth();
       components.put("drools", droolsHealth);
-      if (!STATUS_UP.equals(droolsHealth.getStatus())) {
-        overallStatus = STATUS_DOWN;
-      }
+      boolean canServe = STATUS_UP.equals(droolsHealth.getStatus());
 
-      // Check storage health (S3/Local/Memory)
+      // Storage (S3/file/memory): needed for refreshes, not for serving already-compiled rules
       ComponentHealth storageHealth = checkStorageHealth();
       components.put("storage", storageHealth);
-      if (!STATUS_UP.equals(storageHealth.getStatus())) {
+      if (!canServe) {
         overallStatus = STATUS_DOWN;
+      } else if (!STATUS_UP.equals(storageHealth.getStatus())) {
+        overallStatus = STATUS_DEGRADED;
       }
 
       // Check cache health
@@ -162,7 +177,9 @@ public class AdminController {
               .tag(TAG_STATUS, STATUS_SUCCESS)
               .register(meterRegistry));
 
-      return ResponseEntity.ok(response);
+      return STATUS_DOWN.equals(overallStatus)
+          ? ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response)
+          : ResponseEntity.ok(response);
 
     } catch (Exception e) {
       // Record error response timing
@@ -186,19 +203,14 @@ public class AdminController {
   private ComponentHealth checkDroolsHealth() {
     Map<String, Object> details = new HashMap<>();
     try {
-      long loadedRules = droolsEngineService.getLoadedRulesCount();
-      long activeRules = droolsEngineService.getActiveRulesCount();
-
-      details.put("loaded_rules", loadedRules);
-      details.put("active_rules", activeRules);
+      Health rules = rulesHealthIndicator.health();
+      details.putAll(rules.getDetails());
+      details.put("active_rules", droolsEngineService.getActiveRulesCount());
       details.put("cache_hit_rate", calculateCacheHitRate());
-
-      // Check if we have at least one rule loaded
-      String status = loadedRules > 0 ? STATUS_UP : STATUS_DOWN;
-      if (loadedRules == 0) {
-        details.put(STATUS_ERROR, "No rules loaded");
+      String status = Status.UP.equals(rules.getStatus()) ? STATUS_UP : STATUS_DOWN;
+      if (STATUS_DOWN.equals(status) && details.containsKey("reason")) {
+        details.put(STATUS_ERROR, details.get("reason"));
       }
-
       return new ComponentHealth(status, details);
     } catch (Exception e) {
       details.put(STATUS_ERROR, e.getMessage());
@@ -213,8 +225,8 @@ public class AdminController {
       details.put("type", storage.getClass().getSimpleName());
       details.put("rule_source", ruleSource);
 
-      // For S3, check bucket accessibility
-      if (storage instanceof S3RuleStorage
+      // For S3 (directly or behind the Redis decorator), check bucket accessibility
+      if ("s3".equalsIgnoreCase(ruleSource)
           && s3Client != null
           && !s3BucketName.isEmpty()
           && !checkS3BucketAccessibility(details)) {
@@ -411,119 +423,147 @@ public class AdminController {
     }
   }
 
-  /** Refresh all rules from storage. */
+  /**
+   * Re-read every rule from storage and apply it. Each rule ID compiles independently.
+   *
+   * <ul>
+   *   <li>200 {@code completed}: everything compiled; {@code completed_with_errors}: some rule IDs
+   *       failed (they keep their previous version, if any) and are listed in {@code errors}.
+   *   <li>500 {@code failed}: storage couldn't be read completely; nothing changed.
+   *   <li>409 {@code rejected_empty}: storage returned 0 rules while rules are loaded; nothing
+   *       changed (set {@code drools.refresh.allow-empty=true} to allow it).
+   * </ul>
+   */
   @PostMapping("/refresh-rules")
   public ResponseEntity<RefreshRulesResponse> refreshAllRules() {
     log.info("Refreshing all rules via admin endpoint");
     long startTime = System.currentTimeMillis();
 
+    // Invalidate the shared Redis cache (no-op when disabled) and re-read from storage.
+    RuleRefreshService.BulkResult result =
+        refreshService.refreshAll(
+            RuleRefreshService.Source.ADMIN, RuleRefreshService.ReadMode.INVALIDATE_THEN_READ);
+    long duration = System.currentTimeMillis() - startTime;
+
     List<RefreshRulesResponse.RuleError> errors = new ArrayList<>();
-    int rulesLoaded = 0;
-    int rulesFailed = 0;
-
-    try {
-      // Invalidate Redis cache (no-op when disabled) BEFORE re-reading from storage,
-      // so getAllRules() repopulates Redis with fresh DRL text from S3.
-      RuleStorage storage = storageFactory.createRuleStorage();
-      storage.refreshCache();
-      List<Rule> rules = storage.getAllRules();
-
-      // Reload rules into engine
-      boolean success = droolsEngineService.loadRules(rules);
-
-      if (success) {
-        rulesLoaded = rules.size();
-
-        // Notify sibling ECS tasks via Redis pub/sub so they update their kieContainers.
-        // No-op when pub/sub is disabled (publisher is null).
-        if (refreshPublisher != null) {
-          refreshPublisher.publishBulkRefresh();
-        }
-
-        log.info("Successfully refreshed {} rules", rulesLoaded);
-      } else {
-        rulesFailed = rules.size();
-        errors.add(new RefreshRulesResponse.RuleError("ALL", "Failed to load rules into engine"));
-      }
-
-    } catch (Exception e) {
-      log.error("Error during rule refresh", e);
-      errors.add(new RefreshRulesResponse.RuleError("SYSTEM", e.getMessage()));
-      rulesFailed = 1;
+    if (result.status() != RuleRefreshService.BulkStatus.LOADED) {
+      errors.add(
+          new RefreshRulesResponse.RuleError(
+              "SYSTEM", LogSanitizer.sanitizeMessage(result.error())));
+      boolean empty = result.status() == RuleRefreshService.BulkStatus.REJECTED_EMPTY;
+      RefreshRulesResponse response =
+          new RefreshRulesResponse(empty ? "rejected_empty" : "failed", 0, 0, duration, errors);
+      return ResponseEntity.status(empty ? HttpStatus.CONFLICT : HttpStatus.INTERNAL_SERVER_ERROR)
+          .body(response);
     }
 
-    long duration = System.currentTimeMillis() - startTime;
-    String status = rulesFailed == 0 ? "completed" : "completed_with_errors";
+    DroolsEngineService.LoadReport report = result.report();
+    report
+        .failed()
+        .forEach(
+            (id, msg) ->
+                errors.add(
+                    new RefreshRulesResponse.RuleError(id, LogSanitizer.sanitizeMessage(msg))));
 
+    // Notify sibling instances (no-op when pub/sub is off). Always published after a full read,
+    // even if nothing changed HERE: an operator's refresh should bring every instance current, and
+    // a sibling that missed an earlier event may still be stale. Siblings skip unchanged rules by
+    // digest, so this is cheap.
+    if (refreshPublisher != null) {
+      refreshPublisher.publishBulkRefresh();
+    }
+
+    // rules_loaded keeps its meaning (rule IDs serving from this snapshot); rules_unchanged says
+    // how many of those were already current and skipped the recompile.
     RefreshRulesResponse response =
-        new RefreshRulesResponse(status, rulesLoaded, rulesFailed, duration, errors);
+        new RefreshRulesResponse(
+            report.allSucceeded() ? "completed" : "completed_with_errors",
+            report.loaded().size() + report.unchanged().size(),
+            report.failed().size(),
+            duration,
+            errors);
+    response.setRulesUnchanged(report.unchanged().size());
+    response.setRulesRemoved(report.removed().size());
+    log.info(
+        "Refresh complete: {} loaded, {} unchanged, {} failed, {} removed",
+        report.loaded().size(),
+        report.unchanged().size(),
+        report.failed().size(),
+        report.removed().size());
     return ResponseEntity.ok(response);
   }
 
-  /** Refresh a specific rule by ID. */
+  /**
+   * Re-read one rule from storage and apply it; only that rule ID is recompiled.
+   *
+   * <ul>
+   *   <li>200 {@code success} (new version serving) or {@code unchanged} (same DRL already
+   *       serving).
+   *   <li>404 {@code not_found}: not in storage and not loaded. If it was loaded, it is removed
+   *       (deleted in storage) and the response is 200 {@code removed}.
+   *   <li>500 {@code error}: compile failed (the previous version keeps serving) or storage
+   *       couldn't be read.
+   * </ul>
+   */
   @PostMapping("/refresh-rules/{ruleId}")
   public ResponseEntity<RefreshRuleResponse> refreshRule(@PathVariable @ValidRuleId String ruleId) {
     log.info("Refreshing rule: {}", LogSanitizer.sanitizeMessage(ruleId));
     long startTime = System.currentTimeMillis();
 
-    try {
-      // Get current rule metadata
-      RuleMetadata currentMetadata = droolsEngineService.getRuleMetadata(ruleId);
-      Instant previousVersion =
-          currentMetadata != null && currentMetadata.getLastModified() != null
-              ? currentMetadata.getLastModified().atZone(java.time.ZoneOffset.UTC).toInstant()
-              : null;
+    RuleMetadata before = droolsEngineService.getRuleMetadata(ruleId);
+    Instant previousVersion = toInstant(before != null ? before.getLastModified() : null);
 
-      // Invalidate the single Redis key (no-op when Redis disabled), then re-fetch from
-      // storage. The decorator repopulates Redis on the way back.
-      RuleStorage storage = storageFactory.createRuleStorage();
-      storage.refreshRule(ruleId);
-      Optional<Rule> ruleOpt = storage.getRule(ruleId);
+    RuleRefreshService.SingleResult result =
+        refreshService.refreshOne(ruleId, RuleRefreshService.Source.ADMIN, true);
+    long elapsed = System.currentTimeMillis() - startTime;
 
-      if (ruleOpt.isEmpty()) {
-        RefreshRuleResponse response = new RefreshRuleResponse(ruleId, "not_found");
-        response.setError("Rule not found in storage");
-        return ResponseEntity.notFound().build();
-      }
-
-      Rule rule = ruleOpt.get();
-
-      // Reload rule into engine. loadOrReplaceRule merges the new rule into the current loaded
-      // set before recompiling, so other rules continue to fire after a single-rule refresh.
-      // (Previously this called loadRules(List.of(rule)) which silently replaced the entire
-      // KieContainer with a single-rule one — see e2e-validation-findings.md Finding #1.)
-      boolean success = droolsEngineService.loadOrReplaceRule(rule);
-
-      if (success) {
-        // Notify sibling ECS tasks so they refresh their own kieContainer.
+    return switch (result.status()) {
+      case INSTALLED, UNCHANGED -> {
+        // Published for UNCHANGED too: this instance may be current while a sibling is not.
         if (refreshPublisher != null) {
           refreshPublisher.publishRefresh(ruleId);
         }
-
-        long compilationTime = System.currentTimeMillis() - startTime;
-        Instant currentVersion =
-            rule.getMetadata().getLastModified() != null
-                ? rule.getMetadata().getLastModified().atZone(java.time.ZoneOffset.UTC).toInstant()
-                : null;
-
+        RuleMetadata after = droolsEngineService.getRuleMetadata(ruleId);
+        Instant currentVersion = toInstant(after != null ? after.getLastModified() : null);
         RefreshRuleResponse response =
             new RefreshRuleResponse(
-                ruleId, STATUS_SUCCESS, previousVersion, currentVersion, compilationTime);
-
-        log.info("Successfully refreshed rule: {}", LogSanitizer.sanitizeMessage(ruleId));
-        return ResponseEntity.ok(response);
-      } else {
-        RefreshRuleResponse response = new RefreshRuleResponse(ruleId, STATUS_ERROR);
-        response.setError("Failed to compile rule");
-        return ResponseEntity.internalServerError().body(response);
+                ruleId,
+                result.status() == RuleRefreshService.SingleStatus.INSTALLED
+                    ? STATUS_SUCCESS
+                    : "unchanged",
+                previousVersion,
+                currentVersion,
+                elapsed);
+        log.info("Refreshed rule {}: {}", LogSanitizer.sanitizeMessage(ruleId), result.status());
+        yield ResponseEntity.ok(response);
       }
+      case REMOVED -> {
+        if (refreshPublisher != null) {
+          refreshPublisher.publishDelete(ruleId);
+        }
+        RefreshRuleResponse response = new RefreshRuleResponse(ruleId, "removed");
+        response.setError("Rule no longer exists in storage; removed from the engine");
+        yield ResponseEntity.ok(response);
+      }
+      case NOT_FOUND -> {
+        RefreshRuleResponse response = new RefreshRuleResponse(ruleId, "not_found");
+        response.setError("Rule not found in storage");
+        yield ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+      }
+      case FAILED, STORAGE_FAILED -> {
+        RefreshRuleResponse response = new RefreshRuleResponse(ruleId, STATUS_ERROR);
+        response.setError(
+            result.status() == RuleRefreshService.SingleStatus.FAILED
+                ? "Failed to compile rule (previous version, if any, keeps serving): "
+                    + LogSanitizer.sanitizeMessage(result.error())
+                : LogSanitizer.sanitizeMessage(result.error()));
+        yield ResponseEntity.internalServerError().body(response);
+      }
+    };
+  }
 
-    } catch (Exception e) {
-      log.error("Error refreshing rule: {}", LogSanitizer.sanitizeMessage(ruleId), e);
-      RefreshRuleResponse response = new RefreshRuleResponse(ruleId, STATUS_ERROR);
-      response.setError(LogSanitizer.sanitizeMessage(e.getMessage()));
-      return ResponseEntity.internalServerError().body(response);
-    }
+  private static Instant toInstant(java.time.LocalDateTime ldt) {
+    return ldt != null ? ldt.atZone(java.time.ZoneOffset.UTC).toInstant() : null;
   }
 
   /** List all loaded rules with their metadata. */

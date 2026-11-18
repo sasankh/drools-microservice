@@ -1,6 +1,10 @@
 package com.company.drools.storage;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -59,13 +63,28 @@ class StorageFactoryTest {
   }
 
   @Test
-  @DisplayName("defaults to in-memory for unknown source")
+  @DisplayName("fails fast for an unknown source (no silent in-memory fallback)")
   void testUnknownSource() throws Exception {
     setField(storageFactory, "ruleSource", "unknown");
-    when(applicationContext.getBean(InMemoryRuleStorageAdapter.class)).thenReturn(inMemoryAdapter);
 
-    RuleStorage storage = storageFactory.createRuleStorage();
-    assertThat(storage).isEqualTo(inMemoryAdapter);
+    assertThatThrownBy(() -> storageFactory.createRuleStorage())
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("unknown")
+        .hasMessageContaining("local, file, s3");
+    verify(applicationContext, never()).getBean(InMemoryRuleStorageAdapter.class);
+  }
+
+  @Test
+  @DisplayName("builds the storage once and reuses it")
+  void testStorageIsMemoized() throws Exception {
+    setField(storageFactory, "ruleSource", "s3");
+    when(applicationContext.getBean("s3RuleStorage", RuleStorage.class)).thenReturn(s3RuleStorage);
+
+    RuleStorage first = storageFactory.createRuleStorage();
+    RuleStorage second = storageFactory.createRuleStorage();
+
+    assertThat(second).isSameAs(first);
+    verify(applicationContext, times(1)).getBean("s3RuleStorage", RuleStorage.class);
   }
 
   @Test

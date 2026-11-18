@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.company.drools.api.exception.RuleNotFoundException;
+import com.company.drools.api.exception.RuleStorageException;
 import com.company.drools.core.model.Rule;
 import com.company.drools.testutil.RuleTestUtils;
 import java.io.IOException;
@@ -155,6 +156,56 @@ class LocalFileStorageTest {
       assertThatThrownBy(() -> localFileStorage.deleteRule("nonexistent.rule"))
           .isInstanceOf(RuleNotFoundException.class)
           .hasMessageContaining("Rule not found");
+    }
+
+    @Test
+    @DisplayName("getAllRules throws when the rules directory is missing (not an empty set)")
+    void testGetAllRules_MissingDirectory_Throws() throws Exception {
+      setRulesDirectory(tempDir.resolve("does-not-exist"));
+
+      assertThatThrownBy(() -> localFileStorage.getAllRules())
+          .isInstanceOf(RuleStorageException.class)
+          .hasMessageContaining("does not exist");
+    }
+
+    @Test
+    @DisplayName("getAllRules throws when the rules path is a file, not a directory")
+    void testGetAllRules_PathIsFile_Throws() throws Exception {
+      Path file = tempDir.resolve("a-file");
+      Files.writeString(file, "x");
+      setRulesDirectory(file);
+
+      assertThatThrownBy(() -> localFileStorage.getAllRules())
+          .isInstanceOf(RuleStorageException.class)
+          .hasMessageContaining("not a directory");
+    }
+
+    @Test
+    @DisplayName("getAllRules aborts the whole read on an IO error reading one file")
+    void testGetAllRules_IoErrorOnOneFile_Throws() throws Exception {
+      localFileStorage.saveRule(RuleTestUtils.createSimpleRule("good.rule"));
+      // Invalid UTF-8 → Files.readString throws MalformedInputException (an IOException). Works
+      // even as root, where permission-based failures can't be provoked.
+      Path bad = tempDir.resolve("bad").resolve("rule.drl");
+      Files.createDirectories(bad.getParent());
+      Files.write(bad, new byte[] {(byte) 0xC3, (byte) 0x28, (byte) 0xFF});
+
+      assertThatThrownBy(() -> localFileStorage.getAllRules())
+          .isInstanceOf(RuleStorageException.class)
+          .hasMessageContaining("aborting the full read")
+          .hasCauseInstanceOf(IOException.class);
+    }
+
+    @Test
+    @DisplayName("getAllRules on an existing empty directory returns an empty list")
+    void testGetAllRules_EmptyDirectory_ReturnsEmpty() {
+      assertThat(localFileStorage.getAllRules()).isEmpty();
+    }
+
+    private void setRulesDirectory(Path path) throws Exception {
+      Field rulesDirectoryField = LocalFileStorage.class.getDeclaredField("rulesDirectory");
+      rulesDirectoryField.setAccessible(true);
+      rulesDirectoryField.set(localFileStorage, path.toString());
     }
   }
 

@@ -168,6 +168,43 @@ class RedisCachedStorageIntegrationTest {
     assertThat(meterRegistry.counter("drools.cache.bulk.hit").count()).isEqualTo(1.0);
   }
 
+  @Test
+  @DisplayName("getAllRules partial miss: fresh delegate value replaces a stale cached one")
+  void getAllRulesPartialMissFreshWins() {
+    Rule stale = new Rule("a", "rule \"a\" when then end // OLD", rule("a").getMetadata());
+    Rule fresh = new Rule("a", "rule \"a\" when then end // NEW", rule("a").getMetadata());
+    redisTemplate.opsForValue().set(KEY_PREFIX + "a", stale, Duration.ofMinutes(TTL_MINUTES));
+    when(delegate.getRuleIds()).thenReturn(List.of("a", "b")); // "b" is a miss
+    when(delegate.getAllRules()).thenReturn(List.of(fresh, rule("b")));
+
+    List<Rule> result = cache.getAllRules();
+
+    assertThat(result)
+        .extracting(Rule::getContent)
+        .contains(fresh.getContent())
+        .doesNotContain(stale.getContent());
+    assertThat(redisTemplate.opsForValue().get(KEY_PREFIX + "a").getContent())
+        .isEqualTo(fresh.getContent());
+    assertThat(redisTemplate.opsForValue().get(KEY_PREFIX + "b")).isNotNull();
+  }
+
+  @Test
+  @DisplayName("getAllRulesFromSource ignores what Redis holds and re-caches the source's values")
+  void getAllRulesFromSourceBypassesRedis() {
+    Rule stale = new Rule("a", "rule \"a\" when then end // OLD", rule("a").getMetadata());
+    Rule fresh = new Rule("a", "rule \"a\" when then end // NEW", rule("a").getMetadata());
+    redisTemplate.opsForValue().set(KEY_PREFIX + "a", stale, Duration.ofMinutes(TTL_MINUTES));
+    when(delegate.getAllRulesFromSource()).thenReturn(List.of(fresh));
+
+    List<Rule> result = cache.getAllRulesFromSource();
+
+    assertThat(result).extracting(Rule::getContent).containsExactly(fresh.getContent());
+    assertThat(redisTemplate.opsForValue().get(KEY_PREFIX + "a").getContent())
+        .isEqualTo(fresh.getContent());
+    verify(delegate, never()).getAllRules();
+    verify(delegate, never()).getRuleIds();
+  }
+
   // ─── Invalidation ───────────────────────────────────────────────────────────
 
   @Test

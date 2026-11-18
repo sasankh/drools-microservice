@@ -1,5 +1,6 @@
 package com.company.drools.core.model;
 
+import com.company.drools.common.ContentDigest;
 import java.util.Objects;
 
 public class Rule {
@@ -27,6 +28,14 @@ public class Rule {
 
   public RuleMetadata getMetadata() {
     return metadata;
+  }
+
+  /**
+   * SHA-256 (hex) of the DRL text. Deliberately not a {@code getX()} accessor so it is not part of
+   * the Redis JSON form of a rule.
+   */
+  public String contentDigest() {
+    return ContentDigest.sha256(content);
   }
 
   @Override

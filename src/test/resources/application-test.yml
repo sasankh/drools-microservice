@@ -3,7 +3,7 @@
 
 drools:
   # Use in-memory rule source for fast unit tests
-  rule-source: memory
+  rule-source: local
 
   # Validation limits (lower for faster tests)
   validation:

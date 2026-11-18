@@ -65,10 +65,18 @@ public class RuleMetadata {
    * Execution statistics carry over.
    */
   public RuleMetadata withCompiled() {
+    return withCompiled(lastModified);
+  }
+
+  /**
+   * As {@link #withCompiled()}, also recording when the source DRL was last modified in storage (S3
+   * {@code LastModified} or file mtime); {@code null} keeps the current value.
+   */
+  public RuleMetadata withCompiled(LocalDateTime sourceLastModified) {
     return new RuleMetadata(
         version,
         LocalDateTime.now(),
-        lastModified,
+        sourceLastModified != null ? sourceLastModified : lastModified,
         RuleStatus.ACTIVE,
         null,
         executionCount,

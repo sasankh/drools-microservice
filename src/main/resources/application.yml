@@ -22,6 +22,16 @@ management:
     health:
       show-details: when-authorized
       show-components: when-authorized
+      # Kubernetes/ECS-style probes: /actuator/health/liveness (process alive) and
+      # /actuator/health/readiness (can serve rules). Readiness includes the "rules" indicator,
+      # so an instance with no loaded rules or a failed startup load is taken out of rotation.
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,rules
+        liveness:
+          include: livenessState
   # Only aggregate the Redis health indicator when the app actually uses Redis. Otherwise Spring
   # Boot auto-enables it whenever spring-boot-starter-data-redis is on the classpath, so a Redis
   # blip (or Redis-disabled deployments) would flip /actuator/health to 503 DOWN even though the
@@ -77,8 +87,18 @@ drools:
   cache:
     execution-timeout-seconds: ${RULE_EXECUTION_TIMEOUT_SECONDS:30}
   refresh:
+    # Scheduled reconcile: re-read storage directly (bypassing Redis) every interval and apply only
+    # changed / added / removed rule IDs (unchanged ones are skipped by SHA-256). Self-heals missed
+    # pub/sub events and changes made directly in the bucket.
     auto-enabled: ${AUTO_REFRESH_ENABLED:false}
     interval-minutes: ${AUTO_REFRESH_INTERVAL_MINUTES:5}
+    # Allow a complete storage read with 0 rules to remove every loaded rule. Off by default so a
+    # wrong bucket/path can't wipe the engine (and fan the wipe out to sibling instances).
+    allow-empty: ${DROOLS_REFRESH_ALLOW_EMPTY:false}
+  startup:
+    # true: exit if the startup load can't read storage. false (default): start, report NOT ready
+    # (readiness DOWN, /admin/health 503) and keep retrying via reconcile / admin refresh.
+    fail-on-load-error: ${DROOLS_STARTUP_FAIL_ON_LOAD_ERROR:false}
   timeout:
     http:
       connection: ${DROOLS_HTTP_CONNECTION_TIMEOUT:10}
@@ -188,7 +208,7 @@ spring:
       on-profile: local
       
 drools:
-  rule-source: local
+  rule-source: ${RULE_SOURCE:local}
   cors:
     allowed-origins: "*"
 
@@ -207,7 +227,7 @@ spring:
       on-profile: dev
 
 drools:
-  rule-source: s3
+  rule-source: ${RULE_SOURCE:s3}
   cors:
     allowed-origins: "*"
   s3:
@@ -255,9 +275,9 @@ spring:
       on-profile: prod
 
 drools:
-  rule-source: s3
+  rule-source: ${RULE_SOURCE:s3}
   refresh:
-    auto-enabled: true
+    auto-enabled: ${AUTO_REFRESH_ENABLED:true}
   timeout:
     http:
       connection: 10
@@ -316,7 +336,7 @@ spring:
       on-profile: docker
 
 drools:
-  rule-source: s3
+  rule-source: ${RULE_SOURCE:s3}
   cors:
     allowed-origins: "*"
   timeout:
