@@ -8,7 +8,7 @@ affected version/commit. We aim to acknowledge reports within a few business day
 
 ## Supported versions
 
-Security fixes target the `main` branch. There is no separate LTS branch at this time.
+Security fixes target the `develop` branch (the default/release branch). There is no separate LTS branch at this time.
 
 ## Known security considerations
 
@@ -24,7 +24,10 @@ This service executes business rules authored as Drools `.drl` files loaded from
   JEP 486, so an in-JVM permission sandbox is no longer available).
 - **Admin endpoints (`/admin/*`)** are protected by the `X-Admin-API-Key` header (env `ADMIN_API_KEY`).
   In the `prod` and `docker` profiles the service **fails to start** if the key is blank. Never deploy
-  with a blank admin key.
+  with a blank admin key. Request paths containing `;`, `%`, `\`, `//` or `.`/`..` segments are
+  rejected with 400 before authentication, and all filters match on the normalized (routed) path,
+  so encoded or parameterised paths such as `/admin;x/health` or `/%61dmin/health` cannot bypass the
+  key check (ADR-024; fixed 2026-11-17).
 - **Management port (`8081`, `/actuator/*`)** has no authentication. Bind it to an internal interface
   only (loopback / private security group) — never expose it publicly.
 - **Redis** must use `rediss://` with authentication in production (the `prod` profile enforces this).

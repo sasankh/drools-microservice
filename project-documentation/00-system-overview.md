@@ -13,8 +13,9 @@ Client                     Service                          Storage
 ──────                     ───────                          ───────
 POST /execute-rule  ───→  ┌────────────────────┐  ───→  ┌────────────────┐
 {rule_id, data}           │ Filter chain       │        │ AWS S3 / Local │
-                          │  ├ Headers (-1)    │        │  └ rules/...   │
-                          │  ├ Admin Auth (0)  │        └────────────────┘
+                          │  ├ Headers (-2)    │        │  └ rules/...   │
+                          │  ├ StrictPath (-1) │        └────────────────┘
+                          │  ├ Admin Auth (0)  │
                           │  ├ Rate Limit (1)  │                  ▲
                           │  └ Size Validation │                  │
                           │       ↓            │              cache miss
@@ -127,7 +128,7 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 | Environment variables actually read | 68 |
 | Distinct error codes | 10 |
 | Spring profiles | 4 (`local`, `dev`, `prod`, `docker`) |
-| Filter chain order | 4 filters (-1, 0, 1, none) |
+| Filter chain order | 5 filters (-2, -1, 0, 1, none) — see ADR-024 |
 | Security headers on every response | 7 |
 | Ports exposed | 2 (8080 main+admin, 8081 actuator) |
 | Sustained throughput target / measured | 100-1000 RPS / 45+ RPS sustained |
@@ -210,7 +211,8 @@ This is the elevator-pitch version. Full detail in [04-architecture.md](04-archi
 
 ```
 1. POST /execute-rule {rule_id, data}
-2. SecurityHeadersFilter (Order -1) — adds 7 response headers
+2. SecurityHeadersFilter (Order -2) — adds 7 response headers
+   StrictRequestPathFilter (Order -1) — 400 on ambiguous raw paths (`;` `%` `\` `//` dot-segments, ADR-024)
 3. AdminAuthFilter (Order 0) — skipped for /execute-rule
 4. RateLimitingFilter (Order 1) — checks per-client limit, keyed on source IP
 5. RequestSizeValidationFilter (no Order) — 1 MiB body cap

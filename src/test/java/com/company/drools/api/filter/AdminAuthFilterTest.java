@@ -220,4 +220,46 @@ class AdminAuthFilterTest extends BaseUnitTest {
           .doesNotThrowAnyException();
     }
   }
+
+  @Nested
+  @DisplayName("Path normalization (ADR-024)")
+  class PathNormalization {
+
+    private AdminAuthFilter filter() {
+      return new AdminAuthFilter(objectMapper, "secret-key-123", new MockEnvironment());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest(name = "requires key for {0}")
+    @org.junit.jupiter.params.provider.ValueSource(
+        strings = {
+          "/admin;x/health",
+          "/%61dmin/health",
+          "/admin/health;jsessionid=abc",
+          "//admin/health",
+          "/admin",
+          "/%61dmin/refresh-rules",
+          "/admin;x/memory/gc"
+        })
+    void testEncodedOrParameterisedAdminPathsRequireKey(String uri) throws Exception {
+      when(request.getRequestURI()).thenReturn(uri);
+      when(request.getRemoteAddr()).thenReturn("10.0.0.9");
+      StringWriter stringWriter = new StringWriter();
+      when(response.getWriter()).thenReturn(new PrintWriter(stringWriter));
+
+      filter().doFilter(request, response, filterChain);
+
+      verify(response).setStatus(401);
+      verify(filterChain, never()).doFilter(request, response);
+    }
+
+    @Test
+    @DisplayName("does not require the key for a non-admin path that starts with 'admin'")
+    void testAdministratorPathNotAdmin() throws Exception {
+      when(request.getRequestURI()).thenReturn("/administrator");
+
+      filter().doFilter(request, response, filterChain);
+
+      verify(filterChain).doFilter(request, response);
+    }
+  }
 }

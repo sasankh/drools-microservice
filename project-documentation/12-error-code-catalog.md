@@ -37,7 +37,7 @@ The exact field set depends on which layer emits the error:
 | HTTP | Code | When |
 |---:|---|---|
 | 400 | `RULE_EXECUTION_ERROR` | Rule fired but threw at runtime |
-| 400 | `INVALID_INPUT` | Validation failed OR malformed argument |
+| 400 | `INVALID_INPUT` | Validation failed OR malformed argument OR malformed request path (`StrictRequestPathFilter`, ADR-024) |
 | 401 | `UNAUTHORIZED` | Admin endpoint accessed without/wrong API key |
 | 404 | `RULE_NOT_FOUND` | Rule ID does not exist in storage |
 | 404 | `NOT_FOUND` | Path doesn't match any handler (404 fallback) |

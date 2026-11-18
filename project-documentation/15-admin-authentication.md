@@ -23,7 +23,7 @@
 
 ## How the filter works
 
-[`AdminAuthFilter`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java) is a `@Component` Spring filter at `@Order(0)`. It runs second in the chain (after `SecurityHeadersFilter` at `@Order(-1)`).
+[`AdminAuthFilter`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java) is a `@Component` Spring filter at `@Order(0)`. It runs third in the chain, after `SecurityHeadersFilter` (`@Order(-2)`) and `StrictRequestPathFilter` (`@Order(-1)`, which rejects ambiguous raw paths such as `/admin;x/health` or `/%61dmin/health` with 400). The `/admin/` prefix is matched on the normalized path (`RequestPaths.normalizedPath`), never the raw URI — see ADR-024.
 
 ### Startup validation (fail-closed in deployable profiles)
 

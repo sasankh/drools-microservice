@@ -23,7 +23,7 @@
 
 ## Filter execution
 
-The rate limiter is [`RateLimitingFilter`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java) at `@Order(1)`. It runs **after** SecurityHeadersFilter (-1) and AdminAuthFilter (0), but **before** RequestSizeValidationFilter.
+The rate limiter is [`RateLimitingFilter`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java) at `@Order(1)`. It runs **after** SecurityHeadersFilter (-2), StrictRequestPathFilter (-1) and AdminAuthFilter (0), but **before** RequestSizeValidationFilter.
 
 The decision flow per request:
 

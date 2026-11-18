@@ -228,13 +228,16 @@ class RuleExecutionRequest {
   - 500: Internal errors, rule execution failures
   - 503: Service unavailable (circuit breaker open, OR rule-execution thread pool saturated)
 
-#### Filters (4 total — see [`api/filter/`](../src/main/java/com/company/drools/api/filter/))
+#### Filters (5 total — see [`api/filter/`](../src/main/java/com/company/drools/api/filter/))
 
-**SecurityHeadersFilter** `@Order(-1)`
-- Adds 7 response headers (X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy, Cache-Control, CSP, HSTS) to every response.
+**SecurityHeadersFilter** `@Order(-2)`
+- Adds 7 response headers (X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy, Cache-Control, CSP, HSTS) to every response, including 400/401/413/429 written by later filters.
+
+**StrictRequestPathFilter** `@Order(-1)` (ADR-024)
+- Rejects raw request paths containing `;`, `%`, `\`, `//` or `.`/`..` segments with 400 `INVALID_INPUT`, so URI-prefix checks can't be bypassed (`/admin;x/health`, `/%61dmin/health`). All filters also match on `RequestPaths.normalizedPath()`.
 
 **AdminAuthFilter** `@Order(0)`
-- Matches `/admin/*` paths; requires `X-Admin-API-Key` header when `ADMIN_API_KEY` env var is set; SKIPS check (with WARN log at startup) when unset.
+- Matches `/admin/**` on the normalized path; requires `X-Admin-API-Key` header when `ADMIN_API_KEY` is set. When unset: startup fails on `prod`/`docker` (ADR-017); `local`/`dev` skip the check with a WARN.
 
 **RateLimitingFilter** `@Order(1)`
 - Per-client rate limiting (default: 1000 req/min, 10000 req/hr); admin endpoints exempt.
@@ -567,7 +570,8 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
    }
         ↓
 2. SECURITY FILTERS  (in @Order)
-   - SecurityHeadersFilter  @Order(-1)  - adds 7 headers to response
+   - SecurityHeadersFilter  @Order(-2)  - adds 7 headers to response
+   - StrictRequestPathFilter @Order(-1) - 400 on ambiguous raw paths (ADR-024)
    - AdminAuthFilter        @Order(0)   - skipped for /execute-rule
    - RateLimitingFilter     @Order(1)   - per-client check
    - RequestSizeValidationFilter        - request body size + chunked stream limit
@@ -1056,7 +1060,7 @@ Internal dependencies. **What breaks if X fails?**
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  LAYER 0: SECURITY HEADERS                                   │
-│  SecurityHeadersFilter @Order(-1) — adds 7 headers to every  │
+│  SecurityHeadersFilter @Order(-2) — adds 7 headers to every  │
 │  response. Source: SecurityHeadersFilter.java:21-27          │
 └─────────────────────────────────────────────────────────────┘
                           ↓

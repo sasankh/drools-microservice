@@ -43,6 +43,7 @@ Format used here: each ADR has Status, Context, Decision, Alternatives Considere
 | [021](#adr-021-redis-prod-tlsauth-enforcement--removal-of-jackson-default-typing-2026-08-20) | Redis prod TLS/auth enforcement + removal of Jackson default typing | Accepted (2026-08-20) |
 | [022](#adr-022-storage-delegate-held-in-an-atomicreference-2026-08-20) | Storage delegate held in an `AtomicReference` | Accepted (2026-08-20) |
 | [023](#adr-023-ci-workflow--verify-bound-quality-gates-2026-08-20) | CI workflow + verify-bound quality gates | Accepted (2026-08-20) |
+| [024](#adr-024-strict-request-path-handling-2026-11-17) | Strict request-path handling (reject ambiguous paths + normalized matching) | Accepted (2026-11-17) |
 
 ---
 
@@ -1023,6 +1024,50 @@ Quality tooling (Spotless, SpotBugs, JaCoCo, OWASP dependency-check) existed in 
 
 ---
 
+## ADR-024: Strict request-path handling (2026-11-17)
+
+**Status**: Accepted
+**Date**: 2026-11-17
+
+### Context
+
+The pre-merge end-to-end run of 2026-11-17 found a live **admin authentication bypass**: `GET /admin;x/health` and `GET /%61dmin/health` without `X-Admin-API-Key` returned 200 with full health data. The same trick reached `POST /admin/refresh-rules` and `POST /admin/memory/gc`.
+
+The cause was a mismatch between what the filters matched and what Spring MVC routed:
+- `AdminAuthFilter` matched `request.getRequestURI().startsWith("/admin/")`. `getRequestURI()` is the **raw** path, still holding `;` path parameters and percent-encoding.
+- Spring MVC routes on the **decoded** path with `;` content removed.
+- `RateLimitingFilter` (`startsWith("/execute-rule")`) and `RequestSizeValidationFilter` (`contains("/execute-rule")`) had the same weakness. For example, `/%65xecute-rule` skipped the rate limiter.
+
+### Decision
+
+Two layers:
+
+1. **Reject ambiguous paths up front.** New [`StrictRequestPathFilter`](../src/main/java/com/company/drools/api/filter/StrictRequestPathFilter.java) (`@Order(-1)`) returns **400 `INVALID_INPUT`** ("Malformed request path") when the raw request path contains `;`, `%`, `\`, an empty segment (`//`) or a `.`/`..` segment.
+   - This service has no legitimate encoded paths: rule IDs are `[A-Za-z0-9._-]`, and query strings are not part of `getRequestURI()`.
+   - `SecurityHeadersFilter` moves to `@Order(-2)`, so the rejection still carries the 7 security headers.
+2. **Match on the normalized path everywhere (defense in depth).** New [`RequestPaths.normalizedPath`](../src/main/java/com/company/drools/common/RequestPaths.java) mirrors Spring's routing view: context path stripped, `;` content removed, percent-decoded, repeated `/` collapsed. `AdminAuthFilter` (`/admin/**` plus exact `/admin`), `RateLimitingFilter` and `RequestSizeValidationFilter` all match on it.
+
+New filter order: SecurityHeaders (-2) → StrictRequestPath (-1) → AdminAuth (0) → RateLimiting (1) / RequestTimeout (1) → RequestSizeValidation (unordered) → Logging (unordered).
+
+### Alternatives considered
+
+- **Adopt Spring Security (`StrictHttpFirewall`)**: rejected. It's a large dependency for one control, and it reverses ADR-006's deliberate choice of a lightweight filter. The custom check implements the same idea for the characters relevant here.
+- **Normalization only (no rejection)**: rejected as the sole control. Any future filter that forgets to normalize would reopen the hole. Rejecting ambiguous input closes the whole class.
+- **Rejection only (no normalization)**: rejected as the sole control. Normalized matching costs nothing and protects against inputs the rejection list doesn't anticipate.
+
+### Consequences
+
+- **Positive**: the bypass class is closed. A real-Tomcat regression test ([`PathBypassIntegrationTest`](../src/test/java/com/company/drools/integration/PathBypassIntegrationTest.java)) covers it in the default `mvn test`, because MockMvc does not reproduce raw-URI handling.
+- **Positive**: the size filter now matches `/execute-rule` by prefix instead of substring.
+- **Negative**: clients that percent-encode ordinary path characters get 400. None are expected, because every documented path is plain ASCII.
+
+### References
+- [`StrictRequestPathFilter.java`](../src/main/java/com/company/drools/api/filter/StrictRequestPathFilter.java), [`RequestPaths.java`](../src/main/java/com/company/drools/common/RequestPaths.java)
+- [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java), [`RateLimitingFilter.java`](../src/main/java/com/company/drools/api/filter/RateLimitingFilter.java), [`RequestSizeValidationFilter.java`](../src/main/java/com/company/drools/api/filter/RequestSizeValidationFilter.java)
+- `.ai-workspace/project-plans/pre-merge-fixes-plan-2026-11-17.md` (F1)
+
+---
+
 ## Extension points
 
 These are the documented seams for extending the service without forking it.
@@ -1086,7 +1131,7 @@ public class MyFilter extends OncePerRequestFilter {
 }
 ```
 
-Coordinate with existing `@Order` values (-1, 0, 1, none) to avoid conflicts.
+Coordinate with existing `@Order` values (-2, -1, 0, 1, none) to avoid conflicts. Match on [`RequestPaths.normalizedPath(request)`](../src/main/java/com/company/drools/common/RequestPaths.java), never the raw `getRequestURI()` (ADR-024).
 
 ### Swap the Redis cache decorator for a different cache backend
 
@@ -1108,12 +1153,12 @@ The current cache layer is `RedisCachedRuleStorage`, a decorator on `RuleStorage
 
 ## Future ADRs to write (placeholders)
 
-These decisions are anticipated but not yet documented as ADRs. The last written ADR is 023; the next free number is 024 (ADR-015 was reserved for the structured-logging decision and remains the lone gap in the index).
+These decisions are anticipated but not yet documented as ADRs. The last written ADR is 024; the next free number is 025 (ADR-015 was reserved for the structured-logging decision and remains the lone gap in the index).
 
 - **ADR-015**: Logback + logstash-logback-encoder for structured logs (over alternatives) — number reserved, write-up still pending
-- **ADR-024**: Choice of Apache HTTP client for AWS SDK v2 (over Netty)
-- **ADR-025**: Maven over Gradle
-- **ADR-026**: Container Java distribution: Amazon Corretto (over Temurin / Liberica)
+- **ADR-025**: Choice of Apache HTTP client for AWS SDK v2 (over Netty)
+- **ADR-026**: Maven over Gradle
+- **ADR-027**: Container Java distribution: Amazon Corretto (over Temurin / Liberica)
 
 If anyone is making a major change to the corresponding component, write the ADR before changing the code.
 
@@ -1121,7 +1166,7 @@ If anyone is making a major change to the corresponding component, write the ADR
 
 ## How to write a new ADR
 
-1. Pick the next number (024, 025, ... — ADR-015 is reserved but not yet written; ADR-023 is the last written).
+1. Pick the next number (025, 026, ... — ADR-015 is reserved but not yet written; ADR-024 is the last written).
 2. Add an entry to the index above.
 3. Add the section below.
 4. Cite specific code lines.

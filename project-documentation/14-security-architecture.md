@@ -35,7 +35,9 @@ HTTP request arrives
        │
        ▼
 ┌─────────────────────────────────────────────┐
-│ LAYER 0  SecurityHeadersFilter   @Order(-1) │   adds 7 response headers
+│ LAYER 0  SecurityHeadersFilter   @Order(-2) │   adds 7 response headers
+├─────────────────────────────────────────────┤
+│ LAYER 0b StrictRequestPathFilter @Order(-1) │   400 on ambiguous raw paths (ADR-024)
 ├─────────────────────────────────────────────┤
 │ LAYER 1  Network                            │   CORS check (CorsConfig)
 ├─────────────────────────────────────────────┤
@@ -62,7 +64,7 @@ Each layer is independently effective. Removing one degrades posture but doesn't
 
 ## Layer 0 — Security headers
 
-**File**: [`SecurityHeadersFilter.java`](../src/main/java/com/company/drools/api/filter/SecurityHeadersFilter.java) at `@Order(-1)`.
+**File**: [`SecurityHeadersFilter.java`](../src/main/java/com/company/drools/api/filter/SecurityHeadersFilter.java) at `@Order(-2)`.
 
 Adds 7 headers to **every** response. Verbatim from [`SecurityHeadersFilter.java:21-27`](../src/main/java/com/company/drools/api/filter/SecurityHeadersFilter.java#L21-L27):
 

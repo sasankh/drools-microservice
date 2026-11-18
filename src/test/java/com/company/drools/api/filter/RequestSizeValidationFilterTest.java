@@ -155,10 +155,24 @@ class RequestSizeValidationFilterTest extends BaseUnitTest {
     }
 
     @Test
-    @DisplayName("validates POST to paths containing /execute-rule")
-    void testValidatesPathContainingExecuteRule() throws Exception {
+    @DisplayName("does not validate unrelated paths that merely contain /execute-rule")
+    void testSkipsPathMerelyContainingExecuteRule() throws Exception {
+      // Matching is on the routed path prefix (ADR-024), not a substring of the raw URI.
       when(request.getMethod()).thenReturn("POST");
       when(request.getRequestURI()).thenReturn("/api/execute-rule");
+      when(request.getContentLengthLong()).thenReturn(2000000L);
+
+      filter.doFilterInternal(request, response, filterChain);
+
+      verify(filterChain).doFilter(request, response);
+      verify(response, never()).setStatus(413);
+    }
+
+    @Test
+    @DisplayName("validates POST to an encoded /execute-rule path (normalized match)")
+    void testValidatesEncodedExecuteRulePath() throws Exception {
+      when(request.getMethod()).thenReturn("POST");
+      when(request.getRequestURI()).thenReturn("/%65xecute-rule");
       when(request.getContentLengthLong()).thenReturn(2000000L);
 
       StringWriter stringWriter = new StringWriter();
@@ -167,6 +181,7 @@ class RequestSizeValidationFilterTest extends BaseUnitTest {
       filter.doFilterInternal(request, response, filterChain);
 
       verify(response).setStatus(413);
+      verify(filterChain, never()).doFilter(request, response);
     }
   }
 

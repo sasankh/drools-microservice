@@ -311,4 +311,26 @@ class RateLimitingFilterTest extends BaseUnitTest {
               org.mockito.ArgumentMatchers.anyString());
     }
   }
+
+  @Nested
+  @DisplayName("Path normalization (ADR-024)")
+  class PathNormalization {
+
+    @org.junit.jupiter.params.ParameterizedTest(name = "limits {0}")
+    @org.junit.jupiter.params.provider.ValueSource(
+        strings = {"/%65xecute-rule", "/execute-rule;x", "//execute-rule"})
+    void testEncodedExecuteRulePathsAreLimited(String uri) throws Exception {
+      when(request.getRequestURI()).thenReturn(uri);
+      when(request.getRemoteAddr()).thenReturn("10.0.9." + Math.abs(uri.hashCode() % 250));
+      StringWriter stringWriter = new StringWriter();
+      when(response.getWriter()).thenReturn(new PrintWriter(stringWriter));
+
+      // Limit is 5/min in setUp(); the 6th request must be rejected even via an encoded path.
+      for (int i = 0; i < 6; i++) {
+        filter.doFilter(request, response, filterChain);
+      }
+
+      verify(response).setStatus(429);
+    }
+  }
 }

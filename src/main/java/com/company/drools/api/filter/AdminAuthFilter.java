@@ -1,5 +1,6 @@
 package com.company.drools.api.filter;
 
+import com.company.drools.common.RequestPaths;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -104,8 +105,10 @@ public class AdminAuthFilter extends OncePerRequestFilter {
       return false;
     }
 
-    String uri = request.getRequestURI();
-    return uri.startsWith("/admin/");
+    // Match on the path Spring MVC routes on, not the raw URI: "/admin;x/health" and
+    // "/%61dmin/health" both route to /admin/health (ADR-024).
+    String path = RequestPaths.normalizedPath(request);
+    return path.startsWith("/admin/") || path.equals("/admin");
   }
 
   private void writeUnauthorizedResponse(HttpServletResponse response) throws IOException {

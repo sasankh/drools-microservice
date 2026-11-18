@@ -1,5 +1,6 @@
 package com.company.drools.api.filter;
 
+import com.company.drools.common.RequestPaths;
 import com.company.drools.config.RateLimitingConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
@@ -70,11 +71,10 @@ public class RateLimitingFilter extends OncePerRequestFilter {
   }
 
   private boolean shouldApplyRateLimit(HttpServletRequest request) {
-    String uri = request.getRequestURI();
-
-    // Apply rate limiting to main API endpoints
-    return uri.startsWith("/execute-rule")
-        || (uri.startsWith("/api/") && !uri.startsWith("/admin/"));
+    // Match on the routed (normalized) path so "/%65xecute-rule" or "/execute-rule;x" can't skip
+    // the limiter (ADR-024). /admin/* and actuator are intentionally not limited.
+    String path = RequestPaths.normalizedPath(request);
+    return path.startsWith("/execute-rule") || path.startsWith("/api/");
   }
 
   private String getClientIdentifier(HttpServletRequest request) {
