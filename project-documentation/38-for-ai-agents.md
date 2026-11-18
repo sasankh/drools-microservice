@@ -66,9 +66,9 @@ Full breakdown in [`.ai-workspace/project-plans/security-backlog.md`](../.ai-wor
 
 ### 6. Live-test runtime behavior, don't reason about it
 
-**What we found**: an earlier doc claimed VIP $100 → $80. We documented $72 (after stacking). Verifying via live curl produced $72 — the doc was right; the README example showing $80 was a single-rule-only case. Stacking behavior of multiple rules in the same KieBase is **not obvious from reading the source**.
+**What we found**: an earlier doc claimed VIP $100 → $80, while the live service returned $72: every loaded rule was compiled into one KieBase and all matching rules fired, so `simple`'s 10% stacked on VIP's 20%. That was **not obvious from reading the source** (`rule_id` was only used for lookups and metrics). It was fixed on 2026-11-18 ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)): each rule ID now has its own KieBase, a request runs only its own file's rules, and VIP $100 → $80. Do not describe rules as stacking.
 
-**The rule**: when documenting runtime behavior — especially anything involving rule stacking, ordering, caching, or state — run the actual curl. The cookbook in [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) is the gold standard: every example was live-tested.
+**The rule**: when documenting runtime behavior — especially anything involving rule ordering, caching, or state — run the actual curl. The cookbook in [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) is the gold standard: every example was live-tested.
 
 ---
 
@@ -104,7 +104,7 @@ Output for `snap-memory` lands in [`../.ai-workspace/snap-memory/`](../.ai-works
 | [`.ai-workspace/documentations/CODE_FINDINGS.md`](../.ai-workspace/documentations/CODE_FINDINGS.md) | Catalog of code-vs-doc mismatches discovered during the overhaul (32+ items, all severity Low; doc-fixes applied, code-side recommendations logged) |
 | [`.ai-workspace/project-plans/security-backlog.md`](../.ai-workspace/project-plans/security-backlog.md) + `SECURITY.md` | The two tracked-open security findings (B1 DRL-sandbox-is-not-a-boundary RCE, deferred; #28 Redis auth/TLS, now enforced on prod) — what they are, prod risk |
 | [`.ai-workspace/documentations/CHECKLIST.md`](../.ai-workspace/documentations/CHECKLIST.md) | Phase-by-phase rebuild log including the retroactive Phase 4+5 rigorous review (which caught the metric-name and count bugs above) |
-| [36-architecture-decision-records.md](36-architecture-decision-records.md) | ADRs covering the non-obvious design choices (Drools 10 `KieContainer.updateToVersion` rule loading — see ADR-003 with 2026-05-10 update, write-lock-on-get LRU, AdminAuthFilter instead of Spring Security, traditional DRL only, Drools 10 + Java 25 modernization) |
+| [36-architecture-decision-records.md](36-architecture-decision-records.md) | ADRs covering the non-obvious design choices (per-rule-ID KieBase isolation — ADR-025, which supersedes the Drools 10 `KieContainer.updateToVersion` model of ADR-003; write-lock-on-get LRU, AdminAuthFilter instead of Spring Security, traditional DRL only, Drools 10 + Java 25 modernization) |
 
 ---
 

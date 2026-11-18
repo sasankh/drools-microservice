@@ -127,14 +127,6 @@
             <artifactId>drools-mvel</artifactId>
             <version>${drools.version}</version>
         </dependency>
-        <!-- SPIKE-ONLY (engine-isolation Phase 1): needed to evaluate option B (kmodule.xml with
-             named KieBases). Removed after the ADR-025 decision. -->
-        <dependency>
-            <groupId>org.drools</groupId>
-            <artifactId>drools-xml-support</artifactId>
-            <version>${drools.version}</version>
-            <scope>test</scope>
-        </dependency>
         
         <!-- AWS SDK -->
         <dependency>

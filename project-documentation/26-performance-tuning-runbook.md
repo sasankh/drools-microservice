@@ -60,7 +60,7 @@ curl -fsS http://localhost:8080/admin/health | jq '.components."circuit-breakers
 
 #### A1: Cache hit rate < 80% → refresh churn or TTL too short
 
-Note: `/execute-rule` never reads from Redis — it reads from the compiled `kieContainer`. Cache hit/miss metrics (`drools.cache.hit` / `drools.cache.miss`) reflect refresh and warm-start paths only. If they're poor:
+Note: `/execute-rule` never reads from Redis — it reads from the rule ID's compiled KieBase in the `CompiledRulesetRegistry`. Cache hit/miss metrics (`drools.cache.hit` / `drools.cache.miss`) reflect refresh and warm-start paths only. If they're poor:
 
 - **TTL too short**: increase `REDIS_DRL_RULES_TTL_MINUTES` (default 15) so refresh hits stay warm between admin-driven refreshes.
 - **Stop rule churn**: If `POST /admin/refresh-rules` is being called frequently in production, every refresh deletes and re-warms the Redis keys. Reduce refresh frequency, or use `AUTO_REFRESH_ENABLED=false` and refresh only on rule changes.
@@ -299,9 +299,9 @@ Watch the trend. Climbing steadily = leak. Stable = healthy. Sawtooth = normal G
 
 #### F1: Heap usage growing steadily (looks like a leak)
 
-The KieContainer lifecycle was overhauled on 2026-05-10: a single long-lived container is updated in place via `updateToVersion(ReleaseId)`, and old `KieModule`s are explicitly removed with `kieRepository.removeKieModule(oldReleaseId)`. Verify the current pattern is in place:
+Since 2026-11-18 ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)) each rule ID has its own immutable `KieBase` in the `CompiledRulesetRegistry`; a refresh swaps the handle and the old one is garbage collected once no in-flight request holds it. There is no `KieContainer` or `KieRepository` bookkeeping. Verify the current pattern is in place:
 
-- Look at `DroolsEngineService.loadRules` — confirm it calls `kieRepository.removeKieModule(oldReleaseId)` after `container.updateToVersion(newReleaseId)`. The old `oldContainer.dispose()` two-container pattern is superseded.
+- Look at `DroolsEngineService.compileAndInstall` — it should call `registry.install(...)` and keep no other reference to the previous `CompiledRuleset`. Anything else holding retired handles is the leak.
 - Run a refresh storm test:
   ```bash
   for i in {1..20}; do
@@ -347,7 +347,7 @@ If pauses > 200ms regularly:
 curl -fsS http://localhost:8080/admin/memory/info | jq '.memoryPools[] | select(.name == "Metaspace")'
 ```
 
-If metaspace is climbing, it's a classloader leak. Drools generates classes per rule — if rule reloads aren't disposing the old `KieContainer` properly, metaspace accumulates. See F1.
+If metaspace is climbing, it's a classloader leak. Drools generates classes per rule — if something keeps retired `CompiledRuleset` / `KieBase` references alive after a reload, metaspace accumulates. See F1.
 
 ---
 
@@ -370,8 +370,7 @@ docker compose cp app:/tmp/heap-dumps ./heap-dumps && ls -la heap-dumps/
 #### G1: Heap dump exists → analyze with MAT / VisualVM
 
 Open the `.hprof` file in a heap analyzer. Look for:
-- Many `KieContainer` instances → disposal bug regressed
-- Many `ProjectClassLoader` instances → `KieRepository.removeKieModule` not called after `updateToVersion` (Drools 10 does NOT auto-clean)
+- Many more `CompiledRuleset` / `KieBase` instances than loaded rule IDs → retired handles are still referenced somewhere
 - Lots of pending requests → thread pool runaway
 
 #### G2: No heap dump (OOM happened too fast)
@@ -507,23 +506,19 @@ Mitigations:
 - Increase `AWS_S3_MAX_CONNECTIONS` for parallel fetches
 - Increase `DROOLS_STORAGE_THREAD_POOL_MAX_SIZE`
 
-#### J3: `updateToVersion` works as designed; refresh is inherently O(rules)
+#### J3: Full refresh is O(rules); single-rule refresh is not
 
-This is **fine**. The current pattern (Drools 10 `KieContainer.updateToVersion(ReleaseId)`) compiles **outside** the write lock — existing `/execute-rule` traffic is **not** blocked during compilation. Read traffic continues uninterrupted, and the write lock is held only briefly for the in-place version swap.
+A full refresh (`POST /admin/refresh-rules`) compiles every rule ID, each on its own, and swaps each handle atomically ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)). Execution takes no lock, so `/execute-rule` traffic is **not** blocked while it runs.
 
-**Caveat at scale**: full refresh wall-clock time scales with rule count. Measured 2026-05-10:
-- 10 rules → ~1.5s
-- 1000 rules → ~46s (compile dominates; scales **superlinearly** because Drools rebuilds the whole RETE network)
+**Caveat at scale**: full refresh wall-clock time scales with rule count. In the ADR-025 spike, a cold sequential build of 1,000 synthetic rule IDs took ~4.1 s (versus 1.3 s for the old single KieBase). The 2026-05-10 load-test numbers in [39-load-test-findings.md](39-load-test-findings.md) (~46 s at 1,000 rules, cold JIT) were measured with the old single-KieBase model and have not been re-measured on the new one.
 
-A 30-second refresh is acceptable as long as it's not happening every minute. See [39-load-test-findings.md](39-load-test-findings.md) §"Compile time scaling" for the full curve.
-
-If you need faster turnaround for individual rule updates, use **per-rule refresh**:
+For individual rule updates, use **per-rule refresh**:
 ```bash
 curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" \
   http://localhost:8080/admin/refresh-rules/pricing.discount.vip
 ```
 
-This still recompiles the **full rule set** (Drools 10 has no public per-rule incremental compile API), but it's a useful single-call admin shape. Single-rule refresh under load was load-tested at 1000 rules: 0 errors across 360 swaps, P99 spike during compile windows. See [39-load-test-findings.md](39-load-test-findings.md).
+This recompiles **only that rule ID** (~3.6 ms median at 1,000 resident IDs in the spike, versus ~510 ms for the old full recompile). If the new version fails to compile, the previous version keeps serving.
 
 ---
 
@@ -537,7 +532,7 @@ This still recompiles the **full rule set** (Drools 10 has no public per-rule in
 | Sustained RPS per replica | 100-1000 | 518 RPS (Phase 9 single-replica, 0% errors over 3000 samples) |
 | Redis cache hit rate (when `REDIS_ENABLED=true`) | > 90% on multi-instance | depends on fan-out activity; see `drools.cache.hit{layer=redis}` Micrometer counter; the pre-2026-05-20 "~95%" figure was for the deleted LRU and is no longer meaningful |
 | Startup time | < 60s | ~1.3s for sample workload |
-| Memory baseline | stable | yes (Drools 10 `updateToVersion` + `removeKieModule` pattern verified by Phase 9 long-running load test) |
+| Memory baseline | stable | yes (old `updateToVersion` + `removeKieModule` pattern verified by Phase 9 long-running load test; per-rule-ID model flat over 2,000 refreshes in the ADR-025 spike) |
 | GC pause P99 | < 200ms | yes with default G1GC config |
 | Pub/sub convergence (single-rule refresh, 3-replica) | < 2000ms | max 47ms across 3 sibling instances (Phase 9.3) |
 

@@ -102,13 +102,22 @@ class MetricsConfigTest {
   @Test
   @DisplayName("loadedRulesGauge creates gauge")
   void testLoadedRulesGauge() {
-    Gauge gauge = metricsConfig.loadedRulesGauge(meterRegistry);
+    com.company.drools.core.engine.CompiledRulesetRegistry registry =
+        new com.company.drools.core.engine.CompiledRulesetRegistry();
+    Gauge gauge = metricsConfig.loadedRulesGauge(meterRegistry, registry);
 
     assertThat(gauge).isNotNull();
     assertThat(gauge.getId().getName()).isEqualTo("drools.rules.loaded");
+    assertThat(gauge.value()).isZero();
 
-    metricsConfig.getLoadedRulesCount().set(10);
-    assertThat(gauge.value()).isEqualTo(10.0);
+    registry.install(
+        new com.company.drools.core.engine.CompiledRuleset(
+            "a.b.c",
+            "digest",
+            org.mockito.Mockito.mock(org.kie.api.KieBase.class),
+            java.time.Instant.now(),
+            java.util.List.of("r")));
+    assertThat(gauge.value()).isEqualTo(1.0);
   }
 
   @Test
@@ -143,13 +152,6 @@ class MetricsConfigTest {
   void testGetCacheSize() {
     assertThat(metricsConfig.getCacheSize()).isNotNull();
     assertThat(metricsConfig.getCacheSize().get()).isZero();
-  }
-
-  @Test
-  @DisplayName("getLoadedRulesCount returns atomic integer")
-  void testGetLoadedRulesCount() {
-    assertThat(metricsConfig.getLoadedRulesCount()).isNotNull();
-    assertThat(metricsConfig.getLoadedRulesCount().get()).isZero();
   }
 
   private void setField(Object target, String fieldName, Object value) throws Exception {

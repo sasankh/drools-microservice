@@ -35,7 +35,9 @@ The Drools Rule Engine Microservice includes comprehensive memory monitoring cap
 
 **2026-02-19** — initial fix: original `KieContainer` instances were not being disposed during the two-container atomic-swap, leading to exit-code-137 OOM after ~6h. Added explicit `KieContainer.dispose()` on the swapped-out container.
 
-**2026-05-10** — Drools 10 re-engineering: the service now holds a **single long-lived `KieContainer`** updated in place via `KieContainer.updateToVersion(ReleaseId)`. Old `KieModule`s are explicitly removed from the `KieRepository` after each swap (Drools 10 does **not** auto-clean — verified by 1000-rule load test). The 2026-02-19 `dispose()` pattern was superseded. See [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal) and [`DroolsEngineService.loadOrReplaceRule`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java).
+**2026-05-10** — Drools 10 re-engineering: the service held a **single long-lived `KieContainer`** updated in place via `KieContainer.updateToVersion(ReleaseId)`. Old `KieModule`s were explicitly removed from the `KieRepository` after each swap (Drools 10 does **not** auto-clean — verified by 1000-rule load test). The 2026-02-19 `dispose()` pattern was superseded. See [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal).
+
+**2026-11-18** — per-rule-ID isolation ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)): there is no `KieContainer`, `KieModule` or `KieRepository` any more. Each rule ID is compiled into its own `KieBase` (`KnowledgeBuilder` + `KnowledgeBaseFactory`) and held in an immutable handle in the `CompiledRulesetRegistry`. A refresh swaps the handle; the old one is garbage collected once no in-flight request holds it. The spike showed flat heap and metaspace over 2,000 refreshes. See [`DroolsEngineService`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java).
 
 **Net result**:
 - No `KieModule` / `ProjectClassLoader` leak across refreshes
@@ -192,7 +194,7 @@ curl -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/snaps
 
 ### Heap Memory
 
-**What it is**: Memory used for Java objects (rules, data, KieContainers, etc.)
+**What it is**: Memory used for Java objects (rules, data, compiled KieBases, etc.)
 
 **Key Metrics**:
 - `usedMB`: Currently allocated to objects
@@ -452,27 +454,18 @@ curl -s http://localhost:8080/admin/memory/info | jq '.heap'
 
 **Root Cause history**:
 - Fixed in 2026-02-19 by adding `KieContainer.dispose()` to a two-container atomic-swap.
-- Re-engineered on 2026-05-10 (Drools 10 migration): the service now holds a **single long-lived `KieContainer`** that is updated in place via `KieContainer.updateToVersion(ReleaseId)`. Old `KieModule`s are explicitly removed from the `KieRepository` after the swap (Drools 10 does **not** auto-clean them — verified by load test 2026-05-10).
+- Re-engineered on 2026-05-10 (Drools 10 migration): a single long-lived `KieContainer` updated in place via `KieContainer.updateToVersion(ReleaseId)`, with old `KieModule`s explicitly removed from the `KieRepository`.
+- Replaced on 2026-11-18 ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)): one immutable `KieBase` per rule ID in the `CompiledRulesetRegistry`, with no `KieContainer` / `KieRepository` bookkeeping.
 
-**Solution**: Ensure using latest code with the post-2026-05-10 pattern:
+**Solution**: Ensure you are running the post-2026-11-18 code:
 ```java
-// DroolsEngineService.loadRules — current pattern
-ReleaseId newReleaseId = ruleCompiler.compile(allRules);  // outside write lock
-ReleaseId oldReleaseId = currentReleaseId;
-
-writeLock.lock();
-try {
-    kieContainer.updateToVersion(newReleaseId);   // in-place version swap
-    currentReleaseId = newReleaseId;
-} finally {
-    writeLock.unlock();
-}
-
-if (oldReleaseId != null && !oldReleaseId.equals(newReleaseId)) {
-    kieRepository.removeKieModule(oldReleaseId);  // critical — prevents KieModule pile-up
+// DroolsEngineService — current pattern (refreshLock held)
+RuleCompiler.RuleCompilation c = ruleCompiler.compileRule(rule);  // own KieBase for this rule ID
+if (c.isSuccess()) {
+    registry.install(c.ruleset());   // atomic per-ID swap; the old handle becomes garbage
 }
 ```
-See [04-architecture.md](04-architecture.md), [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal), and [39-load-test-findings.md](39-load-test-findings.md).
+If heap still grows per refresh, look for something else holding retired `CompiledRuleset` / `KieBase` references (a heap dump's dominator tree shows them). See [04-architecture.md](04-architecture.md) and [ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18).
 
 **Verification**:
 ```bash
@@ -516,7 +509,7 @@ curl -s http://localhost:8080/admin/memory/info | jq '.memoryPools'
 # Increase heap size in docker-compose.yml
 JAVA_OPTS=-Xms512m -Xmx4096m  # Increase from 2048 to 4096
 
-# Memory pressure typically comes from compiled rules (kieContainer) — not from
+# Memory pressure typically comes from compiled rules (one KieBase per rule ID) — not from
 # the Redis decorator (DRL JSON lives in Redis, not the JVM heap). Reduce
 # pressure by sharding rules across more instances or trimming rule complexity.
 ```
@@ -568,7 +561,7 @@ docker compose exec app tail -100 /tmp/gc-logs/gc.log
 ```
 
 **Solution**:
-1. Ensure latest code (Drools 10 `updateToVersion` + `KieRepository.removeKieModule` pattern, post-2026-05-10 — the older `dispose()` approach is superseded; see [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal))
+1. Ensure latest code (per-rule-ID KieBases, post-2026-11-18 — see [ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18))
 2. Increase heap size
 3. Reduce memory usage (fewer rules)
 

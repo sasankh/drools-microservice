@@ -12,32 +12,23 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.kie.api.KieServices;
-import org.kie.api.runtime.KieContainer;
+import org.kie.api.KieBase;
 import org.kie.api.runtime.KieSession;
 
 @DisplayName("RuleExecutor")
 class RuleExecutorTest {
 
-  private KieServices kieServices;
-
-  @BeforeEach
-  void setUp() {
-    kieServices = KieServices.Factory.get();
-  }
-
-  /** Helper: compile a single rule and return a fresh KieContainer at its release. */
-  private KieContainer compileRule(Rule rule) {
-    RuleCompiler compiler = new RuleCompiler(kieServices, new DrlSanitizer());
-    RuleCompiler.CompilationResult result = compiler.compileRules(List.of(rule));
+  /** Helper: compile a single rule ID into its own KieBase (ADR-025). */
+  private KieBase compileRule(Rule rule) {
+    RuleCompiler compiler = new RuleCompiler(new DrlSanitizer());
+    RuleCompiler.RuleCompilation result = compiler.compileRule(rule);
     assertThat(result.isSuccess())
         .as("Rule compilation should succeed for: " + rule.getRuleId())
         .isTrue();
-    return kieServices.newKieContainer(result.getReleaseId());
+    return result.ruleset().kieBase();
   }
 
   @Nested
@@ -48,7 +39,7 @@ class RuleExecutorTest {
     @DisplayName("executes a valid rule and returns modified data")
     void testExecuteRule_ValidRule_ReturnsModifiedData() {
       Rule rule = RuleTestUtils.createSimpleRule("pricing.discount.simple");
-      KieContainer kieContainer = compileRule(rule);
+      KieBase kieBase = compileRule(rule);
       ExecutorService executor = Executors.newSingleThreadExecutor();
       RuleExecutor ruleExecutor = new RuleExecutor(executor);
 
@@ -56,7 +47,7 @@ class RuleExecutorTest {
       inputData.put("amount", 100);
 
       RuleExecutor.ExecutionResult result =
-          ruleExecutor.executeRule(kieContainer, "pricing.discount.simple", inputData);
+          ruleExecutor.executeRule(kieBase, "pricing.discount.simple", inputData);
 
       assertThat(result.isSuccess()).isTrue();
       assertThat(result.getResult()).containsEntry("executed", true);
@@ -65,14 +56,13 @@ class RuleExecutorTest {
       assertThat(result.getErrorMessage()).isNull();
 
       executor.shutdown();
-      kieContainer.dispose();
     }
 
     @Test
     @DisplayName("completes within the specified timeout")
     void testExecuteRule_WithTimeout_CompletesSuccessfully() {
       Rule rule = RuleTestUtils.createSimpleRule("test.timeout.fast");
-      KieContainer kieContainer = compileRule(rule);
+      KieBase kieBase = compileRule(rule);
       ExecutorService executor = Executors.newSingleThreadExecutor();
       RuleExecutor ruleExecutor = new RuleExecutor(executor);
 
@@ -81,13 +71,12 @@ class RuleExecutorTest {
 
       // Set a generous 5-second timeout for a rule that completes instantly
       RuleExecutor.ExecutionResult result =
-          ruleExecutor.executeRule(kieContainer, "test.timeout.fast", inputData, 5);
+          ruleExecutor.executeRule(kieBase, "test.timeout.fast", inputData, 5);
 
       assertThat(result.isSuccess()).isTrue();
       assertThat(result.getExecutionTimeMs()).isLessThan(5000);
 
       executor.shutdown();
-      kieContainer.dispose();
     }
 
     @Test
@@ -122,14 +111,14 @@ class RuleExecutorTest {
           """;
       Rule rule =
           new Rule("multi.rules", content, com.company.drools.core.model.RuleMetadata.createNew());
-      KieContainer kieContainer = compileRule(rule);
+      KieBase kieBase = compileRule(rule);
       ExecutorService executor = Executors.newSingleThreadExecutor();
       RuleExecutor ruleExecutor = new RuleExecutor(executor);
 
       Map<String, Object> inputData = new HashMap<>();
 
       RuleExecutor.ExecutionResult result =
-          ruleExecutor.executeRule(kieContainer, "multi.rules", inputData);
+          ruleExecutor.executeRule(kieBase, "multi.rules", inputData);
 
       assertThat(result.isSuccess()).isTrue();
       assertThat(result.getResult()).containsEntry("step1", true);
@@ -137,7 +126,43 @@ class RuleExecutorTest {
       assertThat(result.getResult()).containsEntry("step3", true);
 
       executor.shutdown();
-      kieContainer.dispose();
+    }
+
+    @Test
+    @DisplayName("fires only the rules of the KieBase it is given (ADR-025 isolation)")
+    void testExecuteRule_OnlyGivenKieBaseFires() {
+      KieBase simpleBase = compileRule(RuleTestUtils.createSimpleRule("iso.simple"));
+      String otherContent =
+          """
+          package com.company.rules.iso
+
+          import java.util.Map
+
+          rule "other"
+          when
+              $data : Map()
+          then
+              $data.put("other", true);
+          end
+          """;
+      KieBase otherBase =
+          compileRule(
+              new Rule(
+                  "iso.other",
+                  otherContent,
+                  com.company.drools.core.model.RuleMetadata.createNew()));
+      ExecutorService executor = Executors.newSingleThreadExecutor();
+      RuleExecutor ruleExecutor = new RuleExecutor(executor);
+
+      RuleExecutor.ExecutionResult simple =
+          ruleExecutor.executeRule(simpleBase, "iso.simple", new HashMap<>());
+      RuleExecutor.ExecutionResult other =
+          ruleExecutor.executeRule(otherBase, "iso.other", new HashMap<>());
+
+      assertThat(simple.getResult()).containsEntry("executed", true).doesNotContainKey("other");
+      assertThat(other.getResult()).containsEntry("other", true).doesNotContainKey("executed");
+
+      executor.shutdown();
     }
   }
 
@@ -149,10 +174,10 @@ class RuleExecutorTest {
     @SuppressWarnings("java:S2925")
     @DisplayName("throws TimeoutException when execution exceeds timeout")
     void testExecuteRule_ExceedsTimeout_ThrowsTimeoutException() {
-      // Use a mock KieContainer that blocks the session thread
-      KieContainer mockContainer = mock(KieContainer.class);
+      // Use a mock KieBase whose session blocks the session thread
+      KieBase mockKieBase = mock(KieBase.class);
       KieSession mockSession = mock(KieSession.class);
-      when(mockContainer.newKieSession()).thenReturn(mockSession);
+      when(mockKieBase.newKieSession()).thenReturn(mockSession);
       when(mockSession.fireAllRules(anyInt()))
           .thenAnswer(
               invocation -> {
@@ -166,7 +191,7 @@ class RuleExecutorTest {
 
       Map<String, Object> inputData = new HashMap<>();
 
-      assertThatThrownBy(() -> ruleExecutor.executeRule(mockContainer, "slow.rule", inputData, 1))
+      assertThatThrownBy(() -> ruleExecutor.executeRule(mockKieBase, "slow.rule", inputData, 1))
           .isInstanceOf(TimeoutException.class)
           .hasMessageContaining("slow.rule");
 
@@ -177,7 +202,7 @@ class RuleExecutorTest {
     @DisplayName("completes successfully when finishing just before timeout")
     void testExecuteRule_NearTimeout_CompletesSuccessfully() {
       Rule rule = RuleTestUtils.createSimpleRule("test.neartimeout");
-      KieContainer kieContainer = compileRule(rule);
+      KieBase kieBase = compileRule(rule);
       ExecutorService executor = Executors.newSingleThreadExecutor();
       RuleExecutor ruleExecutor = new RuleExecutor(executor);
 
@@ -185,22 +210,21 @@ class RuleExecutorTest {
 
       // Simple rule completes almost instantly; 2-second timeout is generous
       RuleExecutor.ExecutionResult result =
-          ruleExecutor.executeRule(kieContainer, "test.neartimeout", inputData, 2);
+          ruleExecutor.executeRule(kieBase, "test.neartimeout", inputData, 2);
 
       assertThat(result.isSuccess()).isTrue();
       assertThat(result.getExecutionTimeMs()).isLessThan(2000);
 
       executor.shutdown();
-      kieContainer.dispose();
     }
 
     @Test
     @SuppressWarnings("java:S2925")
     @DisplayName("respects custom timeout configuration")
     void testExecuteRule_CustomTimeout_RespectsConfiguration() {
-      KieContainer mockContainer = mock(KieContainer.class);
+      KieBase mockKieBase = mock(KieBase.class);
       KieSession mockSession = mock(KieSession.class);
-      when(mockContainer.newKieSession()).thenReturn(mockSession);
+      when(mockKieBase.newKieSession()).thenReturn(mockSession);
       when(mockSession.fireAllRules(anyInt()))
           .thenAnswer(
               invocation -> {
@@ -215,12 +239,12 @@ class RuleExecutorTest {
 
       // Custom timeout of 1 second should trigger before the 5s sleep
       assertThatThrownBy(
-              () -> ruleExecutor.executeRule(mockContainer, "custom.timeout", inputData, 1))
+              () -> ruleExecutor.executeRule(mockKieBase, "custom.timeout", inputData, 1))
           .isInstanceOf(TimeoutException.class);
 
       // Verify the timeout value is in the exception
       try {
-        ruleExecutor.executeRule(mockContainer, "custom.timeout", inputData, 1);
+        ruleExecutor.executeRule(mockKieBase, "custom.timeout", inputData, 1);
       } catch (TimeoutException e) {
         assertThat(e.getTimeoutSeconds()).isEqualTo(1);
       } catch (Exception _) {
@@ -234,9 +258,9 @@ class RuleExecutorTest {
     @SuppressWarnings("java:S2925")
     @DisplayName("halts the running session when execution times out (P3)")
     void testExecuteRule_Timeout_HaltsSession() {
-      KieContainer mockContainer = mock(KieContainer.class);
+      KieBase mockKieBase = mock(KieBase.class);
       KieSession mockSession = mock(KieSession.class);
-      when(mockContainer.newKieSession()).thenReturn(mockSession);
+      when(mockKieBase.newKieSession()).thenReturn(mockSession);
       when(mockSession.fireAllRules(anyInt()))
           .thenAnswer(
               invocation -> {
@@ -248,7 +272,7 @@ class RuleExecutorTest {
       RuleExecutor ruleExecutor = new RuleExecutor(executor);
 
       Map<String, Object> data = new HashMap<>();
-      assertThatThrownBy(() -> ruleExecutor.executeRule(mockContainer, "runaway.rule", data, 1))
+      assertThatThrownBy(() -> ruleExecutor.executeRule(mockKieBase, "runaway.rule", data, 1))
           .isInstanceOf(TimeoutException.class);
 
       // The timeout path must call halt() so the runaway firing is stopped, not leaked.
@@ -265,7 +289,7 @@ class RuleExecutorTest {
     @Test
     @DisplayName("throws ServiceUnavailableException when the pool rejects the task (P3)")
     void testExecuteRule_PoolSaturated_ThrowsServiceUnavailable() {
-      KieContainer mockContainer = mock(KieContainer.class);
+      KieBase mockKieBase = mock(KieBase.class);
       // Executor that always rejects — simulates a saturated pool under AbortPolicy.
       Executor rejecting =
           command -> {
@@ -274,7 +298,7 @@ class RuleExecutorTest {
       RuleExecutor ruleExecutor = new RuleExecutor(rejecting);
 
       Map<String, Object> data = new HashMap<>();
-      assertThatThrownBy(() -> ruleExecutor.executeRule(mockContainer, "rejected.rule", data, 5))
+      assertThatThrownBy(() -> ruleExecutor.executeRule(mockKieBase, "rejected.rule", data, 5))
           .isInstanceOf(ServiceUnavailableException.class);
     }
   }
@@ -287,7 +311,7 @@ class RuleExecutorTest {
     @DisplayName("uses the provided custom thread pool executor")
     void testExecuteRule_UsesCustomThreadPool() {
       Rule rule = RuleTestUtils.createSimpleRule("test.threadpool");
-      KieContainer kieContainer = compileRule(rule);
+      KieBase kieBase = compileRule(rule);
 
       // Track which thread runs the rule
       List<String> threadNames = new CopyOnWriteArrayList<>();
@@ -309,21 +333,20 @@ class RuleExecutorTest {
       Map<String, Object> inputData = new HashMap<>();
 
       RuleExecutor.ExecutionResult result =
-          ruleExecutor.executeRule(kieContainer, "test.threadpool", inputData);
+          ruleExecutor.executeRule(kieBase, "test.threadpool", inputData);
 
       assertThat(result.isSuccess()).isTrue();
       assertThat(threadNames).isNotEmpty();
       assertThat(threadNames.get(0)).isEqualTo("custom-rule-thread");
 
       customExecutor.shutdown();
-      kieContainer.dispose();
     }
 
     @Test
     @DisplayName("parallel executions use independent sessions")
     void testExecuteRule_ParallelExecutions_IndependentSessions() throws Exception {
       Rule rule = RuleTestUtils.createSimpleRule("test.parallel");
-      KieContainer kieContainer = compileRule(rule);
+      KieBase kieBase = compileRule(rule);
       ExecutorService executor = Executors.newFixedThreadPool(5);
       RuleExecutor ruleExecutor = new RuleExecutor(executor);
 
@@ -341,7 +364,7 @@ class RuleExecutorTest {
                     inputData.put("index", index);
 
                     RuleExecutor.ExecutionResult result =
-                        ruleExecutor.executeRule(kieContainer, "test.parallel", inputData);
+                        ruleExecutor.executeRule(kieBase, "test.parallel", inputData);
                     results.add(result);
                   } catch (Exception e) {
                     errors.add(e);
@@ -364,7 +387,6 @@ class RuleExecutorTest {
       }
 
       executor.shutdown();
-      kieContainer.dispose();
     }
   }
 
@@ -375,9 +397,8 @@ class RuleExecutorTest {
     @Test
     @DisplayName("returns failure when rule throws an exception")
     void testExecuteRule_RuleThrowsException_ReturnsFailure() {
-      KieContainer mockContainer = mock(KieContainer.class);
-      when(mockContainer.newKieSession())
-          .thenThrow(new RuntimeException("Session creation failed"));
+      KieBase mockKieBase = mock(KieBase.class);
+      when(mockKieBase.newKieSession()).thenThrow(new RuntimeException("Session creation failed"));
 
       ExecutorService executor = Executors.newSingleThreadExecutor();
       RuleExecutor ruleExecutor = new RuleExecutor(executor);
@@ -385,7 +406,7 @@ class RuleExecutorTest {
       Map<String, Object> inputData = new HashMap<>();
 
       RuleExecutor.ExecutionResult result =
-          ruleExecutor.executeRule(mockContainer, "error.rule", inputData);
+          ruleExecutor.executeRule(mockKieBase, "error.rule", inputData);
 
       assertThat(result.isSuccess()).isFalse();
       assertThat(result.getErrorMessage()).contains("Session creation failed");
@@ -396,9 +417,9 @@ class RuleExecutorTest {
     @Test
     @DisplayName("handles null input data gracefully")
     void testExecuteRule_InvalidInputData_HandlesGracefully() {
-      KieContainer mockContainer = mock(KieContainer.class);
+      KieBase mockKieBase = mock(KieBase.class);
       KieSession mockSession = mock(KieSession.class);
-      when(mockContainer.newKieSession()).thenReturn(mockSession);
+      when(mockKieBase.newKieSession()).thenReturn(mockSession);
       when(mockSession.fireAllRules(anyInt())).thenReturn(0);
 
       ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -406,7 +427,7 @@ class RuleExecutorTest {
 
       // Passing null data -- the executor should either handle it or report an error
       RuleExecutor.ExecutionResult result =
-          ruleExecutor.executeRule(mockContainer, "null.data", null);
+          ruleExecutor.executeRule(mockKieBase, "null.data", null);
 
       // The result should not be an unhandled exception -- it should either succeed or fail
       assertThat(result).isNotNull();

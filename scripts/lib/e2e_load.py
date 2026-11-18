@@ -6,8 +6,8 @@ Used by scripts/e2e-load-test.sh. Python 3 stdlib only.
 Why this exists (2026-11-17): the previous bash/curl load step opened a new TCP connection per
 request, exhausted Linux's ephemeral ports (~28k, 60 s TIME_WAIT) in ~30 s, and its workers then
 died silently under `set -e` -- reporting "0 errors / PASS" for a test that had stopped. This
-harness reuses connections, counts every exception, checks result values (with all 17 sample
-rules loaded, so rule stacking applies), detects stalls, and exits non-zero on any failed gate.
+harness reuses connections, counts every exception, checks result values (each rule_id runs
+only its own DRL file -- ADR-025), detects stalls, and exits non-zero on any failed gate.
 
 Usage:
   e2e_load.py --workers 20 --duration 300 --reload-at 120 --min-rps 200 --label e2e
@@ -27,34 +27,38 @@ def near(x, y):
     return isinstance(x, (int, float)) and abs(x - y) < 0.005
 
 
-# (payload, predicate on result) -- expected values assume ALL 17 sample rules are loaded, so
-# every rule whose LHS matches the input fires (e.g. pricing.discount.simple also applies 10%).
+# (payload, predicate on result). Rules are isolated per rule_id (ADR-025): a request runs ONLY
+# the rules in its own DRL file, so these are single-rule values (VIP $100 -> 80, not the old
+# stacked 72). Several payloads would match other rules' LHS too; the values prove they don't fire.
 CASES = [
     ({"rule_id": "pricing.discount.simple", "data": {"amount": 150}},
      lambda r: near(r["amount"], 135.0) and near(r["discount"], 15.0)),
     ({"rule_id": "pricing.discount.vip", "data": {"customerType": "VIP", "amount": 100}},
-     lambda r: near(r["amount"], 72.0)),
+     lambda r: near(r["amount"], 80.0) and r.get("customerTier") == "VIP"),
     ({"rule_id": "pricing.discount.bulk", "data": {"quantity": 15, "amount": 200}},
-     lambda r: near(r["amount"], 153.0) and r.get("qualifyingQuantity") == 15),
+     lambda r: near(r["amount"], 170.0) and r.get("qualifyingQuantity") == 15),
     ({"rule_id": "pricing.discount.first-time", "data": {"isFirstTimeCustomer": True, "amount": 100}},
-     lambda r: near(r["amount"], 85.5)),
+     lambda r: near(r["amount"], 95.0) and r.get("customerStatus") == "First Time"),
     ({"rule_id": "pricing.loyalty.salience", "data": {"loyaltyMember": True, "amount": 100}},
-     lambda r: near(r["amount"], 76.5) and r.get("loyaltyApplied") is True),
+     lambda r: near(r["amount"], 85.0) and r.get("loyaltyApplied") is True and "discount" not in r),
     ({"rule_id": "seasonal.holiday.blackfriday", "data": {"promotionCode": "BLACK2024", "amount": 200}},
-     lambda r: near(r["amount"], 135.0) and r.get("promotionValid") is True),
+     lambda r: near(r["amount"], 150.0) and r.get("promotionValid") is True),
     ({"rule_id": "seasonal.holiday.discount", "data": {"isHolidaySeason": True, "amount": 100}},
-     lambda r: near(r["amount"], 79.2)),
+     lambda r: near(r["amount"], 88.0)),
     ({"rule_id": "pricing.shipping.standard", "data": {"shippingType": "standard", "weight": 0.5}},
      lambda r: near(r["shippingCost"], 5.99) and r.get("estimatedDays") == 5),
     ({"rule_id": "pricing.shipping.express", "data": {"shippingType": "express", "weight": 3, "amount": 150}},
-     lambda r: r.get("freeShipping") is True and near(r["shippingCost"], 0.0)),
+     lambda r: r.get("freeShipping") is True and near(r["shippingCost"], 0.0) and near(r["amount"], 150.0)),
     ({"rule_id": "validation.customer.age", "data": {"customerAge": 15}},
      lambda r: r.get("validationResult") == "REJECTED" and r.get("eligible") is False),
     ({"rule_id": "validation.customer.credit", "data": {"creditScore": 720, "requestedAmount": 10000}},
      lambda r: r.get("creditTier") == "Good" and near(r["approvedAmount"], 5000.0)),
-    ({"rule_id": "pricing.bundle.accumulate",
-      "data": {"items": [{"price": 50, "stockLevel": 9}, {"price": 60, "stockLevel": 9}]}},
-     lambda r: near(r["bundleTotal"], 110.0) and near(r["bundleFinalAmount"], 99.0)),
+    ({"rule_id": "pricing.bundle.accumulate", "data": {"items": [{"price": 50}, {"price": 60}]}},
+     lambda r: near(r["bundleTotal"], 110.0) and near(r["bundleFinalAmount"], 99.0)
+     and "allItemsInStock" not in r),
+    # Before isolation this failed: the bundle rule's LHS cast the missing price and threw an NPE.
+    ({"rule_id": "validation.cart.forall", "data": {"items": [{"stockLevel": 10}]}},
+     lambda r: r.get("allItemsInStock") is True and "bundleTotal" not in r),
     ({"rule_id": "validation.email.compound",
       "data": {"email": "alice@company.com", "customerType": "internal"}},
      lambda r: r.get("emailValidationResult") == "VALID"),

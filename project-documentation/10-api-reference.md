@@ -130,7 +130,7 @@ Content-Type: application/json
 }
 ```
 
-`result` is the modified `data` map after rules fire. `execution_time_ms` is the elapsed time from `KieSession.fireAllRules()` start to finish.
+`result` is the modified `data` map after rules fire. Only the rules in the requested `rule_id`'s DRL file run; other loaded rules never fire, even if their conditions match ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)). `execution_time_ms` is the elapsed time from `KieSession.fireAllRules()` start to finish.
 
 **Error responses**:
 
@@ -301,7 +301,7 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/rules | jq
 | Field | Notes |
 |---|---|
 | `status` | Enum: `ACTIVE`, `INACTIVE`, `ERROR`. |
-| `loaded_at` | ISO-8601 timestamp when this rule was last loaded into the KieContainer. |
+| `loaded_at` | ISO-8601 timestamp when this rule was last compiled and installed (its own KieBase). |
 | `last_modified` | ISO-8601 timestamp from the storage layer (S3 LastModified). **`null` if the rule has never been refetched** — it's set by storage operations, not on initial load. |
 | `execution_count` | Increments per `/execute-rule` call. Starts at 0 for unused rules. |
 | `avg_execution_time_ms` | Tracked in [`RuleMetadata`](../src/main/java/com/company/drools/core/model/RuleMetadata.java) using **incremental averaging** (Welford's method) to avoid numeric overflow. `0.0` for unused rules. |
@@ -315,7 +315,7 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/rules | jq
 
 ### `POST /admin/refresh-rules` — Reload all rules
 
-Pipeline: (1) `RedisCachedRuleStorage.refreshCache()` clears Redis keys matching the prefix and re-populates them from base storage (S3/file/memory) via write-through — no-op when `REDIS_ENABLED=false`; (2) the resulting `Rule` set is recompiled into a fresh versioned `KieModule` via `KieFileSystem` + `KieBuilder`; (3) `KieContainer.updateToVersion(ReleaseId)` atomically swaps under a brief write lock; (4) `KieRepository.removeKieModule(oldReleaseId)` releases the prior `ProjectClassLoader` (Drools 10 does NOT auto-clean); (5) when `REDIS_PUBSUB_ENABLED=true`, `RuleRefreshPublisher.publishBulkRefresh()` emits `{event_type: RULE_REFRESHED_BULK, source_instance_id}` to channel `drools:rule:events` so other instances reload + swap. In-flight `/execute-rule` requests keep their existing `KieBase` until session disposal. See [04-architecture.md](04-architecture.md), [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal), [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20), and [39-load-test-findings.md](39-load-test-findings.md) for measured behavior at 1000 rules.
+Pipeline: (1) `RedisCachedRuleStorage.refreshCache()` clears Redis keys matching the prefix and re-populates them from base storage (S3/file/memory) via write-through — no-op when `REDIS_ENABLED=false`; (2) rule IDs no longer in storage are removed, and each remaining rule ID is compiled into its own `KieBase` ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)); (3) each compiled rule ID's handle is swapped atomically in the `CompiledRulesetRegistry` — an ID that fails to compile keeps its previous version (or is recorded as `ERROR`), and other IDs are unaffected; (4) when `REDIS_PUBSUB_ENABLED=true`, `RuleRefreshPublisher.publishBulkRefresh()` emits `{event_type: RULE_REFRESHED_BULK, source_instance_id}` to channel `drools:rule:events` so other instances reload + swap. In-flight `/execute-rule` requests finish on the handle they took. See [04-architecture.md](04-architecture.md), [ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18), [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20), and [39-load-test-findings.md](39-load-test-findings.md) for measured behavior at 1000 rules.
 
 ```bash
 curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/refresh-rules | jq
@@ -350,7 +350,7 @@ curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/re
 
 **Response (full failure)**: HTTP 500 with `INTERNAL_ERROR` envelope.
 
-> When this returns, the new rule set is live for subsequent requests. In-flight requests use whichever `KieBase` was current when the `KieSession` was created — Drools 10's `updateToVersion` is non-blocking for in-flight sessions.
+> When this returns, the new rule set is live for subsequent requests. In-flight requests use whichever `KieBase` their rule ID had when the request took it; execution takes no lock, so a refresh never blocks them.
 
 **Source**: [`AdminController.java:415-461`](../src/main/java/com/company/drools/api/controller/AdminController.java#L415-L461).
 

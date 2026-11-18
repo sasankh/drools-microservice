@@ -737,7 +737,7 @@ curl http://localhost:8081/actuator/metrics/http.server.requests
 1. ✅ Check memory usage: `free -h` and JVM metrics
 2. ✅ Increase heap size: Set `-Xmx` parameter
 3. ✅ Enable GC logging: Add GC flags to `JAVA_OPTS`
-4. ✅ Heap pressure from compiled rules: drop `REDIS_ENABLED=false` (no effect — Redis stores DRL JSON, not compiled `KieBase`), or scale horizontally. The compiled state lives in `kieContainer` per instance and is bounded by rule count, not cache size.
+4. ✅ Heap pressure from compiled rules: drop `REDIS_ENABLED=false` (no effect — Redis stores DRL JSON, not compiled `KieBase`), or scale horizontally. The compiled state lives in the `CompiledRulesetRegistry` (one KieBase per rule ID) per instance and is bounded by rule count, not cache size.
 
 ### Emergency Recovery Procedures
 

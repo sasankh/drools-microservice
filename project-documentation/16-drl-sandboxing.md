@@ -52,9 +52,9 @@ The sandbox stops all of that **before compilation** — text-level scan, not ru
        ▼
    DrlSanitizer.sanitize(ruleId, drlContent)
        │
-       ├── ANY violation? → reject; log; rule excluded from KieContainer
+       ├── ANY violation? → reject; log; that rule ID is not compiled (other IDs unaffected)
        │
-       └── all clear → proceed to RuleCompiler → KieBuilder.buildAll()
+       └── all clear → RuleCompiler compiles that rule ID into its own KieBase (KnowledgeBuilder)
 ```
 
 Implementation: [`RuleCompiler`](../src/main/java/com/company/drools/core/engine/RuleCompiler.java) calls `DrlSanitizer.sanitize()` on every rule before submitting to Drools. A failed rule does not abort the whole refresh — it's reported in `POST /admin/refresh-rules` response under `errors[]` and the other rules continue.

@@ -285,7 +285,7 @@ Fluent async assertions (`await().atMost(...).until(...)`). Used sparingly — m
 | Reactive (WebFlux, Reactor) | Synchronous request/response is sufficient. Async only inside the rule executor (`CompletableFuture` for timeout cancellation). |
 | Spring Cloud | Single-service, not microservices-ecosystem deployment. No service registry / config server. |
 | Terraform / Pulumi / CDK | No IaC in repo. AWS deployment is documented as a reference architecture in [06-deployment.md](06-deployment.md) but provisioning is owned by the deploying team. |
-| Caffeine cache | No per-instance cache layer in scope — shared cache lives in Redis via `RedisCachedRuleStorage`. Execution reads from the compiled `kieContainer`, not a key-value cache. |
+| Caffeine cache | No per-instance cache layer in scope — shared cache lives in Redis via `RedisCachedRuleStorage`. Execution reads the rule ID's compiled KieBase from the in-memory `CompiledRulesetRegistry`, not a key-value cache. |
 | Hystrix | Resilience4j replaces it. |
 | Lombok in production code | Pulled as `provided` scope only; runtime annotations like `@Slf4j` use Lombok at compile time. The runtime jar excludes Lombok. |
 | Apache HttpClient v5 (raw) | Used transitively via AWS SDK v2 `apache-client`. Not used directly. |

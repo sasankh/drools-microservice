@@ -15,16 +15,16 @@
 A stateless evaluation session. Created from a `KieBase`, used once for a single `fireAllRules()` call, then disposed. Each `/execute-rule` request creates a new `KieSession` — they are not reused. This is the unit of thread-isolation for rule execution.
 
 ### `KieBase`
-The compiled rule set. Immutable once compiled. Multiple `KieSession`s can be created from one `KieBase`. In this project, the `KieBase` is held by the `KieContainer`.
+The compiled rule set. Immutable once compiled. Multiple `KieSession`s can be created from one `KieBase`. In this project each rule ID (one DRL file) has its own `KieBase`, held in an immutable `CompiledRuleset` in the `CompiledRulesetRegistry` ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)).
 
 ### `KieContainer`
-The top-level Drools container that holds compiled `KieBase` objects. **Memory-heavy** — holds compiled bytecode for all rules. Since the 2026-05-10 Drools 10 migration, the service holds a **single long-lived `KieContainer`** and updates it in place via `KieContainer.updateToVersion(ReleaseId)` on every rule refresh. The old versioned `KieModule` is explicitly removed from the `KieRepository` after the swap (Drools 10 does **not** auto-clean — verified by load test). See [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal).
+The top-level Drools container that holds compiled `KieBase` objects. **The service no longer uses one** ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18), 2026-11-18): `RuleCompiler` builds a separate `KieBase` per rule ID with `KnowledgeBuilder` + `KnowledgeBaseFactory`, with no `KieModule` or `KieRepository` involved. From 2026-05-10 to 2026-11-18 the service held a single long-lived `KieContainer` with all rules, updated in place via `KieContainer.updateToVersion(ReleaseId)`. See [ADR-003](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal) for that history.
 
 ### `KieBuilder`
-Drools API for compiling `.drl` text into a `KieContainer`. Invoked by [`RuleCompiler`](../src/main/java/com/company/drools/core/engine/RuleCompiler.java) after the `DrlSanitizer` has approved the content.
+Drools API for compiling `.drl` text into a `KieContainer`. Not used since [ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18): [`RuleCompiler`](../src/main/java/com/company/drools/core/engine/RuleCompiler.java) now compiles each rule ID with a `KnowledgeBuilder` after the `DrlSanitizer` has approved the content.
 
 ### `KieFileSystem`
-In-memory virtual filesystem that the `KieBuilder` reads from. We populate it with `.drl` content fetched from S3 / local files / in-memory.
+In-memory virtual filesystem that the `KieBuilder` reads from. Not used since ADR-025 (2026-11-18); each rule's DRL text is passed straight to a `KnowledgeBuilder`.
 
 ### Working memory
 Drools terminology for the set of facts (objects) currently being matched against rules during a single `KieSession.fireAllRules()` call. In this project's traditional-DRL pattern, working memory contains a single `Map<String,Object>` (the request's `data` field).
@@ -42,7 +42,7 @@ A specific instance of a rule whose `when` clause has matched against a specific
 Executing a rule's `then` block. "Fire" is the verb Drools uses; this project documentation uses it interchangeably with "execute".
 
 ### `salience`
-A rule attribute that sets execution priority. Higher salience fires first. In this project's sample rules, **none use salience** — which is why rules stack in unpredictable order. See [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md).
+A rule attribute that sets execution priority. Higher salience fires first. It orders rules **within one rule ID's file**; rules in other files never fire on the same request ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)). Among the sample rules only `pricing.loyalty.salience` uses it. See [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md).
 
 ### `no-loop`
 A rule attribute that prevents the rule from re-firing if its own `then` block modifies a fact in a way that would re-match its `when`. Without `no-loop true`, you can get infinite loops (capped by `maxRuleFirings = 10000`).
@@ -103,7 +103,7 @@ Read-through Redis cache decorator over the base `RuleStorage` (S3/local/memory)
 Publishes `RefreshEvent`s to the Redis pub/sub channel (default `drools:rule:events`) when a local refresh completes. Wrapped in circuit breaker; fire-and-forget — publish failures log WARN but don't propagate. Active only when `REDIS_ENABLED=true && REDIS_PUBSUB_ENABLED=true`.
 
 ### `RuleRefreshSubscriber`
-Spring `MessageListener` that receives `RefreshEvent`s and refreshes this task's `kieContainer`. Skips events from its own instance (per-instance UUID dedup via `droolsInstanceId` bean). For `RULE_REFRESHED`, fetches the rule from `RuleStorage` (Redis is already populated by the publisher) and calls `DroolsEngineService.loadOrReplaceRule()`. For `RULE_REFRESHED_BULK`, calls `loadRules(getAllRules())`. For `RULE_DELETED`, logs INFO (auto-deletion deferred to a future iteration).
+Spring `MessageListener` that receives `RefreshEvent`s and refreshes this task's compiled rulesets. Skips events from its own instance (per-instance UUID dedup via `droolsInstanceId` bean). For `RULE_REFRESHED`, fetches the rule from `RuleStorage` (Redis is already populated by the publisher) and calls `DroolsEngineService.loadOrReplaceRule()`. For `RULE_REFRESHED_BULK`, calls `loadRules(getAllRules())`. For `RULE_DELETED`, calls `DroolsEngineService.removeRule()` for that rule ID.
 
 ### `RefreshEvent`
 JSON event published on `drools:rule:events`. Fields: `event` (enum: `RULE_REFRESHED` / `RULE_REFRESHED_BULK` / `RULE_DELETED`), `rule_id`, `source_instance_id` (UUID), `timestamp`. Schema is part of the cross-service contract — see [04-architecture.md](04-architecture.md).
@@ -112,7 +112,7 @@ JSON event published on `drools:rule:events`. Fields: `event` (enum: `RULE_REFRE
 Startup guard active only on the `prod` profile ([`@Profile("prod")`](../src/main/java/com/company/drools/config/RedisSecurityValidator.java)). When Redis is enabled on `prod`, it throws `IllegalStateException` (refusing to start) unless `REDIS_URL` uses the `rediss://` TLS scheme **and** carries credentials (`rediss://user:password@host:port`). Enforces security finding #28 on production. Non-prod profiles (local/dev/docker with LocalStack Redis) are unaffected. See [ADR-021](36-architecture-decision-records.md#adr-021-redis-prod-tlsauth-enforcement--removal-of-jackson-default-typing-2026-08-20).
 
 ### `refreshLock`
-A dedicated `ReentrantLock` in `DroolsEngineService`, **separate** from the `rulesLock` read-write lock that guards the compiled state. All refresh paths (`loadRules`, `loadOrReplaceRule`) take `refreshLock` to serialize refreshes with each other, while the actual rule compile still happens **outside** the read-write write lock (which is held only for the brief state swap). Pub/sub-driven sibling refreshes run on a dedicated single-thread `ruleRefreshListenerExecutor`. See [ADR-020](36-architecture-decision-records.md#adr-020-refreshlock-separated-from-the-rule-read-write-lock-2026-08-20).
+A dedicated `ReentrantLock` in `DroolsEngineService` that serializes every mutation (`loadRules`, `loadOrReplaceRule`, `removeRule`). Since [ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18) it is the only engine lock: the old `rulesLock` read-write lock is gone, each rule ID's compiled handle is installed with an atomic per-ID map put, and execution takes no lock. Pub/sub-driven sibling refreshes run on a dedicated single-thread `ruleRefreshListenerExecutor`. See [ADR-020](36-architecture-decision-records.md#adr-020-refreshlock-separated-from-the-rule-read-write-lock-2026-08-20).
 
 ### `ServiceUnavailableException`
 Exception ([`api/exception/ServiceUnavailableException.java`](../src/main/java/com/company/drools/api/exception/ServiceUnavailableException.java)) mapped to HTTP **503**. Raised when the rule-execution thread pool sheds load: the pool uses an `AbortPolicy`, so once the pool and queue are full, new submissions are rejected and surfaced as this exception. A distinct 503 source from circuit-breaker-open and graceful-shutdown refusal. See [ADR-019](36-architecture-decision-records.md#adr-019-rule-execution-timeout-halt--thread-pool-load-shed-503-2026-08-20).
@@ -141,14 +141,17 @@ The 17 `.drl` files in [`sample-rules/`](../sample-rules/) (10 original + 7 adde
 ### LocalStack
 AWS service emulator. Used in dev for S3. Runs as a Docker container. `init-localstack.sh` populates the bucket with sample rules on container startup.
 
-### `updateToVersion` (rule loading) — formerly "atomic-swap"
-The current rule-load pattern (post-2026-05-10 Drools 10 migration). The rule set is compiled into a new versioned `KieModule` OUTSIDE the write lock; the lock is then briefly acquired to call `kieContainer.updateToVersion(newReleaseId)` (in-place version swap on the long-lived container); after release, the old `KieModule` is removed from the `KieRepository`. Prevents reader blocking during compilation. Replaces the earlier two-container atomic-swap-with-`dispose()` pattern. See [04-architecture.md](04-architecture.md) and [`DroolsEngineService.loadRules`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java).
+### `updateToVersion` (rule loading) — superseded 2026-11-18
+The rule-load pattern from 2026-05-10 to 2026-11-18, replaced by per-rule-ID KieBases ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)). The rule set is compiled into a new versioned `KieModule` OUTSIDE the write lock; the lock is then briefly acquired to call `kieContainer.updateToVersion(newReleaseId)` (in-place version swap on the long-lived container); after release, the old `KieModule` is removed from the `KieRepository`. Prevented reader blocking during compilation. It replaced the earlier two-container atomic-swap-with-`dispose()` pattern. See [ADR-003](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal).
 
 ### TOCTOU (Time-Of-Check-Time-Of-Use)
-A race condition where state checked at one moment differs at the moment of use. The service avoids this in rule lookup by doing a single atomic `loadedRules.get(ruleId)` + null check, instead of `containsKey` followed by `get`.
+A race condition where state checked at one moment differs at the moment of use. The service avoids this in rule lookup by taking the rule ID's immutable handle once with `CompiledRulesetRegistry.get(ruleId)` (an `Optional`), instead of `containsKey` followed by `get`.
 
-### Discount stacking
-The behavior where multiple sample rules fire on the same input, multiplicatively reducing the amount. Example: VIP $100 → $80 (VIP rule) → $72 (simple rule). **Not a bug** — happens because no rule sets `salience` or `activation-group`. See [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md).
+### Discount stacking (historical)
+Before 2026-11-18, every loaded rule whose conditions matched fired on every request, so discounts from different rule files compounded. Example: VIP $100 → $80 (VIP rule) → $72 (simple rule). **No longer happens** — see Rule isolation below and [ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18).
+
+### Rule isolation
+Since 2026-11-18, `rule_id` is an execution boundary: each rule ID (one DRL file) is compiled into its own `KieBase`, held in an immutable `CompiledRuleset` in the `CompiledRulesetRegistry`. A request opens a fresh `KieSession` on its own rule ID's base only, so rules from other files never fire. Refreshing one rule ID recompiles only that ID. To combine rules, call each rule ID. See [ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18).
 
 ### Rate-limit client identity
 How the rate limiter assigns a client identity: it keys **only** on `ip:{request.getRemoteAddr()}`. Application-level headers (`X-API-Key`, `Authorization: Bearer`, `X-Client-Id`) are unauthenticated on the public `/execute-rule` API and are **not** used for keying. `X-Forwarded-For` is ignored by default and honored (left-most entry) only when `trust-proxy` is enabled (see below). See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) and [ADR-018](36-architecture-decision-records.md#adr-018-rate-limiter-keys-on-ip-only-optional-trust-proxy-2026-08-20).
@@ -272,7 +275,7 @@ The number of distinct tag combinations on a metric. High cardinality (thousands
 Security pattern of having multiple independent controls. If one fails, others still protect. The service has 8 security layers (see [14-security-architecture.md](14-security-architecture.md)).
 
 ### Last-writer-wins
-The semantic of `Map.put(key, value)` — if multiple rules write the same key, the last one wins. Drives the discount-stacking behavior.
+The semantic of `Map.put(key, value)` — if multiple rules in the same file write the same key, the last one wins. Before rule isolation (2026-11-18) it also applied across files and drove the discount-stacking behavior.
 
 ### Idempotent
 An operation that produces the same result when called multiple times. `POST /execute-rule` is idempotent (rules are referentially transparent). `POST /admin/refresh-rules` is NOT idempotent (S3 contents may have changed).
@@ -283,8 +286,8 @@ Returning an error immediately rather than blocking/timing out. Circuit breakers
 ### Backpressure
 Slowing down or rejecting incoming work when the system can't keep up. The thread pool's `CallerRunsPolicy` is a backpressure mechanism.
 
-### Atomic-swap (deprecated term)
-Originally referred to replacing the entire `KieContainer` reference on rule refresh. **Superseded** by `KieContainer.updateToVersion(ReleaseId)` (Drools 10 in-place version swap) on 2026-05-10. The doc corpus uses both terms interchangeably for the locking guarantee (in-flight readers see a consistent `KieBase`); for the modern wiring see [04-architecture.md](04-architecture.md) and [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal).
+### Atomic-swap
+Originally referred to replacing the entire `KieContainer` reference on rule refresh (superseded by `updateToVersion` on 2026-05-10). Since 2026-11-18 it means swapping one rule ID's immutable `CompiledRuleset` handle in the `CompiledRulesetRegistry`: in-flight requests keep the handle they took and finish on that version. See [04-architecture.md](04-architecture.md) and [ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18).
 
 ### Stateless
 The service holds no per-request state across requests. Every replica handles every request identically. Enables horizontal scaling.

@@ -28,13 +28,13 @@ A high-performance business rule execution microservice built with Spring Boot a
 ```
 Client Request → REST API → Rule Engine → Storage Layer
                     ↓           ↓            ↓
-               Controller → kieContainer → RedisCachedRuleStorage decorator (opt-in)
-                            (in-memory      → S3 / LocalFile / In-Memory base storage
-                             compiled       (+ Redis pub/sub fan-out on refresh)
-                             rules)
+               Controller → KieBases     → RedisCachedRuleStorage decorator (opt-in)
+                            (one per rule   → S3 / LocalFile / In-Memory base storage
+                             ID, in-memory  (+ Redis pub/sub fan-out on refresh)
+                             compiled)
 ```
 
-`/execute-rule` reads compiled rules from the in-memory `kieContainer` only — it never touches Redis. The Redis decorator only sits in the refresh path (DRL text fetch from S3 → cache populate). Pub/sub events on `drools:rule:events` keep cross-instance compiled state in sync.
+`/execute-rule` runs only the requested rule ID's own compiled KieBase, held in memory in the `CompiledRulesetRegistry` ([ADR-025](project-documentation/36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)) — it never touches Redis, and other rule IDs never fire. The Redis decorator only sits in the refresh path (DRL text fetch from S3 → cache populate). Pub/sub events on `drools:rule:events` keep cross-instance compiled state in sync.
 
 ### Tech Stack
 
@@ -960,21 +960,23 @@ curl -s -X POST http://localhost:8080/admin/refresh-rules \
 #### Step 4 — Smoke test a few rules
 
 ```bash
-# Simple discount
+# Simple discount — expect amount 135.0, discount 15.0
 curl -s -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
-  -d '{"rule_id":"pricing.discount.simple","data":{"amount":150,"customer_tier":"gold"}}' | jq .
+  -d '{"rule_id":"pricing.discount.simple","data":{"amount":150}}' | jq .
 
-# Bulk discount
+# Bulk discount — expect amount 425.0, discount 75.0
 curl -s -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
   -d '{"rule_id":"pricing.discount.bulk","data":{"amount":500,"quantity":20}}' | jq .
 
-# Age validation
+# Age validation — expect validationResult APPROVED, ageGroup "Adult"
 curl -s -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
-  -d '{"rule_id":"validation.customer.age","data":{"age":25,"customer_id":"cust-001"}}' | jq .
+  -d '{"rule_id":"validation.customer.age","data":{"customerAge":25}}' | jq .
 ```
+
+Each `rule_id` runs only the rules in its own DRL file ([ADR-025](project-documentation/36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)), so these are single-rule results. Payload keys must match the DRL (`customerType`, `customerAge`, `promotionCode`, `shippingType`, …); see [19-sample-rules-cookbook.md](project-documentation/19-sample-rules-cookbook.md).
 
 #### Step 5 — Hot reload test
 
@@ -986,7 +988,7 @@ curl -s -X POST http://localhost:8080/admin/refresh-rules \
 # Confirm rules still execute after reload
 curl -s -X POST http://localhost:8080/execute-rule \
   -H "Content-Type: application/json" \
-  -d '{"rule_id":"pricing.discount.simple","data":{"amount":100,"customer_tier":"gold"}}' | jq .
+  -d '{"rule_id":"pricing.discount.simple","data":{"amount":100}}' | jq .   # amount 90.0
 ```
 
 #### Step 6 — Memory stability check (5 rapid reloads)
@@ -1021,12 +1023,12 @@ curl -s -H "X-Admin-API-Key: admin-secret" http://localhost:8080/admin/memory/in
 # Save this as /tmp/loadtest.sh and run: bash /tmp/loadtest.sh
 DURATION=300; WORKERS=20; BASE_URL="http://localhost:8080/execute-rule"
 PAYLOADS=(
-  '{"rule_id":"pricing.discount.simple","data":{"amount":150,"customer_tier":"gold"}}'
+  '{"rule_id":"pricing.discount.simple","data":{"amount":150}}'
   '{"rule_id":"pricing.discount.bulk","data":{"amount":500,"quantity":20}}'
-  '{"rule_id":"seasonal.holiday.blackfriday","data":{"amount":200,"customer_tier":"silver"}}'
-  '{"rule_id":"validation.customer.age","data":{"age":30,"customer_id":"cust-100"}}'
-  '{"rule_id":"pricing.shipping.standard","data":{"amount":80,"weight":2.5}}'
-  '{"rule_id":"pricing.discount.vip","data":{"amount":300,"customer_tier":"vip"}}'
+  '{"rule_id":"seasonal.holiday.blackfriday","data":{"promotionCode":"BLACK2024","amount":200}}'
+  '{"rule_id":"validation.customer.age","data":{"customerAge":30}}'
+  '{"rule_id":"pricing.shipping.standard","data":{"shippingType":"standard","weight":2.5}}'
+  '{"rule_id":"pricing.discount.vip","data":{"customerType":"VIP","amount":300}}'
 )
 TMPDIR_LT=$(mktemp -d); START=$(date +%s); END=$((START + DURATION)); RELOAD_DONE=0
 
@@ -1224,9 +1226,9 @@ Two distinct rule state stores; only one occupies JVM heap.
 | Store | What it holds | Used when | Memory impact |
 |---|---|---|---|
 | Redis (via `RedisCachedRuleStorage`) | DRL JSON for every loaded rule (~10 KB each) | Refresh, warm-start, cross-instance fan-out | None on JVM — lives in Redis |
-| `DroolsEngineService.kieContainer` | All compiled `KieBase` objects simultaneously | Every `/execute-rule` call | Significant — grows with rule count |
+| `CompiledRulesetRegistry` (via `DroolsEngineService`) | One compiled `KieBase` per rule ID, all resident | Every `/execute-rule` call | Significant — grows with rule count (~52 MB at 1,000 IDs in the ADR-025 spike) |
 
-**Key point:** Redis is not in the execution hot path. Cache TTL (`REDIS_DRL_RULES_TTL_MINUTES`) only affects refresh/warm-start cost. Heap pressure comes from the compiled `kieContainer`, which holds all loaded rules with no eviction. Scale horizontally to shard compiled-state memory across instances.
+**Key point:** Redis is not in the execution hot path. Cache TTL (`REDIS_DRL_RULES_TTL_MINUTES`) only affects refresh/warm-start cost. Heap pressure comes from the compiled per-rule-ID KieBases, which hold all loaded rules with no eviction. Scale horizontally to shard compiled-state memory across instances.
 
 **Real capacity limit = heap / compiled-rule size.** Only `-Xmx` matters.
 

@@ -93,7 +93,7 @@ curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" \
 # }
 ```
 
-The compile happens **outside** the write lock; the lock is held only briefly for `KieContainer.updateToVersion(ReleaseId)`. In-flight `/execute-rule` requests are not interrupted. New requests use the new rule set immediately after the version swap. See [04-architecture.md](04-architecture.md) and [39-load-test-findings.md](39-load-test-findings.md) for measured behavior at 1000 rules.
+Each rule ID is compiled into its own KieBase and its handle is swapped atomically ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)); execution takes no lock. In-flight `/execute-rule` requests finish on the version they took. New requests for a rule ID use its new version as soon as that ID is swapped. A rule ID that fails to compile keeps its previous version. See [04-architecture.md](04-architecture.md).
 
 #### Single rule
 
@@ -102,7 +102,7 @@ curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" \
   http://localhost:8080/admin/refresh-rules/pricing.discount.simple | jq
 ```
 
-Faster than full refresh when only one rule changed.
+Faster than full refresh when only one rule changed: only that rule ID is recompiled; every other rule ID is untouched.
 
 #### After uploading a new rule to S3
 
@@ -126,7 +126,7 @@ kubectl scale deployment drools --replicas=5
 
 #### Considerations
 
-- Each replica has its own compiled `kieContainer` (the execution hot path) and per-instance rate-limit buckets. Horizontal scaling **shares the Redis cache** (when `REDIS_ENABLED=true`) via `RedisCachedRuleStorage`, but rate limits multiply across replicas.
+- Each replica has its own compiled per-rule-ID KieBases (the execution hot path) and per-instance rate-limit buckets. Horizontal scaling **shares the Redis cache** (when `REDIS_ENABLED=true`) via `RedisCachedRuleStorage`, but rate limits multiply across replicas.
 - Cross-instance refresh coherence is provided by `RuleRefreshPublisher`/`Subscriber` on channel `drools:rule:events` (requires `REDIS_PUBSUB_ENABLED=true`). When pub/sub is disabled, replicas must each be refreshed individually or via TTL expiry.
 - If you need cluster-wide rate limiting, you'd need to back the limiter with Redis — currently not implemented (see [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md)).
 - Cold-start time is ~30-45s per replica. Plan capacity accordingly.
@@ -454,8 +454,7 @@ If either fails, page on-call.
    - Inside container: `jcmd 1 GC.heap_dump /tmp/heap.hprof` (or use the OOM auto-dump if OOM is imminent — `-XX:+HeapDumpOnOutOfMemoryError` is set).
 4. **Restart**: buys time. Schedule deeper investigation.
 5. **Investigate**: open the heap dump in MAT or VisualVM. Look for:
-   - Many `KieContainer` instances → disposal regression (Drools 10 `KieRepository.removeKieModule` missing after `updateToVersion`)
-   - Many `ProjectClassLoader` instances → old `KieModule` not removed from `KieRepository`
+   - Many more `CompiledRuleset` / `KieBase` instances than loaded rule IDs → retired handles still referenced somewhere
    - Per-request objects retained → request-scoped state leak
 
 ### P2 runbook: "Latency is degraded"

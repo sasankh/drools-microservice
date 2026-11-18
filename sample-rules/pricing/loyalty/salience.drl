@@ -2,13 +2,10 @@ package com.company.rules.pricing.loyalty
 
 import java.util.Map
 
-// Salience pattern: when multiple rules' LHSes match the same fact, Drools fires them in
-// salience order (higher first). This rule has salience 100, so it fires before any rule
-// with the default salience of 0. Useful for "always-applies" overrides like loyalty pricing.
-//
-// Note: with input that also matches pricing.discount.simple (amount > 50), both rules will
-// fire — loyalty first because of the higher salience. The cookbook entry documents the
-// stacking effect.
+// Salience pattern: when several rules in the SAME DRL file match the same fact, Drools fires
+// them in salience order (higher first). This rule has salience 100, so it would fire before
+// any default-salience (0) rule added to this file. Rules in other rule_ids never fire on a
+// request for pricing.loyalty.salience (each rule_id is isolated — ADR-025).
 rule "Loyalty Member Discount"
 salience 100
 when

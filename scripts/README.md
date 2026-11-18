@@ -31,11 +31,11 @@ A one-command E2E check: it starts the full Docker stack, verifies rules, smoke-
 1. Docker stack starts healthy (LocalStack + Redis + App). Rate limiting is disabled through the `scripts/docker-compose.loadtest.yml` overlay; no tracked file is edited.
 2. The 17 sample rules are in LocalStack S3. The LocalStack ready hook uploads them, so no host AWS CLI is needed.
 3. All 17 rules load into the engine with 0 failures.
-4. Smoke tests with **value checks**. All 17 rules are loaded, so stacking applies: VIP $100 → $72, bulk 15 × $200 → $153, and so on.
+4. Smoke tests with **value checks**. Each `rule_id` runs only its own rules ([ADR-025](../project-documentation/36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)), so the values are single-rule results: VIP $100 → $80, bulk 15 × $200 → $170, and so on.
 5. Hot reload: 17 rules reload, and execution is correct immediately afterwards.
 6. Memory stability: 5 rapid reloads with no runaway growth; post-GC heap < 150 MB.
 7. Load test via [`lib/e2e_load.py`](lib/e2e_load.py).
-   - **How it runs:** keep-alive HTTP workers over 14 payloads covering all rule types. Every response's **values** are validated, and there's a hot reload at 120 s.
+   - **How it runs:** keep-alive HTTP workers over 15 payloads covering all rule types. Every response's **values** are validated, and there's a hot reload at 120 s.
    - **Gates:** 0 non-200, 0 wrong values, 0 client errors, average RPS ≥ `--min-rps` (default 200), no 10-second window without completed requests, 17 rules loaded afterwards.
 8. Tear down (`down -v`).
 

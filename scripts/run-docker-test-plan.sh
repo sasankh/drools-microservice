@@ -101,30 +101,30 @@ rec 3.3 "Refresh single rule" "$(ok jq -e '.status=="success"' <<<"$j")" "$(jq -
 t=$(curl -s "$A/admin/rules" "${K[@]}" | jq .total_rules); rec 3.4 "Still 17 after refresh" "$([ "$t" = 17 ] && echo 1 || echo 0)" "total=$t"
 
 # ── Step 4 + X1: execution with VALUE checks ──────────────────────────────────
-echo "=== Step 4 / X1: rule execution — values checked (all 17 loaded → stacking applies)"
+echo "=== Step 4 / X1: rule execution — values checked (each rule_id runs only its own rules, ADR-025)"
 chk() { local id="$1" name="$2" body="$3" filt="$4" j; j=$(ex "$body"); rec "$id" "$name" "$(ok jq -e "(.error==null) and ($filt)" <<<"$j")" "$(jq -c .result <<<"$j" | head -c 150)"; }
 chk 4.1  "simple \$100 -> \$90"              '{"rule_id":"pricing.discount.simple","data":{"amount":100}}' '.result.amount==90 and .result.discount==10'
-chk 4.2  "vip \$100 stacks -> \$72"          '{"rule_id":"pricing.discount.vip","data":{"customerType":"VIP","amount":100}}' '(.result.amount*100|round)==7200'
-chk 4.3  "bulk 15 x \$200 -> \$153"          '{"rule_id":"pricing.discount.bulk","data":{"quantity":15,"amount":200}}' '(.result.amount*100|round)==15300'
-chk 4.4  "first-time \$100 -> \$85.50"       '{"rule_id":"pricing.discount.first-time","data":{"isFirstTimeCustomer":true,"amount":100}}' '(.result.amount*100|round)==8550'
+chk 4.2  "vip \$100 -> \$80 (isolated)"      '{"rule_id":"pricing.discount.vip","data":{"customerType":"VIP","amount":100}}' '(.result.amount*100|round)==8000 and .result.customerTier=="VIP"'
+chk 4.3  "bulk 15 x \$200 -> \$170"          '{"rule_id":"pricing.discount.bulk","data":{"quantity":15,"amount":200}}' '(.result.amount*100|round)==17000'
+chk 4.4  "first-time \$100 -> \$95"          '{"rule_id":"pricing.discount.first-time","data":{"isFirstTimeCustomer":true,"amount":100}}' '(.result.amount*100|round)==9500'
 chk 4.5  "standard ship 0.5kg -> 5.99"       '{"rule_id":"pricing.shipping.standard","data":{"shippingType":"standard","weight":0.5}}' '.result.shippingCost==5.99 and .result.estimatedDays==5'
-chk 4.6  "express 3kg \$150 -> free"         '{"rule_id":"pricing.shipping.express","data":{"shippingType":"express","weight":3,"amount":150}}' '.result.freeShipping==true and .result.shippingCost==0'
-chk 4.7  "blackfriday \$200 -> \$135"        '{"rule_id":"seasonal.holiday.blackfriday","data":{"promotionCode":"BLACK2024","amount":200}}' '(.result.amount*100|round)==13500 and .result.promotionValid==true'
-chk 4.8  "holiday \$100 -> \$79.20"          '{"rule_id":"seasonal.holiday.discount","data":{"isHolidaySeason":true,"amount":100}}' '(.result.amount*100|round)==7920'
+chk 4.6  "express 3kg \$150 -> free"         '{"rule_id":"pricing.shipping.express","data":{"shippingType":"express","weight":3,"amount":150}}' '.result.freeShipping==true and .result.shippingCost==0 and .result.amount==150'
+chk 4.7  "blackfriday \$200 -> \$150"        '{"rule_id":"seasonal.holiday.blackfriday","data":{"promotionCode":"BLACK2024","amount":200}}' '(.result.amount*100|round)==15000 and .result.promotionValid==true'
+chk 4.8  "holiday \$100 -> \$88"             '{"rule_id":"seasonal.holiday.discount","data":{"isHolidaySeason":true,"amount":100}}' '(.result.amount*100|round)==8800'
 chk 4.9  "age 15 -> REJECTED"                '{"rule_id":"validation.customer.age","data":{"customerAge":15}}' '.result.validationResult=="REJECTED" and .result.eligible==false'
 chk 4.10 "credit 720 -> Good, 5000"          '{"rule_id":"validation.customer.credit","data":{"creditScore":720,"requestedAmount":10000}}' '.result.creditTier=="Good" and .result.approvedAmount==5000'
 chk X1.1 "simple \$40 -> unchanged"          '{"rule_id":"pricing.discount.simple","data":{"amount":40}}' '.result.amount==40 and (.result|has("discount")|not)'
-chk X1.2 "loyalty \$100 -> \$76.50"          '{"rule_id":"pricing.loyalty.salience","data":{"loyaltyMember":true,"amount":100}}' '(.result.amount*100|round)==7650 and .result.loyaltyApplied==true'
+chk X1.2 "loyalty \$100 -> \$85"             '{"rule_id":"pricing.loyalty.salience","data":{"loyaltyMember":true,"amount":100}}' '(.result.amount*100|round)==8500 and .result.loyaltyApplied==true'
 chk X1.3 "age 70 -> Senior"                  '{"rule_id":"validation.customer.age","data":{"customerAge":70}}' '.result.ageGroup=="Senior" and .result.seniorDiscount==true'
 chk X1.4 "credit 580 -> REJECTED"            '{"rule_id":"validation.customer.credit","data":{"creditScore":580,"requestedAmount":10000}}' '.result.validationResult=="REJECTED" and .result.approvedAmount==0'
-chk X1.5 "bundle 50+60 -> 99"                '{"rule_id":"pricing.bundle.accumulate","data":{"items":[{"price":50,"stockLevel":9},{"price":60,"stockLevel":9}]}}' '.result.bundleTotal==110 and .result.bundleFinalAmount==99'
-chk X1.6 "exists: low stock warning"         '{"rule_id":"inventory.warning.exists","data":{"items":[{"price":1,"stockLevel":10},{"price":1,"stockLevel":3}]}}' '.result.lowStockWarning==true'
+chk X1.5 "bundle 50+60 -> 99"                '{"rule_id":"pricing.bundle.accumulate","data":{"items":[{"price":50},{"price":60}]}}' '.result.bundleTotal==110 and .result.bundleFinalAmount==99'
+chk X1.6 "exists: low stock warning"         '{"rule_id":"inventory.warning.exists","data":{"items":[{"stockLevel":10},{"stockLevel":3}]}}' '.result.lowStockWarning==true'
 chk X1.7 "notempty [] -> REJECTED"           '{"rule_id":"validation.cart.notempty","data":{"items":[]}}' '.result.validationResult=="REJECTED" and .result.reason=="EMPTY_CART"'
-chk X1.8 "forall: all in stock"              '{"rule_id":"validation.cart.forall","data":{"items":[{"price":1,"stockLevel":10},{"price":1,"stockLevel":20}]}}' '.result.allItemsInStock==true'
+chk X1.8 "forall: all in stock"              '{"rule_id":"validation.cart.forall","data":{"items":[{"stockLevel":10},{"stockLevel":20}]}}' '.result.allItemsInStock==true'
 chk X1.9 "email internal -> VALID"           '{"rule_id":"validation.email.compound","data":{"email":"alice@company.com","customerType":"internal"}}' '.result.emailValidationResult=="VALID"'
 chk X1.10 "temporal -> ACTIVE, 235 days"     '{"rule_id":"seasonal.expiry.temporal","data":{"currentDate":"2026-05-10","expiryDate":"2026-12-31"}}' '.result.promoStatus=="ACTIVE" and .result.daysRemaining==235'
-j=$(ex '{"rule_id":"validation.cart.forall","data":{"items":[{"stockLevel":10}]}}')
-note X1.K "Known issue: items without price" "error=$(jq -c .error.code <<<"$j") (bundle rule NPE on shared Map; backlog)"
+chk X1.K "forall, items without price -> OK" '{"rule_id":"validation.cart.forall","data":{"items":[{"stockLevel":10}]}}' '.result.allItemsInStock==true and (.result|has("bundleTotal")|not)'
+chk X1.11 "simple w/ VIP fields -> \$90 only" '{"rule_id":"pricing.discount.simple","data":{"customerType":"VIP","amount":100}}' '.result.amount==90 and (.result|has("customerTier")|not)'
 
 # ── Step 5 ────────────────────────────────────────────────────────────────────
 echo "=== Step 5: error handling"

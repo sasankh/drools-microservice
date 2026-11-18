@@ -51,9 +51,9 @@ All 17 sample rules with examples: [19-sample-rules-cookbook.md](19-sample-rules
 
 **`rule_id`** (snake_case) on the wire. The Java field is `ruleId` (camelCase) but mapped via `@JsonProperty("rule_id")`. See [ADR-008](36-architecture-decision-records.md#adr-008-snake_case-json-via-jsonproperty).
 
-### Why is my VIP $100 order returning $72 instead of $80?
+### Does one request run other rules too?
 
-Both `pricing.discount.vip` (20% off) AND `pricing.discount.simple` (10% off) match. They stack multiplicatively: `100 × 0.80 × 0.90 = 72`. Sample rules don't use `salience` to control firing order — see [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) for the full explanation and three patterns to make rules non-stacking.
+No. Since 2026-11-18 ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)) a request runs only the rules in its own `rule_id`'s DRL file. Each rule ID is compiled into its own KieBase, so VIP $100 returns $80 even though `pricing.discount.simple` would also match the data. Before that change every loaded rule whose conditions matched fired, and VIP $100 returned $72 (`100 × 0.80 × 0.90`).
 
 ### Can I see all loaded rules?
 
@@ -105,39 +105,11 @@ See [16-drl-sandboxing.md](16-drl-sandboxing.md) and [ADR-009](36-architecture-d
 
 The upstream Drools 8 reference ([23-rule-language-reference.md](23-rule-language-reference.md)) documents these features for completeness; sections describing them are tagged `[Not used in this project]`.
 
-### How do I make rules NOT stack?
+### How do I combine discounts?
 
-Three options:
+Call each `rule_id` explicitly, for example `pricing.discount.vip` and then `pricing.discount.simple` with the first result. Rules in different files no longer stack on their own ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)), and there is no fallback to the old behaviour. An explicit composition feature may be added later.
 
-```drools
-// Option A: salience + activation-group (only one in group fires)
-rule "VIP discount"
-  salience 100
-  activation-group "discount"
-when ...
-
-// Option B: exclude from competing rule's pattern
-rule "Simple discount (excluding VIP)"
-when
-  $data : Map(this["amount"] != null, this["customerType"] != "VIP")
-  eval(((Number) $data.get("amount")).doubleValue() >= 50.0)
-
-// Option C: flag-based gating
-rule "VIP discount"
-  salience 100
-when ...
-then
-  // ... apply VIP discount
-  $data.put("discountApplied", true);
-end
-
-rule "Simple discount"
-  salience 50
-when
-  $data : Map(this["amount"] != null, this["discountApplied"] == null)
-```
-
-See [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) for full patterns.
+Inside one file, rules still interact normally: use `salience` to order them and `activation-group` if only one should fire.
 
 ### What's the maximum rule complexity?
 
@@ -147,7 +119,7 @@ See [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) for full patterns
 
 ### Can I have rules that depend on each other?
 
-Yes — Drools' RETE network handles inter-rule firing automatically. Set `salience` to control order. Set `no-loop true` if a rule modifies its own match condition.
+Within one DRL file, yes — Drools' RETE network handles inter-rule firing automatically. Set `salience` to control order. Set `no-loop true` if a rule modifies its own match condition. Rules in **different** files (different rule IDs) never fire together ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)).
 
 ### How do I version my rules?
 
@@ -273,7 +245,7 @@ Recommended dashboards + alerts: [30-runbooks-and-monitoring.md](30-runbooks-and
 
 ### What if S3 goes down?
 
-503 `SERVICE_UNAVAILABLE` from new rule lookups after the S3 breaker trips. Already-loaded rules continue executing (compiled in `kieContainer`, no S3 touch per request). The breaker auto-recovers after `wait-duration` (60s default, 120s in prod) when S3 comes back.
+503 `SERVICE_UNAVAILABLE` from new rule lookups after the S3 breaker trips. Already-loaded rules continue executing (each rule ID's compiled KieBase is in memory, no S3 touch per request). The breaker auto-recovers after `wait-duration` (60s default, 120s in prod) when S3 comes back.
 
 ### How often should I refresh rules in production?
 
@@ -310,11 +282,11 @@ See [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md).
 
 ### How does multi-instance refresh stay consistent?
 
-`RuleRefreshPublisher` emits to `drools:rule:events` whenever `/admin/refresh-rules` succeeds; other instances' `RuleRefreshSubscriber` reload from storage and swap `kieContainer`. Self-dedup via `source_instance_id == this.instanceId` prevents loop-back. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20). Without `REDIS_PUBSUB_ENABLED=true`, each instance must be refreshed manually or wait for TTL expiry + next refresh.
+`RuleRefreshPublisher` emits to `drools:rule:events` whenever `/admin/refresh-rules` succeeds; other instances' `RuleRefreshSubscriber` reload from storage and swap their own per-rule-ID compiled handles. Self-dedup via `source_instance_id == this.instanceId` prevents loop-back. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20). Without `REDIS_PUBSUB_ENABLED=true`, each instance must be refreshed manually or wait for TTL expiry + next refresh.
 
 ### Why was the old `LocalLRUCache` / `RedisRuleCache` layer removed?
 
-It was dead code — `RuleCache.get()` was never called from execution or refresh paths. Execution reads from `DroolsEngineService.kieContainer`; refresh fetches directly from storage. Replaced 2026-05-20 by `RedisCachedRuleStorage` (a real read-through decorator on `RuleStorage`) plus pub/sub. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20); [ADR-004](36-architecture-decision-records.md#adr-004-locallrucache-uses-write-lock-on-get) and [ADR-005](36-architecture-decision-records.md#adr-005-redis-bean-exists-but-is-dormant-by-default) are marked Superseded.
+It was dead code — `RuleCache.get()` was never called from execution or refresh paths. Execution reads compiled rules held by `DroolsEngineService` (today: one KieBase per rule ID in the `CompiledRulesetRegistry`); refresh fetches directly from storage. Replaced 2026-05-20 by `RedisCachedRuleStorage` (a real read-through decorator on `RuleStorage`) plus pub/sub. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20); [ADR-004](36-architecture-decision-records.md#adr-004-locallrucache-uses-write-lock-on-get) and [ADR-005](36-architecture-decision-records.md#adr-005-redis-bean-exists-but-is-dormant-by-default) are marked Superseded.
 
 ### Why no Spring Security?
 
@@ -342,7 +314,7 @@ See [04-architecture.md](04-architecture.md).
 
 ### How does rule refresh work without blocking readers?
 
-The full rule set is compiled into a new versioned `KieModule` **outside** the write lock. Then a brief write lock acquires, calls `KieContainer.updateToVersion(newReleaseId)` (Drools 10's in-place version swap), and releases. The old `KieModule` is then explicitly removed from the `KieRepository` (Drools 10 does **not** auto-clean — verified by load test 2026-05-10). Readers are never blocked during the (potentially slow) compile. See [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal), [04-architecture.md](04-architecture.md), and [39-load-test-findings.md](39-load-test-findings.md).
+Each rule ID has its own compiled KieBase, held in an immutable handle in the `CompiledRulesetRegistry`. A refresh compiles a new KieBase for each changed rule ID off the request path and swaps that ID's handle atomically; a single-rule refresh recompiles only that ID. Execution takes no lock: a request takes its rule ID's handle once, and in-flight requests finish on the version they took. If a new version fails to compile, the previous version keeps serving. See [ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18), [04-architecture.md](04-architecture.md).
 
 ---
 
@@ -403,13 +375,13 @@ P99 < 100ms for cached rules. P99 < 500ms for cache miss (cold S3 read). Sample 
 
 ### What's the memory footprint?
 
-Default heap: 512m-2048m. Production sizing: depends on rule count and complexity. ~10-100 MB per `KieContainer`; sample workload uses ~250-500 MB total.
+Default heap: 512m-2048m. Production sizing: depends on rule count and complexity. Compiled rules are resident for every loaded rule ID (~52 MB for 1,000 synthetic IDs in the ADR-025 spike); sample workload uses ~250-500 MB total.
 
 ### What's the cache hit rate?
 
 The legacy in-process LRU was removed on 2026-05-20 (ADR-016). What's left:
 
-- **`/execute-rule` path**: reads compiled rules from `kieContainer` in-memory; never consults any cache. "Hit rate" doesn't apply.
+- **`/execute-rule` path**: runs the rule ID's own compiled KieBase from memory; never consults any cache. "Hit rate" doesn't apply.
 - **Refresh / startup path** (when `REDIS_ENABLED=true`): goes through `RedisCachedRuleStorage`. Hit rate depends on whether sibling instances have populated Redis since the last refresh. Tracked via `drools.cache.hit{layer=redis}` / `drools.cache.miss{layer=redis}` Micrometer counters (visible at `/admin/health` → `components.cache.details.statistics` and `/actuator/metrics`).
 - **Multi-instance deployment**: after one task refreshes and publishes on `drools:rule:events`, sibling tasks process the event and read from a now-warm Redis. Their bulk hit counters incremented during Phase 9.2 test runs.
 

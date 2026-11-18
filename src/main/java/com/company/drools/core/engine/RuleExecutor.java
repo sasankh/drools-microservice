@@ -8,7 +8,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import org.kie.api.runtime.KieContainer;
+import org.kie.api.KieBase;
 import org.kie.api.runtime.KieSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,15 +39,16 @@ public class RuleExecutor {
   }
 
   public ExecutionResult executeRule(
-      KieContainer kieContainer, String ruleId, Map<String, Object> inputData) {
-    return executeRule(kieContainer, ruleId, inputData, DEFAULT_TIMEOUT_SECONDS);
+      KieBase kieBase, String ruleId, Map<String, Object> inputData) {
+    return executeRule(kieBase, ruleId, inputData, DEFAULT_TIMEOUT_SECONDS);
   }
 
+  /**
+   * Execute {@code inputData} against ONE rule ID's own compiled base (ADR-025): a fresh session on
+   * {@code kieBase}, which contains only that rule ID's DRL rules, so unrelated rules cannot fire.
+   */
   public ExecutionResult executeRule(
-      KieContainer kieContainer,
-      String ruleId,
-      Map<String, Object> inputData,
-      long timeoutSeconds) {
+      KieBase kieBase, String ruleId, Map<String, Object> inputData, long timeoutSeconds) {
     log.debug("Executing rule {} with timeout {}s", ruleId, timeoutSeconds);
 
     long startTime = System.currentTimeMillis();
@@ -60,7 +61,7 @@ public class RuleExecutor {
       // Execute rule in custom thread pool to handle timeout and provide better concurrency control
       future =
           CompletableFuture.supplyAsync(
-              () -> executeRuleInternal(kieContainer, ruleId, inputData, sessionRef),
+              () -> executeRuleInternal(kieBase, ruleId, inputData, sessionRef),
               ruleExecutionExecutor);
 
       Map<String, Object> result = future.get(timeoutSeconds, TimeUnit.SECONDS);
@@ -119,11 +120,11 @@ public class RuleExecutor {
   }
 
   private Map<String, Object> executeRuleInternal(
-      KieContainer kieContainer,
+      KieBase kieBase,
       String ruleId,
       Map<String, Object> inputData,
       AtomicReference<KieSession> sessionRef) {
-    try (KieSession kieSession = kieContainer.newKieSession()) {
+    try (KieSession kieSession = kieBase.newKieSession()) {
       sessionRef.set(kieSession);
       kieSession.insert(inputData);
       int rulesFired = kieSession.fireAllRules(maxRuleFirings);

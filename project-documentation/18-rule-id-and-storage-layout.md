@@ -374,7 +374,7 @@ There is **no atomic guarantee** between upload and refresh. During the migratio
 
 ### "I uploaded a rule but it doesn't appear"
 
-Most likely you forgot `POST /admin/refresh-rules`. Rules are loaded into the `KieContainer` cache at startup or on explicit refresh. Uploading to S3 alone doesn't trigger a reload (unless `AUTO_REFRESH_ENABLED=true` and you wait the configured interval).
+Most likely you forgot `POST /admin/refresh-rules`. Rules are compiled into the in-memory `CompiledRulesetRegistry` (one KieBase per rule ID) at startup or on explicit refresh. Uploading to S3 alone doesn't trigger a reload (unless `AUTO_REFRESH_ENABLED=true` and you wait the configured interval).
 
 ### "I get RULE_NOT_FOUND but I see it in S3"
 

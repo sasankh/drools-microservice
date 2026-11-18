@@ -95,13 +95,13 @@ com/company/drools/
 │
 ├── core/                              # Business logic — the rule engine itself
 │   ├── engine/
-│   │   ├── DroolsEngineService.java       # Central rule-execution service. Holds a single long-lived
-│   │   │                                  # KieContainer updated in place via Drools 10's
-│   │   │                                  # KieContainer.updateToVersion(ReleaseId). ReentrantReadWriteLock
-│   │   │                                  # + explicit KieRepository.removeKieModule cleanup. See ADR-003
-│   │   │                                  # 2026-05-10 update.
-│   │   ├── RuleCompiler.java              # Compiles .drl → returns versioned ReleaseId (KieModule auto-
-│   │   │                                  # registered in KieRepository). Calls DrlSanitizer first.
+│   │   ├── DroolsEngineService.java       # Central rule-execution service. Runs a request on ITS rule ID's
+│   │   │                                  # KieBase only; loads/replaces/removes rule IDs independently
+│   │   │                                  # (refreshLock serializes mutations; execution is lock-free). ADR-025.
+│   │   ├── RuleCompiler.java              # Compiles ONE rule ID's .drl into its own KieBase (KnowledgeBuilder +
+│   │   │                                  # KnowledgeBaseFactory; no KieModule/KieRepository). Calls DrlSanitizer first.
+│   │   ├── CompiledRuleset.java           # Immutable record: ruleId, content digest, KieBase, compiledAt, ruleNames
+│   │   ├── CompiledRulesetRegistry.java   # ConcurrentHashMap of rule ID → CompiledRuleset; atomic per-ID install/remove
 │   │   ├── RuleExecutor.java              # Async fireAllRules(maxRuleFirings=10000) with timeout cancel.
 │   │   └── DrlSanitizer.java              # ★ Sandbox: import allowlist + class/method blocklist + eval() block
 │   │
@@ -127,8 +127,7 @@ com/company/drools/
 │   ├── LogSanitizer.java                  # Masks sensitive data in logs (CC, SSN, tokens, etc.)
 │   └── RuleIds.java                       # Rule ID ↔ storage-path transformation helpers
 │
-└── config/                            # 17 Spring @Configuration classes
-    ├── DroolsConfig.java                  # KieServices/KieContainer beans
+└── config/                            # 16 Spring configuration classes
     ├── S3Config.java                      # AWS S3 client + connection pool + endpoint validation
     ├── RedisConfig.java                   # Lettuce ConnectionFactory + RedisTemplate<String,Rule> + RedisMessageListenerContainer (when enabled)
     ├── InstanceIdConfig.java              # UUID-per-process bean used by RuleRefreshPublisher/Subscriber for self-dedup
@@ -394,7 +393,8 @@ If you are an AI agent considering whether to read those folders: don't, unless 
 | Refresh pub/sub subscriber | [RuleRefreshSubscriber.java](../src/main/java/com/company/drools/cache/RuleRefreshSubscriber.java) |
 | Refresh event wire format | [RefreshEvent.java](../src/main/java/com/company/drools/cache/RefreshEvent.java) |
 | Log sanitizer | [LogSanitizer.java](../src/main/java/com/company/drools/common/LogSanitizer.java) |
-| Drools KIE beans | [DroolsConfig.java](../src/main/java/com/company/drools/config/DroolsConfig.java) |
+| Per-rule-ID compiled handle | [CompiledRuleset.java](../src/main/java/com/company/drools/core/engine/CompiledRuleset.java) |
+| Registry of compiled rule IDs | [CompiledRulesetRegistry.java](../src/main/java/com/company/drools/core/engine/CompiledRulesetRegistry.java) |
 | S3 client + endpoint validation | [S3Config.java](../src/main/java/com/company/drools/config/S3Config.java) |
 | Circuit breakers | [CircuitBreakerConfig.java](../src/main/java/com/company/drools/config/CircuitBreakerConfig.java) |
 | Thread pools | [ThreadPoolConfig.java](../src/main/java/com/company/drools/config/ThreadPoolConfig.java) |

@@ -44,7 +44,7 @@ The Drools Rule Engine Microservice is a high-performance, cloud-native business
 
 - **Stateless Design**: Each request is independent, enabling horizontal scaling
 - **Polyglot Rule Storage**: Rules stored as .drl files in S3 with hierarchical organization
-- **Single-Tier Shared Cache + Pub/Sub Fan-Out (ADR-016, 2026-05-20)**: Refresh path: S3 ↔ `RedisCachedRuleStorage` decorator (read-through Redis cache of DRL text, opt-in via `REDIS_ENABLED`); cross-instance refresh coherence via Redis pub/sub on `drools:rule:events`. Execution path: compiled KieBases in a single long-lived `KieContainer` (never touches Redis).
+- **Single-Tier Shared Cache + Pub/Sub Fan-Out (ADR-016, 2026-05-20)**: Refresh path: S3 ↔ `RedisCachedRuleStorage` decorator (read-through Redis cache of DRL text, opt-in via `REDIS_ENABLED`); cross-instance refresh coherence via Redis pub/sub on `drools:rule:events`. Execution path: one compiled KieBase per rule ID in the `CompiledRulesetRegistry` ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18); never touches Redis).
 - **API Architecture**: All API endpoints on port 8080, Actuator on port 8081
 - **Memory Stable**: Proper resource disposal prevents memory leaks and OOM errors
 - **Cloud-Native**: Containerized, 12-factor app compliant, AWS-ready
@@ -88,7 +88,7 @@ The Drools Rule Engine Microservice is a high-performance, cloud-native business
 │  │         DroolsEngineService (Core Business Logic)        │   │
 │  │  - Rule Compilation    - Rule Execution                  │   │
 │  │  - Session Management  - Metadata Tracking               │   │
-│  │  - KieContainer Lifecycle (Memory Management)            │   │
+│  │  - Per-rule-ID KieBase lifecycle (CompiledRulesetRegistry)│   │
 │  └──────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
                               ▲
@@ -98,13 +98,13 @@ The Drools Rule Engine Microservice is a high-performance, cloud-native business
 │              REFRESH / STARTUP PATH (DRL text only)              │
 │  ┌──────────────────────────┐    ┌────────────────────────────┐ │
 │  │ RedisCachedRuleStorage   │ ←→ │ DroolsEngineService        │ │
-│  │ (decorator, opt-in via   │    │ kieContainer (compiled) +  │ │
+│  │ (decorator, opt-in via   │    │ per-rule-ID KieBases +     │ │
 │  │  REDIS_ENABLED=true)     │    │ pub/sub fan-out via        │ │
 │  │  └ read-through Redis    │    │ drools:rule:events on      │ │
 │  │    cache of DRL text     │    │ refresh                    │ │
 │  └──────────────────────────┘    └────────────────────────────┘ │
 │  Note: Redis stores raw DRL text. Compiled KieBases live in      │
-│  kieContainer only. Execution bypasses Redis entirely.           │
+│  the CompiledRulesetRegistry only. Execution bypasses Redis.     │
 └─────────────────────────────────────────────────────────────────┘
                               ▲
                               │
@@ -134,7 +134,7 @@ The Drools Rule Engine Microservice is a high-performance, cloud-native business
 2. **Dependency Inversion**: Higher layers depend on abstractions, not implementations
 3. **Fail-Safe Defaults**: System degrades gracefully when external services unavailable
 4. **Observability First**: Comprehensive logging, metrics, and health checks built-in
-5. **Resource Management**: Explicit lifecycle management for expensive resources (KieContainer)
+5. **Resource Management**: Explicit lifecycle management for expensive resources (per-rule-ID compiled KieBases)
 
 ---
 
@@ -260,101 +260,98 @@ class RuleExecutionRequest {
 #### DroolsEngineService (Primary Service)
 
 **Responsibilities**:
-1. **Rule Compilation**: Convert .drl files to executable KieBase objects
-2. **Rule Execution**: Execute rules with provided data in isolated sessions
-3. **KieContainer Lifecycle**: Manage KieContainer creation and disposal (CRITICAL for memory stability)
+1. **Rule Compilation**: Compile each rule ID (one .drl file) into its **own** KieBase via `RuleCompiler` ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18))
+2. **Rule Execution**: Execute a request against its own rule ID's KieBase only, in a fresh session
+3. **Ruleset Lifecycle**: Install, replace and remove per-rule-ID compiled handles in the `CompiledRulesetRegistry`
 4. **Metadata Tracking**: Track rule status, execution counts, timestamps
-5. **Error Handling**: Capture compilation and execution errors
+5. **Error Handling**: Capture compilation and execution errors per rule ID
 
-**Key Methods**:
+**Key Methods** ([`DroolsEngineService.java`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java)):
 
 ```java
-// Load all rules from storage
-public boolean loadRulesFromStorage()
+// Execute a request against THIS rule ID's KieBase only
+public RuleExecutor.ExecutionResult executeRule(String ruleId, Map<String, Object> inputData)
 
-// Load single rule by ID
-public boolean loadRule(String ruleId)
+// Load the authoritative full set: compile every rule ID independently,
+// install the ones that compile, remove IDs no longer present
+public boolean loadRules(List<Rule> rules)
+public LoadReport loadRulesReport(List<Rule> rules)   // per-ID loaded / failed / removed
 
-// Execute rule with data
-public Map<String, Object> executeRule(String ruleId, Map<String, Object> data)
+// Replace (or add) one rule ID; only that ID is recompiled
+public boolean loadOrReplaceRule(Rule rule)
 
-// Get rule metadata
+// Remove one rule ID
+public boolean removeRule(String ruleId)
+
+// Metadata
 public RuleMetadata getRuleMetadata(String ruleId)
-
-// List all loaded rules
-public List<Rule> getAllLoadedRules()
-
-// Refresh rules (reload from storage)
-public void refreshRules()
+public Map<String, RuleMetadata> getAllRuleMetadata()
 ```
 
-**Memory Management Architecture** (Critical):
+**Rule-ID isolation and lifecycle** ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18), 2026-11-18):
 
 ```java
-// CURRENT APPROACH (Drools 10 incremental update via updateToVersion + explicit cleanup):
-//
-// 1. RuleCompiler emits a versioned KieModule with a fresh ReleaseId, registered
-//    in the singleton KieRepository. Compilation runs OUTSIDE the rulesLock so
-//    reads against the OLD KieBase are not blocked.
-ReleaseId newReleaseId = ruleCompiler.compileRules(rules).getReleaseId();
+// Each rule ID compiles on its own (KnowledgeBuilder + KnowledgeBaseFactory), into an
+// immutable CompiledRuleset(ruleId, contentDigest, kieBase, compiledAt, ruleNames).
+// No KieContainer, KieModule or KieRepository is involved.
 
-// 2. Take the write lock, capture the prior ReleaseId, swap the running KieBase
-//    via Drools 10's incremental update. This is atomic; in-flight sessions keep
-//    the old definitions, new sessions see the new ones.
-ReleaseId oldReleaseId;
-rulesLock.writeLock().lock();
+// Mutations (load / replace / remove) are serialized by refreshLock.
+refreshLock.lock();
 try {
-    oldReleaseId = kieContainer.getReleaseId();
-    kieContainer.updateToVersion(newReleaseId);
-    // ... update loadedRules / ruleMetadata maps
+    RuleCompiler.RuleCompilation c = ruleCompiler.compileRule(rule);
+    if (c.isSuccess()) {
+        registry.install(c.ruleset());   // atomic per-ID swap in a ConcurrentHashMap
+    } else if (registry.contains(ruleId)) {
+        // previous version keeps serving; metadata records the rejected update
+    } else {
+        // ID recorded as ERROR; it never falls back to other rules
+    }
 } finally {
-    rulesLock.writeLock().unlock();
+    refreshLock.unlock();
 }
 
-// 3. Outside the write lock, evict the prior KieModule from KieRepository.
-//    Drools 10 does NOT auto-clean — without this, every refresh accumulates a
-//    KieModule + ProjectClassLoader + compiled rule classes until LRU caps evict.
-//    Verified by load test: 1 MB heap drift over 98 refreshes (see 39-load-test-findings.md).
-kieRepository.removeKieModule(oldReleaseId);
+// Execution takes no lock: it takes its rule ID's handle once and opens a
+// fresh KieSession on that KieBase only.
+Optional<CompiledRuleset> handle = registry.get(ruleId);
 ```
 
 **Why This Matters**:
-- Each `KieModule` retained in `KieRepository` holds a `ProjectClassLoader` + every compiled rule class (10–100 MB at scale).
-- Without explicit `removeKieModule`, refreshes accumulate compiled bytecode in the singleton repository → OOM under sustained hot reloads.
-- With explicit cleanup: heap stable across thousands of refreshes (load tested 2026-05-10).
-- The earlier "two-container atomic-swap with `oldContainer.dispose()`" pattern was superseded on 2026-05-10 — Drools 10's `updateToVersion` swaps the internal `KieBase` in place, and the explicit `dispose()` of an old container is no longer the right model. See [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal).
+- A request runs **only** the rules in its own DRL file. Other rule IDs never fire, so results don't stack and one rule can't crash on another rule's input (the bundle rule used to throw an NPE on forall requests).
+- Refreshing one rule ID recompiles only that ID (~3.6 ms at 1,000 resident IDs in the spike, versus a full recompile before). A file that fails to compile affects only its own ID, which keeps its last good version.
+- Retired handles are freed by the GC once no in-flight request references them; there is no module bookkeeping to leak (spike: flat heap/metaspace over 2,000 refreshes).
+- History: from 2026-05-10 to 2026-11-18 all rules lived in one KieBase inside a single long-lived `KieContainer`, updated via `KieContainer.updateToVersion(ReleaseId)` plus `KieRepository.removeKieModule`. See [ADR-003](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal) (superseded).
 
 **Thread Safety**:
-- Uses `ConcurrentHashMap` for thread-safe rule and metadata storage
-- Each execution creates a new `KieSession` (stateless, thread-safe)
-- `KieContainer.updateToVersion(ReleaseId)` is atomic; the brief swap window is held under `rulesLock.writeLock()` while the long compile happens outside the lock
+- `CompiledRulesetRegistry` is a `ConcurrentHashMap<String, CompiledRuleset>`; `CompiledRuleset` is immutable
+- Each execution creates a new `KieSession` on its rule ID's KieBase (stateless, thread-safe)
+- No read lock on execution; `refreshLock` serializes mutations only. In-flight requests finish on the handle they took
 
 #### RuleCompiler
 
-**Responsibility**: Compile .drl files to executable KieBase objects
+**Responsibility**: Compile one rule ID (one .drl file) into its own KieBase ([`RuleCompiler.java`](../src/main/java/com/company/drools/core/engine/RuleCompiler.java))
 
 **Compilation Process**:
 ```
-.drl File (Text)
+.drl File (Text) for ONE rule ID
     ↓
-KieFileSystem (Drools API)
+DrlSanitizer policy check
     ↓
-KieBuilder.buildAll()
+KnowledgeBuilder.add(DRL)          (errors → failure for this ID only)
     ↓
-KieContainer (Compiled Rules)
+KnowledgeBaseFactory.newKnowledgeBase() + addPackages(...)
     ↓
-KieBase (Executable Rule Set)
+CompiledRuleset (ruleId, SHA-256 digest, KieBase, compiledAt, ruleNames)
 ```
 
 **Error Handling**:
-- Syntax errors: Returns compilation error messages
-- Semantic errors: Returns validation error messages
-- Successful compilation: Returns KieContainer ready for execution
+- Policy violations, syntax and semantic errors: returned as a failed `RuleCompilation` for that rule ID; other IDs are unaffected
+- Successful compilation: returns an immutable `CompiledRuleset` ready to install
+- `KnowledgeBaseFactory` is an internal Drools API, confined to `RuleCompiler`; the tests compile and run all sample rules through it
 
 **Caching**:
-- All compiled rules held in a single long-lived `KieContainer` in DroolsEngineService (updated in place via `KieContainer.updateToVersion(ReleaseId)`)
+- Compiled handles live in the `CompiledRulesetRegistry`, one per rule ID
 - Avoids re-compilation on every request
-- Cache invalidation on rule refresh
+- A refresh recompiles only the rule IDs it loads and swaps each handle atomically
 
 ---
 
@@ -452,8 +449,8 @@ File Path: "{LOCAL_RULES_DIRECTORY}/pricing/discount/vip.drl"
 ```
 Request for Rule ID
     ↓
-DroolsEngineService.loadedRules (ConcurrentHashMap — all loaded rules in memory)
-    ↓ rule found → kieContainer.newKieSession()
+CompiledRulesetRegistry.get(ruleId) (ConcurrentHashMap — one compiled KieBase per rule ID)
+    ↓ handle found → handle.kieBase().newKieSession()   (this rule ID's rules only)
 RuleExecutor.fireAllRules()
     ↓
 Response
@@ -474,10 +471,10 @@ S3 (source of truth)
 │  - Circuit breaker: Redis op fails → fall through to base│
 └──────────────────────────────────────────────────────────┘
     ↓ (compiled into)
-DroolsEngineService.kieContainer
-    Single long-lived container, updated in place via
-    KieContainer.updateToVersion(ReleaseId) on refresh.
-    All loaded rules live here; no eviction.
+CompiledRulesetRegistry (via DroolsEngineService)
+    One immutable CompiledRuleset (own KieBase) per rule ID;
+    a refresh recompiles each loaded ID and swaps its handle atomically.
+    All loaded rule IDs live here; no eviction.
 ```
 
 When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` returns the base storage (S3 / file / memory) directly. There is no longer a per-instance LRU layer — base storage is consulted on every cache miss (it has its own connection pooling and circuit breaker).
@@ -510,7 +507,7 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
 
 #### RuleRefreshPublisher / RuleRefreshSubscriber (multi-instance fan-out)
 
-**Why** ([ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20)): Rule **execution** reads from `DroolsEngineService.kieContainer`, not Redis. So a `POST /admin/refresh-rules` against instance A only updates A's `kieContainer`; instances B and C still execute the old compiled rules until their next refresh. Pub/sub fans the refresh out so every instance recompiles.
+**Why** ([ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20)): Rule **execution** reads from the in-process `CompiledRulesetRegistry`, not Redis. So a `POST /admin/refresh-rules` against instance A only updates A's compiled rulesets; instances B and C still execute the old compiled rules until their next refresh. Pub/sub fans the refresh out so every instance recompiles.
 
 **Wire format** ([`RefreshEvent.java`](../src/main/java/com/company/drools/cache/RefreshEvent.java)):
 ```json
@@ -533,7 +530,7 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
 - Dispatch:
   - `RULE_REFRESHED` → `storage.getRule(id)` (warm Redis miss) → `engine.loadOrReplaceRule(rule)`
   - `RULE_REFRESHED_BULK` → `storage.getAllRules()` → `engine.loadRules(rules)`
-  - `RULE_DELETED` → log INFO (no compiled-state delete yet; deferred to v2)
+  - `RULE_DELETED` → `engine.removeRule(id)` (only that rule ID is removed)
 
 #### Compiled KieBase (execution hot path)
 
@@ -542,17 +539,17 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
 **Purpose**: Cache expensive compiled rule objects (not rule text)
 
 **Storage**:
-- Held in `DroolsEngineService` as a single long-lived `KieContainer` (all rules compiled into one KieBase; no per-rule `Map`)
+- Held in the `CompiledRulesetRegistry`: one immutable `CompiledRuleset` (with its own KieBase) per rule ID ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18))
 - In-memory only (Redis caches raw DRL text, not compiled state)
 
 **Lifecycle**:
-- Created on first rule load
-- Updated on rule refresh
-- Old KieBase discarded (garbage collected)
+- Created when the rule ID is first loaded
+- Replaced atomically when that rule ID is refreshed; other IDs are untouched
+- The old handle is garbage collected once no in-flight request references it
 
 **Performance Impact**:
-- Rule compilation: 50-500ms per rule (expensive)
-- Compiled execution (cached `kieContainer`): 1-10ms (fast)
+- Single-rule compile: ~3.6 ms median at 1,000 resident IDs (ADR-025 spike)
+- Compiled execution: 1-10ms (fast); a request evaluates only its own rule ID's LHS
 - Redis cache hit rate (post-2026-05-20 architecture): tracked via `drools.cache.hit{layer=redis}` Micrometer counter; depends on multi-instance fan-out activity, not a fixed steady-state number. See [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md) and [39-load-test-findings.md](39-load-test-findings.md) Phase 9 addendum.
 
 ---
@@ -583,15 +580,13 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
         ↓
 4. CORE SERVICE
    - DroolsEngineService.executeRule(ruleId, data)
-   - Acquire READ lock; atomic loadedRules.get(ruleId) + null check (TOCTOU-safe)
-   - Verify metadata.status == ACTIVE
-   - Use the long-lived kieContainer (a single instance for the lifetime of the JVM,
-     updated in place via updateToVersion(ReleaseId) on refresh)
-   - Release READ lock
+   - No lock: take this rule ID's immutable CompiledRuleset once via
+     registry.get(ruleId) (TOCTOU-safe; a concurrent refresh can't change it)
+   - Verify the handle exists and metadata.status == ACTIVE
         ↓
 5. RULE EXECUTION (RuleExecutor)
    - Submit to ruleExecutionExecutor (CompletableFuture)
-   - Create new KieSession (stateless, thread-isolated)
+   - Create new KieSession on THIS rule ID's KieBase only (ADR-025)
    - Insert data as Map into session
    - kieSession.fireAllRules(maxRuleFirings = 10000)  // cap prevents runaway loops
    - Extract results from modified data Map
@@ -612,7 +607,7 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
    }
 ```
 
-**Note**: `RULE_COMPILATION` is **not** in the request path — rules are compiled once at startup and on `POST /admin/refresh-rules`, then held in the long-lived `kieContainer`. Each request creates a new `KieSession` from the current `KieBase`. See "Compile-outside-the-lock Rule Loading Pattern" below.
+**Note**: `RULE_COMPILATION` is **not** in the request path — rules are compiled at startup and on refresh, then held in the `CompiledRulesetRegistry`. Each request creates a new `KieSession` from its own rule ID's current `KieBase`, so only that file's rules can fire. See "Per-rule-ID Rule Loading Pattern" below.
 
 ### Admin Flow - Rule Refresh
 
@@ -633,19 +628,18 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
 4. STORAGE LAYER (base)
    - S3RuleStorage.getAllRules() (or LocalFileStorage / InMemoryStorage)
         ↓
-5. RELOAD RULES
-   - RuleCompiler.compileRules(rules) builds a fresh versioned KieModule via
-     KieFileSystem + generateAndWritePomXML(releaseId) + KieBuilder.buildAll().
-     Auto-registered in the singleton KieRepository under the bumped ReleaseId.
+5. RELOAD RULES (DroolsEngineService.loadRules, under refreshLock)
+   - Remove rule IDs no longer present in storage
+   - For each rule ID: RuleCompiler.compileRule(rule) → its own KieBase
+     (KnowledgeBuilder + KnowledgeBaseFactory; no KieModule / KieRepository)
         ↓
-6. ATOMIC SWAP (under write lock)
-   ReleaseId oldReleaseId = kieContainer.getReleaseId();
-   Results r = kieContainer.updateToVersion(newReleaseId);  // Drools 10 in-place swap
-   // ... update loadedRules + ruleMetadata maps to ACTIVE
+6. PER-ID ATOMIC SWAP
+   registry.install(compiledRuleset);   // ConcurrentHashMap put, per rule ID
+   // A failed compile affects only that ID: a previous version keeps serving,
+   // otherwise the ID is recorded as ERROR. Other IDs are unaffected.
         ↓
-7. CLEANUP (outside the write lock)
-   kieRepository.removeKieModule(oldReleaseId);  // free prior compiled bytecode
-   // (Drools 10 does NOT auto-clean; without this, refreshes leak ProjectClassLoaders)
+7. (no cleanup step) — retired handles are garbage collected once no
+   in-flight request still holds them
         ↓
 8. PUB/SUB FAN-OUT (when REDIS_ENABLED + REDIS_PUBSUB_ENABLED)
    - RuleRefreshPublisher.publishBulkRefresh()
@@ -723,22 +717,22 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
                           ↓ Compilation
 ┌─────────────────────────────────────────────────────────────┐
 │                    RULE COMPILATION                          │
-│  1. RuleCompiler receives .drl content                       │
-│  2. Create KieFileSystem                                     │
-│  3. Build KieContainer                                       │
-│  4. Extract KieBase                                          │
+│  1. RuleCompiler receives ONE rule ID's .drl content         │
+│  2. DrlSanitizer policy check                                │
+│  3. KnowledgeBuilder compiles the DRL                        │
+│  4. KnowledgeBaseFactory builds that ID's own KieBase        │
 └─────────────────────────────────────────────────────────────┘
                           ↓ Caching
 ┌─────────────────────────────────────────────────────────────┐
 │                 COMPILED RULE STATE                          │
-│  Single long-lived KieContainer (updateToVersion swap)       │
-│  - All rules in one KieBase; in-memory only                  │
+│  CompiledRulesetRegistry: one KieBase per rule ID (ADR-025)  │
+│  - Atomic per-ID swap on refresh; in-memory only             │
 │  - Fast execution (1-10ms)                                   │
 └─────────────────────────────────────────────────────────────┘
                           ↓ Request arrives
 ┌─────────────────────────────────────────────────────────────┐
 │                    RULE EXECUTION                            │
-│  1. Create KieSession from KieBase                           │
+│  1. Create KieSession from the rule ID's own KieBase         │
 │  2. Insert request data                                      │
 │  3. Fire rules                                               │
 │  4. Extract results                                          │
@@ -851,11 +845,11 @@ The 2026-05-20 refactor (ADR-016) collapsed the legacy L1+L2 model into a single
    └──────────────────────────────────────────────────┘
 ```
 
-A refresh on instance A (`POST /admin/refresh-rules`) (1) deletes A's Redis keys, (2) reloads them from S3 via write-through, (3) atomically swaps A's `kieContainer`, (4) publishes `RULE_REFRESHED_BULK` to `drools:rule:events`. Instances B and C's subscribers receive the event, fetch from `RedisCachedRuleStorage` (which is now a hot cache hit since A warmed it), and atomically swap their own `kieContainer`. Without step (4), B and C would keep executing stale compiled rules.
+A refresh on instance A (`POST /admin/refresh-rules`) (1) deletes A's Redis keys, (2) reloads them from S3 via write-through, (3) atomically swaps A's per-rule-ID compiled handles, (4) publishes `RULE_REFRESHED_BULK` to `drools:rule:events`. Instances B and C's subscribers receive the event, fetch from `RedisCachedRuleStorage` (which is now a hot cache hit since A warmed it), and atomically swap their own per-rule-ID handles. Without step (4), B and C would keep executing stale compiled rules.
 
 #### Cache Invalidation Strategies
 
-1. **Manual Invalidation** (`POST /admin/refresh-rules`): clears Redis keys, reloads from base, swaps local `kieContainer`, publishes `RULE_REFRESHED_BULK`.
+1. **Manual Invalidation** (`POST /admin/refresh-rules`): clears Redis keys, reloads from base, swaps the local per-rule-ID handles, publishes `RULE_REFRESHED_BULK`.
 2. **Single-rule Invalidation** (`POST /admin/refresh-rules/{id}`): deletes one Redis key, reloads from base, swaps in via `loadOrReplaceRule()`, publishes `RULE_REFRESHED`.
 3. **TTL Expiration**: `REDIS_DRL_RULES_TTL_MINUTES` (default 15) bounds staleness even if no admin action happens.
 4. **Self-dedup**: subscribers compare `source_instance_id == this.instanceId` and skip their own events to prevent loop-back recompilation. Counter: `drools.refresh.skipped_self`.
@@ -867,7 +861,7 @@ A refresh on instance A (`POST /admin/refresh-rules`) (1) deletes A's Redis keys
 | Redis (decorator) | 1–5 ms | ~95% on refresh / startup paths | All instances | Volatile + TTL |
 | Base storage (S3) | 50–200 ms | ~5% (miss + refresh) | Global | Durable |
 
-**Note**: Caches are NOT in the execution hot path. Once compiled, `kieContainer` serves `POST /execute-rule` directly in ~1–10 ms — no Redis or S3 touch per request. The cache exists only to make refresh and warm-start cheap on the hot S3 path.
+**Note**: Caches are NOT in the execution hot path. Once compiled, the `CompiledRulesetRegistry` serves `POST /execute-rule` directly in ~1–10 ms — no Redis or S3 touch per request. The cache exists only to make refresh and warm-start cheap on the hot S3 path.
 
 ---
 
@@ -918,7 +912,7 @@ Request 1 (Thread 1)          Request 2 (Thread 2)
       ↓                              ↓
   executeRule("pricing.vip")    executeRule("pricing.bulk")
       ↓                              ↓
-  Get KieBase (shared, immutable)    Get KieBase (shared, immutable)
+  Get vip's KieBase (immutable)  Get bulk's KieBase (immutable)
       ↓                              ↓
   Create KieSession (isolated)   Create KieSession (isolated)
       ↓                              ↓
@@ -930,9 +924,9 @@ Request 1 (Thread 1)          Request 2 (Thread 2)
 ```
 
 **Key Points**:
-- **KieBase**: Shared, immutable, thread-safe
+- **KieBase**: One per rule ID, shared by that ID's requests, immutable, thread-safe
 - **KieSession**: Created per request, stateless, thread-isolated
-- **No locking required**: Each request has own session
+- **No locking required**: Each request has own session; execution takes no lock
 - **High concurrency**: Limited only by thread pool size
 
 #### Cache Concurrency
@@ -944,10 +938,10 @@ Request 1 (Thread 1)          Request 2 (Thread 2)
 - Redis is single-threaded (serializes operations); client-side multiplexing for concurrency
 - All ops wrapped in `redisCircuitBreaker` (including SCAN as of 2026-05-24); failures fall through to base storage
 
-**Compiled `kieContainer` (execution hot path)**:
-- Single long-lived `KieContainer`; `loadedRules: ConcurrentHashMap<String, Rule>` for ACTIVE-flag lookup
-- Lock-free reads on `loadedRules.get(ruleId)` (TOCTOU-safe atomic get + null check)
-- Atomic in-place `KieContainer.updateToVersion(ReleaseId)` on refresh; brief `ReentrantReadWriteLock` write-lock window during the swap only; compile happens outside the lock
+**Compiled rulesets (execution hot path)**:
+- `CompiledRulesetRegistry`: `ConcurrentHashMap<String, CompiledRuleset>`, one immutable handle per rule ID; `ruleMetadata: ConcurrentHashMap<String, RuleMetadata>` for the ACTIVE check
+- Lock-free reads on `registry.get(ruleId)` (TOCTOU-safe: the handle is taken once)
+- Mutations (load / replace / remove) serialized by `refreshLock`; each install is an atomic per-ID map put. There is no read-write lock
 
 ### Thread Safety Guarantees
 
@@ -955,46 +949,50 @@ Request 1 (Thread 1)          Request 2 (Thread 2)
 2. **Immutable KieBase**: Once compiled, never modified
 3. **Session Isolation**: Each request gets own KieSession
 4. **Concurrent Collections**: Thread-safe data structures for caches
-5. **Atomic Updates**: KieContainer replacement is atomic
+5. **Atomic Updates**: Each rule ID's handle is replaced atomically; in-flight requests finish on the handle they took
 
-### Compile-outside-the-lock Rule Loading Pattern (Drools 10 `updateToVersion`)
+### Per-rule-ID Rule Loading Pattern (ADR-025)
 
-A defining choice in this service: **rule compilation happens *outside* the write lock**, then a brief in-place swap via `KieContainer.updateToVersion(ReleaseId)` installs the new `KieBase`. Readers are not blocked during compilation, even though full-set compile can take ~50 s cold-JIT / ~1 s warm-JIT for 1,000 rules.
+Since 2026-11-18 each rule ID (one DRL file) is compiled into its own KieBase and held in an immutable `CompiledRuleset` in the `CompiledRulesetRegistry` ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)). A request opens a fresh `KieSession` on its own rule ID's base, so only that file's rules can fire.
 
 ```
-                BEFORE 2026-05-10 (atomic-swap):      AFTER 2026-05-10 (Drools 10 update):
-                ─────────────────────────────────     ────────────────────────────────────
-                newContainer = compile(rules)         newReleaseId = compile(rules)
-                writeLock.lock()                      writeLock.lock()
-                  ├── oldContainer = current            ├── oldReleaseId = container.getReleaseId()
-                  ├── current = newContainer            ├── container.updateToVersion(newReleaseId)
-                  └── oldContainer.dispose()            └── update loadedRules / metadata maps
-                writeLock.unlock()                    writeLock.unlock()
-                                                      kieRepository.removeKieModule(oldReleaseId)
-                Two-container window                  Single long-lived container.
-                during the swap.                      KieRepository cleanup is the
-                                                      explicit leak-stopper.
+  loadRules(rules) / loadOrReplaceRule(rule) / removeRule(id)     [refreshLock held]
+      for each rule ID:
+          compiled = ruleCompiler.compileRule(rule)     // KnowledgeBuilder + KnowledgeBaseFactory
+          success → registry.install(compiled)          // atomic per-ID swap
+          failure → previous version keeps serving, or ID recorded as ERROR
+      loadRules only: IDs missing from the new set → registry.remove(id)
+
+  executeRule(id, data)                                          [no lock]
+      handle = registry.get(id)                         // taken once
+      handle.kieBase().newKieSession() → insert → fireAllRules → close
 ```
 
-Two architectural fixes from the load test on 2026-05-10:
+Properties:
 
-1. **`KieRepository.removeKieModule(oldReleaseId)`** is called outside the write lock after a successful `updateToVersion`. Drools 10 does not auto-clean — without this, every refresh accumulates a `KieModule` + `ProjectClassLoader` + every compiled rule class until LRU caps evict (~1000 entries for our single-GA app). Verified leak-free under 98 refreshes during a 15-min soak.
-2. **No upfront LOADING-state pre-mark**. An earlier version set every rule's metadata to `LOADING` before the compile, then back to `ACTIVE` after. With 10-rule corpora the LOADING window was sub-millisecond and never observable; at 1,000 rules and a 46-second cold-JIT compile, ~1.5 % of concurrent execute requests hit the LOADING window and got `400 "Rule is not active"` — defeating the goal of non-blocking reads. Removed; rules stay ACTIVE in the OLD KieBase during compile, and metadata is updated under the write lock only after `updateToVersion` succeeds.
+1. **Isolation.** Rules in other files never fire, so results don't stack and one rule can't crash on another rule's input.
+2. **Incremental refresh.** A single-rule refresh recompiles only that ID (~3.6 ms median at 1,000 resident IDs in the spike, versus ~510 ms for the old full recompile). A failed compile affects only its own ID.
+3. **No leak bookkeeping.** No `KieModule` or `KieRepository` is involved. A retired handle is garbage collected once no in-flight request holds it (spike: flat heap/metaspace over 2,000 refreshes).
+4. **No LOADING window.** Metadata is set to ACTIVE when the handle is installed; existing IDs keep serving their previous handle while a new one compiles.
 
-Implementation: [`DroolsEngineService.loadRules`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java). See also [ADR-003 2026-05-10 update](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal) and [39-load-test-findings.md](39-load-test-findings.md).
+History: from 2026-05-10 to 2026-11-18 all rules were compiled into one KieBase inside a single long-lived `KieContainer`, swapped with `KieContainer.updateToVersion(ReleaseId)` under a brief write lock, followed by `KieRepository.removeKieModule(oldReleaseId)`. See [ADR-003](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal) and [39-load-test-findings.md](39-load-test-findings.md).
+
+Implementation: [`DroolsEngineService`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java), [`RuleCompiler`](../src/main/java/com/company/drools/core/engine/RuleCompiler.java), [`CompiledRulesetRegistry`](../src/main/java/com/company/drools/core/engine/CompiledRulesetRegistry.java), [`CompiledRuleset`](../src/main/java/com/company/drools/core/engine/CompiledRuleset.java).
 
 ### TOCTOU-Safe Rule Lookup
 
-Lookup avoids the classic time-of-check-vs-time-of-use race by using an atomic `get() + null check` instead of `containsKey() + get()`:
+Lookup avoids the classic time-of-check-vs-time-of-use race by taking the rule ID's immutable handle once instead of `containsKey() + get()`:
 
 ```java
 // In DroolsEngineService.executeRule():
-Rule rule = loadedRules.get(ruleId);          // single atomic get
-RuleMetadata meta = ruleMetadata.get(ruleId);
-if (rule == null || !meta.isActive()) { ... } // null check, no race
+RuleMetadata metadata = ruleMetadata.get(ruleId);
+if (metadata == null) { ... }                                   // RULE_NOT_FOUND
+Optional<CompiledRuleset> ruleset = registry.get(ruleId);       // taken once
+if (ruleset.isEmpty() || metadata.getStatus() != ACTIVE) { ... } // not active
+ruleExecutor.executeRule(ruleset.get().kieBase(), ruleId, inputData, timeout);
 ```
 
-Even if a concurrent `loadRules()` triggers `updateToVersion` between the check and use, this code is safe: the long-lived `kieContainer` reference is stable, and the in-flight `KieSession` keeps its existing rule definitions until disposal. New sessions created after the swap see the new `KieBase`.
+Even if a concurrent refresh swaps or removes this rule ID between the lookup and the execution, the request is safe: it keeps the handle it took and finishes on that version. The next request sees the new handle.
 
 ### Component Dependency Map
 
@@ -1046,8 +1044,7 @@ Internal dependencies. **What breaks if X fails?**
 |---|---|---|
 | Redis (when enabled) | Cross-instance fan-out + shared cache | Everything — circuit breaker opens, decorator falls through to base storage; instances refresh independently |
 | Redis pub/sub | Cross-instance refresh coherence | Local refresh still works; other instances stay on old compiled rules until their own refresh or TTL expiry |
-| AWS S3 | Cold rule loads, refresh | Already-loaded rules (served from `kieContainer`, no cache hit needed) |
-| KieContainer module cleanup | Memory leak risk | Logged; `KieRepository.removeKieModule` is best-effort after swap |
+| AWS S3 | Cold rule loads, refresh | Already-loaded rules (served from the `CompiledRulesetRegistry`, no cache hit needed) |
 | `ADMIN_API_KEY` not set | Admin auth: open + WARN in local/dev; **hard startup failure** in prod/docker | Everything else; admin endpoints become open (local/dev only) |
 | Rule-execution thread pool exhausted | New rule executions rejected with HTTP 503 (AbortPolicy → ServiceUnavailableException) | Existing requests; ops endpoints |
 
@@ -1335,7 +1332,7 @@ Benefits:
 | P99 Latency (miss) | < 500ms | ~100-300ms (expected); not separately measured |
 | Concurrent Rules | 1000+ | Architecture supports; 1000-rule load test verified |
 | Cache Hit Rate | > 90% | depends on REDIS_ENABLED; tracked via `drools.cache.hit{layer=redis}` / `drools.cache.miss{layer=redis}` Micrometer counters (no L1+L2 stack — single Redis tier as of 2026-05-20 ADR-016) |
-| Memory Stability | Indefinite | ✅ Stable (1 MB drift over 98 refreshes / 15-min mixed-workload soak; `KieRepository.removeKieModule` cleanup verified leak-free) |
+| Memory Stability | Indefinite | ✅ Stable (1 MB drift over 98 refreshes / 15-min soak on 2026-05-10 with the old single-KieContainer model; the per-rule-ID model showed flat heap/metaspace over 2,000 refreshes in the ADR-025 spike) |
 
 ---
 
@@ -1661,7 +1658,7 @@ class RedisCachedRuleStorage implements RuleStorage { }  // decorator (opt-in vi
 - Testable (mock storage in tests)
 
 #### 6. Factory Pattern (Rule Compilation)
-- `RuleCompiler.compile()` creates KieContainer
+- `RuleCompiler.compileRule()` creates one `CompiledRuleset` (own KieBase) per rule ID
 - Encapsulates complex Drools API
 - Single point for compilation logic
 
@@ -1716,10 +1713,10 @@ This Drools Rule Engine Microservice is architected for:
 ✅ **Reliability**: Circuit breakers, health checks, graceful degradation
 ✅ **Maintainability**: Clean architecture, separation of concerns, comprehensive monitoring
 ✅ **Security**: Admin auth, DRL sandboxing, security headers, multi-layer validation, rate limiting, log sanitization
-✅ **Memory Stability**: Proper resource disposal (KieContainer lifecycle)
+✅ **Memory Stability**: Immutable per-rule-ID KieBases, garbage collected once retired
 
 **Key Architectural Achievements**:
-- **Zero Memory Leaks**: Fixed via KieContainer disposal (2026-02-19)
+- **Zero Memory Leaks**: Fixed via KieContainer disposal (2026-02-19); since 2026-11-18 no KieContainer/KieRepository bookkeeping exists to leak (ADR-025)
 - **Redis-decorator caching** when `REDIS_ENABLED=true` (single shared tier per ADR-016; hit rate tracked via Micrometer)
 - **Sub-100ms Latency**: Compiled rule caching, optimized execution
 - **Cloud-Native**: 12-factor compliant, containerized, AWS-ready

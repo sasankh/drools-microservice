@@ -79,6 +79,10 @@ paths:
       summary: Execute Business Rule
       description: |
         Execute a business rule with provided input data.
+
+        **Rule isolation:** only the rules in the requested `rule_id`'s DRL file run
+        (ADR-025). Other loaded rules never fire, even if their conditions match the data,
+        so discounts from different rule IDs do not stack. To combine rules, call each rule_id.
         
         **Security Features:**
         - Input validation for rule ID format and data payload
@@ -102,17 +106,16 @@ paths:
               simple_discount:
                 summary: Simple Discount Rule
                 value:
-                  rule_id: "simple.discount"
+                  rule_id: "pricing.discount.simple"
                   data:
                     amount: 100
-                    customer_type: "regular"
               vip_discount:
                 summary: VIP Customer Discount
                 value:
                   rule_id: "pricing.discount.vip"
                   data:
                     amount: 150
-                    customer_type: "VIP"
+                    customerType: "VIP"
                     region: "US"
               complex_pricing:
                 summary: Complex Pricing Rule
@@ -151,14 +154,29 @@ paths:
                 success_response:
                   summary: Successful Rule Execution
                   value:
-                    rule_id: "simple.discount"
+                    rule_id: "pricing.discount.simple"
                     result:
-                      amount: 90
-                      discount: 10
-                      discount_percentage: 10
+                      amount: 90.0
+                      discount: 10.0
+                      discountPercent: 10
+                      discountReason: "Order over $50 discount"
                     error: null
                     execution_time_ms: 15
                     timestamp: "2025-07-22T12:00:00Z"
+                vip_response:
+                  summary: VIP discount only (simple's 10% does not stack)
+                  value:
+                    rule_id: "pricing.discount.vip"
+                    result:
+                      amount: 120.0
+                      customerType: "VIP"
+                      customerTier: "VIP"
+                      region: "US"
+                      discount: 30.0
+                      discountPercent: 20
+                      discountReason: "VIP customer exclusive discount"
+                    error: null
+                    execution_time_ms: 15
         '400':
           description: Invalid input or rule execution error
           content:
@@ -184,7 +202,7 @@ paths:
                     error:
                       code: "RULE_EXECUTION_ERROR"
                       message: "Failed to execute rule"
-                      details: "Missing required field 'customer_type'"
+                      details: "Missing required field 'customerType'"
                       timestamp: "2025-07-22T12:00:00Z"
         '404':
           description: Rule not found
@@ -795,7 +813,7 @@ components:
           additionalProperties: true
           example:
             amount: 150
-            customer_type: "VIP"
+            customerType: "VIP"
             region: "US"
 
     RuleExecutionResponse:
@@ -810,9 +828,13 @@ components:
           description: Rule execution result data
           additionalProperties: true
           example:
-            amount: 120
-            discount: 30
-            discount_percentage: 20
+            amount: 120.0
+            customerType: "VIP"
+            customerTier: "VIP"
+            region: "US"
+            discount: 30.0
+            discountPercent: 20
+            discountReason: "VIP customer exclusive discount"
         error:
           $ref: '#/components/schemas/ErrorInfo'
         execution_time_ms:

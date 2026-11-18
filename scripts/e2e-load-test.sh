@@ -8,7 +8,7 @@
 #   2. Verify the 17 sample rules are in LocalStack S3 (uploaded by the
 #      LocalStack ready hook — no host AWS CLI needed)
 #   3. Load rules into the engine
-#   4. Smoke-test rules with VALUE checks (stacking-aware expected results)
+#   4. Smoke-test rules with VALUE checks (rules are isolated per rule_id — ADR-025)
 #   5. Hot reload test
 #   6. Memory stability check (5 rapid reloads + GC verify)
 #   7. Load test: keep-alive Python harness (scripts/lib/e2e_load.py), N workers,
@@ -183,7 +183,7 @@ fi
 info "Heap after load: $(mem_info)"
 
 # ── Step 4: Smoke tests (value checks) ────────────────────────────────────────
-step "Step 4 — Smoke test rules (values checked; all $EXPECTED_RULES rules loaded → stacking applies)"
+step "Step 4 — Smoke test rules (values checked; each rule_id runs only its own rules)"
 
 # smoke_test LABEL PAYLOAD PYTHON_PREDICATE_ON_r
 smoke_test() {
@@ -202,10 +202,10 @@ sys.exit(0 if j.get("error") is None and ('"$pred"') else 1)' "$resp" 2>/dev/nul
 }
 
 smoke_test "simple: \$150 → \$135"        '{"rule_id":"pricing.discount.simple","data":{"amount":150}}'                         'near(r["amount"], 135.0)'
-smoke_test "vip: \$100 stacks → \$72"      '{"rule_id":"pricing.discount.vip","data":{"customerType":"VIP","amount":100}}'       'near(r["amount"], 72.0)'
-smoke_test "bulk: 15 × \$200 → \$153"      '{"rule_id":"pricing.discount.bulk","data":{"quantity":15,"amount":200}}'             'near(r["amount"], 153.0)'
+smoke_test "vip: \$100 → \$80 (isolated)" '{"rule_id":"pricing.discount.vip","data":{"customerType":"VIP","amount":100}}'       'near(r["amount"], 80.0)'
+smoke_test "bulk: 15 × \$200 → \$170"      '{"rule_id":"pricing.discount.bulk","data":{"quantity":15,"amount":200}}'             'near(r["amount"], 170.0)'
 smoke_test "age: 15 → REJECTED"            '{"rule_id":"validation.customer.age","data":{"customerAge":15}}'                     'r["validationResult"] == "REJECTED"'
-smoke_test "blackfriday: \$200 → \$135"    '{"rule_id":"seasonal.holiday.blackfriday","data":{"promotionCode":"BLACK2024","amount":200}}' 'near(r["amount"], 135.0) and r["promotionValid"] is True'
+smoke_test "blackfriday: \$200 → \$150"    '{"rule_id":"seasonal.holiday.blackfriday","data":{"promotionCode":"BLACK2024","amount":200}}' 'near(r["amount"], 150.0) and r["promotionValid"] is True'
 
 # ── Step 5: Hot reload ────────────────────────────────────────────────────────
 step "Step 5 — Hot reload test"

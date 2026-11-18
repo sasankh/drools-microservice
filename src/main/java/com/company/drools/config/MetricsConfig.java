@@ -1,5 +1,6 @@
 package com.company.drools.config;
 
+import com.company.drools.core.engine.CompiledRulesetRegistry;
 import io.micrometer.cloudwatch2.CloudWatchConfig;
 import io.micrometer.cloudwatch2.CloudWatchMeterRegistry;
 import io.micrometer.core.instrument.*;
@@ -127,9 +128,6 @@ public class MetricsConfig {
   /** Atomic integer to track cache size for gauge metrics. */
   private final AtomicInteger cacheSize = new AtomicInteger(0);
 
-  /** Atomic integer to track loaded rules for gauge metrics. */
-  private final AtomicInteger loadedRulesCount = new AtomicInteger(0);
-
   /** Gauge for current cache size. Monitors cache utilization. */
   @Bean
   public Gauge cacheSizeGauge(MeterRegistry meterRegistry) {
@@ -140,11 +138,15 @@ public class MetricsConfig {
         .register(meterRegistry);
   }
 
-  /** Gauge for number of loaded rules. Monitors rule engine state. */
+  /**
+   * Gauge for the number of rule IDs with a compiled version able to serve requests. Bound to the
+   * live {@link CompiledRulesetRegistry} (previously an AtomicInteger nothing updated, so it always
+   * read 0).
+   */
   @Bean
-  public Gauge loadedRulesGauge(MeterRegistry meterRegistry) {
-    return Gauge.builder("drools.rules.loaded", loadedRulesCount, AtomicInteger::doubleValue)
-        .description("Number of rules currently loaded")
+  public Gauge loadedRulesGauge(MeterRegistry meterRegistry, CompiledRulesetRegistry registry) {
+    return Gauge.builder("drools.rules.loaded", registry, CompiledRulesetRegistry::size)
+        .description("Number of rule IDs currently compiled and serving")
         .tag(TAG_APPLICATION, applicationName)
         .tag(TAG_ENVIRONMENT, environment)
         .register(meterRegistry);
@@ -153,11 +155,6 @@ public class MetricsConfig {
   /** Get cache size atomic integer for updating metrics. */
   public AtomicInteger getCacheSize() {
     return cacheSize;
-  }
-
-  /** Get loaded rules count atomic integer for updating metrics. */
-  public AtomicInteger getLoadedRulesCount() {
-    return loadedRulesCount;
   }
 
   /** Counter for API requests by endpoint. Measures API usage patterns. */

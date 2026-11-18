@@ -60,6 +60,36 @@ public class RuleMetadata {
         averageExecutionTimeMs);
   }
 
+  /**
+   * A new version compiled and is now serving: ACTIVE, error cleared, {@code loadedAt} = now.
+   * Execution statistics carry over.
+   */
+  public RuleMetadata withCompiled() {
+    return new RuleMetadata(
+        version,
+        LocalDateTime.now(),
+        lastModified,
+        RuleStatus.ACTIVE,
+        null,
+        executionCount,
+        averageExecutionTimeMs);
+  }
+
+  /**
+   * An update failed but the previous version keeps serving: status unchanged, error recorded so
+   * operators can see the rejected update.
+   */
+  public RuleMetadata withFailedUpdate(String errorMessage) {
+    return new RuleMetadata(
+        version,
+        loadedAt,
+        lastModified,
+        status,
+        errorMessage,
+        executionCount,
+        averageExecutionTimeMs);
+  }
+
   public RuleMetadata withExecution(double executionTimeMs) {
     long newCount = executionCount + 1;
     // Incremental average avoids overflow for large execution counts

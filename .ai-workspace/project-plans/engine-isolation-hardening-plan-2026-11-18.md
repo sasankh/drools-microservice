@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Created** | 2026-11-18 |
-| **Status** | 🟡 Phase 1 complete (ADR-025: per-ID KnowledgeBuilder KieBase); Phase 2 (isolation) in progress |
+| **Status** | 🟡 Phases 1–2 complete (rule_id isolation shipped on the branch); Phase 3 (refresh/storage/startup) in progress |
 | **Work branch** | `engine-isolation` (git worktree `.claude/worktrees/engine-isolation`, based on `improvements-1-11-18-2026` @ `e1dd059` = `develop` after PR #10) |
 | **Delivered to** | `improvements-1-11-18-2026`, then one PR to `develop` (opened when the user asks) |
 | **Release target** | Next minor after v3.3.0. This contains a **breaking semantic change**: rule stacking is removed. |
@@ -448,19 +448,19 @@ Same as A4.8, plus live: a runaway rule → 408 and the stuck gauge = 1; a cap-l
 - [ ] Commit
 
 ### B2. Phase 2 — Isolation
-- [ ] `CompiledRuleset` + `CompiledRulesetRegistry` (atomic install/remove/get/snapshot, retirement)
-- [ ] `RuleCompiler.compileRule` (per-ID sanitize + build); `compileRules` → per-ID results; single-module path removed
-- [ ] `RuleExecutor` executes a `CompiledRuleset`; session always closed
-- [ ] `DroolsEngineService`: registry lookup, **no read lock**, `LoadReport`, per-ID replace/remove, failed ID keeps last good + `ERROR`
-- [ ] Callers on the `LoadReport` (AdminController, subscriber, startup)
-- [ ] `KieContainer` bean retired; all users updated
-- [ ] Metrics: compile time/error; `drools.rules.loaded` gauge bound
-- [ ] `RuleIsolationIntegrationTest`: all A4.6 cases; regression test enabled and green
-- [ ] Existing tests updated (Executor, Service, Compiler duplicate-name, Refresh IT, Admin, Subscriber)
-- [ ] Scripts on isolated values (`e2e_load.py`, `e2e-load-test.sh`, `run-docker-test-plan.sh`; X1.K → PASS)
-- [ ] Docs on isolated values (test plan, cookbook, 00/04/32/35/37/38, READMEs, openapi)
-- [ ] Gate: `mvn verify` + ITs green; docker test plan all PASS; e2e 60 s PASS
-- [ ] Commit
+- [x] `CompiledRuleset` + `CompiledRulesetRegistry` (atomic install/remove/get/snapshot, retirement)
+- [x] `RuleCompiler.compileRule` (per-ID sanitize + build); `compileRules` → per-ID results; single-module path removed
+- [x] `RuleExecutor` executes a `CompiledRuleset`; session always closed
+- [x] `DroolsEngineService`: registry lookup, **no read lock**, `LoadReport`, per-ID replace/remove, failed ID keeps last good + `ERROR`
+- [x] Callers on the `LoadReport` (AdminController, subscriber, startup)
+- [x] `KieContainer` bean retired; all users updated
+- [x] Metrics: compile time/error; `drools.rules.loaded` gauge bound
+- [x] `RuleIsolationIntegrationTest`: all A4.6 cases; regression test enabled and green
+- [x] Existing tests updated (Executor, Service, Compiler duplicate-name, Refresh IT, Admin, Subscriber)
+- [x] Scripts on isolated values (`e2e_load.py`, `e2e-load-test.sh`, `run-docker-test-plan.sh`; X1.K → PASS)
+- [x] Docs on isolated values (25 files: test plan, cookbook, 00/01/02/04/10/16/18/19/25/26/28/29/30/31/32/35/37/38, READMEs, openapi)
+- [x] Gate: `mvn verify` 620 tests / 0 failures, coverage 92.1 % / 82.1 %; Testcontainers ITs 20/20; docker test plan **60 PASS / 0 FAIL** (X1.K now PASS, X1.11 new); e2e 60 s 306,723 req, 0 errors, 0 wrong
+- [x] Commit
 
 ### B3. Phase 3 — Refresh / storage / startup
 - [ ] `getAllRules()` complete-or-throw contract (S3, Local, Redis decorator); CB counts failures
@@ -510,4 +510,4 @@ Same as A4.8, plus live: a runaway rule → 408 and the stuck gauge = 1; a cap-l
 
 ---
 
-_Plan created: 2026-11-18 · Last updated: 2026-11-18 (Phase 1 complete — ADR-025; Phase 2 in progress)_
+_Plan created: 2026-11-18 · Last updated: 2026-11-18 (Phase 2 complete — isolation; Phase 3 in progress)_

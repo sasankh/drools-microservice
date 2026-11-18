@@ -220,7 +220,7 @@ See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) for
 
 ## Redis
 
-Refactored 2026-05-20 — see [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20). When `REDIS_ENABLED=true`, `StorageFactory` wraps the base `RuleStorage` with `RedisCachedRuleStorage` (read-through cache of DRL text). When `REDIS_PUBSUB_ENABLED=true` (default when Redis is on), `RuleRefreshPublisher` emits events on `drools:rule:events` after every refresh; `RuleRefreshSubscriber` receives and refreshes this task's `kieContainer`.
+Refactored 2026-05-20 — see [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20). When `REDIS_ENABLED=true`, `StorageFactory` wraps the base `RuleStorage` with `RedisCachedRuleStorage` (read-through cache of DRL text). When `REDIS_PUBSUB_ENABLED=true` (default when Redis is on), `RuleRefreshPublisher` emits events on `drools:rule:events` after every refresh; `RuleRefreshSubscriber` receives and refreshes this task's compiled rulesets.
 
 | Variable | Default | What it does |
 |---|---|---|

@@ -454,9 +454,9 @@ executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
 
 Because a refresh event triggers a (possibly long) rule recompile, running it on the Lettuce thread would block delivery of subsequent events. The single-thread + bounded-queue (50) design serializes recompiles off the dispatch thread and caps pile-up under bursts; `CallerRunsPolicy` means nothing is silently dropped if the queue fills. Spring manages init/shutdown. This is separate from the `FixedBackOff(2s, ∞)` re-subscribe recovery backoff documented above.
 
-### `refreshLock` — compile off the write lock (P7)
+### `refreshLock` — mutations serialized, execution lock-free
 
-[`DroolsEngineService`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java) uses a separate `refreshLock` (a `ReentrantLock`) to serialize refreshes, distinct from the `rulesLock` `ReentrantReadWriteLock` that guards the compiled `KieBase`. The (slow) rule compile runs **without** holding the write lock; only the brief `kieContainer.updateToVersion(...)` + metadata swap takes the write lock. So `/execute-rule` reads are not blocked during compilation — even a 46s 1000-rule recompile does not stall live traffic. `loadOrReplaceRule` (single-rule) and the new `removeRule` (used by the pub/sub `RULE_DELETED` handler) both follow this pattern: snapshot the current rule set under a short read lock, then compile + swap off the write lock.
+[`DroolsEngineService`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java) uses a `refreshLock` (a `ReentrantLock`) to serialize mutations: `loadRules` (full set), `loadOrReplaceRule` (one rule ID) and `removeRule` (used by the pub/sub `RULE_DELETED` handler). Since [ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18) there is no read-write lock: each rule ID has its own immutable compiled handle in the `CompiledRulesetRegistry`, installed with an atomic per-ID map put. `/execute-rule` takes its rule ID's handle without any lock, so a refresh never blocks live traffic, and a single-rule refresh recompiles only that ID.
 
 ---
 

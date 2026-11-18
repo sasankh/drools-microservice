@@ -139,7 +139,7 @@ Expected:
 
 The rule fired: 10% off because the order is ≥ $50.
 
-### Call 3: Execute the VIP discount (and discover stacking)
+### Call 3: Execute the VIP discount
 
 ```bash
 curl -sX POST http://localhost:8080/execute-rule \
@@ -147,11 +147,9 @@ curl -sX POST http://localhost:8080/execute-rule \
   -d '{"rule_id":"pricing.discount.vip","data":{"customerType":"VIP","amount":100}}' | jq '.result'
 ```
 
-Expected: `amount: 72.0` (NOT 80.0).
+Expected: `amount: 80.0`, `discount: 20.0`, `discountReason: "VIP customer exclusive discount"`.
 
-Why? Both `pricing.discount.vip` AND `pricing.discount.simple` matched and fired. The discounts compounded multiplicatively: `100 × 0.80 × 0.90 = 72`. The sample rules **stack** because none use `salience` to control firing order.
-
-This is documented thoroughly in [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md). It's the most surprising thing about the sample rule set.
+Only the rules in `pricing/discount/vip.drl` ran. `pricing.discount.simple` would also match this data (amount ≥ 50), but a request runs only its own `rule_id`, so the 10% does not stack on top ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)). To combine discounts, call each rule ID. Every sample rule is covered in [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md).
 
 ---
 
@@ -162,7 +160,7 @@ You've now seen the service work. Where to go next depends on your role:
 ### "I'm a developer who'll work on the codebase"
 
 → [27-development-setup.md](27-development-setup.md) — local Java setup, IDE, conventions, build/test workflow.
-→ [04-architecture.md](04-architecture.md) — full architecture: filter chain, threading, Drools 10 `updateToVersion` rule-loading pattern, security layers.
+→ [04-architecture.md](04-architecture.md) — full architecture: filter chain, threading, per-rule-ID KieBase rule loading, security layers.
 → [28-testing-guide.md](28-testing-guide.md) — test suite map (48 files, 536 unit + 14 integration tests), how to add tests.
 
 ### "I'm an architect / I want to understand the design"

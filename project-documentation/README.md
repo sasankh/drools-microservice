@@ -18,7 +18,7 @@ NotebookLM accepts up to 50 sources, each up to 500K characters. This corpus has
 4. Wait for indexing (~1-2 minutes for this corpus size).
 5. Test with sample queries:
    - "What are the 7 security headers and their values?"
-   - "Why does VIP discount with $100 produce $72 instead of $80?"
+   - "Does a request for one rule_id run any other rules?"
    - "How does rate limiting identify clients?"
    - "What's blocked by the DRL sandbox?"
    - "How do I rotate the admin API key?"

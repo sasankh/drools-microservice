@@ -89,12 +89,11 @@ The dead `LocalLRUCacheTest` / `RedisRuleCacheTest` / `CacheStatisticsTest` file
 | [`LogSanitizerTest.java`](../src/test/java/com/company/drools/common/LogSanitizerTest.java) | 24 — credit card masking, SSN masking, nested map recursion, false-positive avoidance |
 | [`RequestPathsTest.java`](../src/test/java/com/company/drools/common/RequestPathsTest.java) | 13 — normalization used by all filters: percent-decoding, `;` stripping, `//` collapse, context path (ADR-024) |
 
-### `config/` — 11 files
+### `config/` — 10 files
 
 | File | Tests |
 |---|---:|
 | `CircuitBreakerConfigTest.java` | 6 |
-| `DroolsConfigTest.java` | 4 |
 | `InstanceIdConfigTest.java` | 2 (per-instance UUID bean used by pub/sub layer, added 2026-05-20) |
 | `LoggingConfigTest.java` | 9 |
 | `MetricsConfigTest.java` | 13 |
@@ -110,8 +109,8 @@ The dead `LocalLRUCacheTest` / `RedisRuleCacheTest` / `CacheStatisticsTest` file
 | File | Tests | What it proves |
 |---|---:|---|
 | [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) | 8 | Every sandbox rule: import allowlist/blocklist, blocked classes, blocked methods, eval() rejection, static imports rejected (8 methods across 6 `@Nested` classes; parameterized methods expand over all blocked entries) |
-| [`DroolsEngineServiceTest.java`](../src/test/java/com/company/drools/core/engine/DroolsEngineServiceTest.java) | 25 | Rule lookup, `KieContainer.updateToVersion` swap (post-2026-05-10 pattern), `KieRepository.removeKieModule` cleanup, `removeRule`, TOCTOU-safe lookup |
-| [`RuleCompilerTest.java`](../src/test/java/com/company/drools/core/engine/RuleCompilerTest.java) | 9 | DRL compilation, sanitizer integration, error reporting |
+| [`DroolsEngineServiceTest.java`](../src/test/java/com/company/drools/core/engine/DroolsEngineServiceTest.java) | 25 | Rule lookup, per-rule-ID install/replace/remove (`PerIdIsolation`), failed compile keeps last good version, `removeRule`, TOCTOU-safe lookup, metrics |
+| [`RuleCompilerTest.java`](../src/test/java/com/company/drools/core/engine/RuleCompilerTest.java) | 9 | Per-rule-ID DRL compilation into its own KieBase, sanitizer integration, error reporting |
 | [`RuleExecutorTest.java`](../src/test/java/com/company/drools/core/engine/RuleExecutorTest.java) | 12 | Async execution, timeout → `KieSession.halt()` + `future.cancel(true)`, pool-saturation → `ServiceUnavailableException` (503), maxRuleFirings cap |
 
 ### `core/model/` — 38 tests
@@ -138,7 +137,8 @@ The dead `LocalLRUCacheTest` / `RedisRuleCacheTest` / `CacheStatisticsTest` file
 |---|---|
 | [`RuleExecutionIntegrationTest.java`](../src/test/java/com/company/drools/integration/RuleExecutionIntegrationTest.java) | Real Drools KieBase + sample rules from filesystem; includes the `SampleRulesExecution` nested class that pin-tests outputs for all 17 sample rules |
 | [`S3StorageIntegrationTest.java`](../src/test/java/com/company/drools/integration/S3StorageIntegrationTest.java) | Real LocalStack S3 via Testcontainers |
-| [`RuleRefreshIntegrationTest.java`](../src/test/java/com/company/drools/integration/RuleRefreshIntegrationTest.java) | Refresh-path integration including `KieRepository.removeKieModule` cleanup verification (Drools 10 pattern) |
+| [`RuleRefreshIntegrationTest.java`](../src/test/java/com/company/drools/integration/RuleRefreshIntegrationTest.java) | Refresh-path integration (full and single-rule refresh against the per-rule-ID registry) |
+| [`RuleIsolationIntegrationTest.java`](../src/test/java/com/company/drools/integration/RuleIsolationIntegrationTest.java) | Rule-ID isolation with all 17 sample rules loaded ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)): VIP $100 → 80 and simple with VIP fields → 90 (no stacking), forall without `price` succeeds, same-package files isolate, salience order inside one file, unknown IDs never fall back, broken refresh keeps last good version, replace recompiles only that ID, in-flight request finishes on the old version, concurrent IDs don't cross-contaminate |
 | [`PathBypassIntegrationTest.java`](../src/test/java/com/company/drools/integration/PathBypassIntegrationTest.java) | **Real embedded Tomcat** (`@SpringBootTest(RANDOM_PORT)`, `local` profile) + `java.net.http.HttpClient` sending raw paths: `/admin;x/health`, `/%61dmin/health`, `/%65xecute-rule`, … → 400 (with security headers); `/admin/health` → 401 / 200. Regression guard for ADR-024. Runs in default `mvn test` (no Docker). |
 | [`RedisCachedStorageIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisCachedStorageIntegrationTest.java) | Redis decorator end-to-end (cold→warm cache, TTL, bulk SCAN+MGET, refreshCache, refreshRule, write-through, Redis-kill CB fallback) |
 | [`RedisPubSubIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisPubSubIntegrationTest.java) | Two-instance pub/sub fan-out (single + bulk + delete events, wire-format end-to-end, source-instance dedup) |
@@ -239,8 +239,8 @@ These are claims that are **proven by tests** — when this doc says "X is enfor
 | Blocked imports rejected | `DrlSanitizerTest` (`BlockedImports` nested) | various |
 | Allowed imports accepted | `DrlSanitizerTest` (`AllowedRules` nested) | various |
 | Static imports rejected | `DrlSanitizerTest` (`BlockedImports` nested) | dedicated test |
-| Old `KieModule` removed from `KieRepository` on refresh | `DroolsEngineServiceTest` | post-2026-05-10 cleanup test (representative) |
-| `KieContainer.updateToVersion` rule loading | `DroolsEngineServiceTest` | tested in load/refresh paths |
+| A request runs only its own rule ID's rules (no stacking) | `RuleIsolationIntegrationTest` | `simpleDoesNotRunVip`, `vipGivesEighty` |
+| Per-rule-ID refresh recompiles only that ID | `RuleIsolationIntegrationTest`, `DroolsEngineServiceTest` (`PerIdIsolation`) | `replaceOnlyRecompilesThatId` |
 | TOCTOU-safe lookup | `DroolsEngineServiceTest` | tested via concurrent access |
 | `maxRuleFirings = 10000` cap | `RuleExecutorTest` | bounded execution test |
 | Timeout calls `KieSession.halt()` + `future.cancel(true)` | `RuleExecutorTest` | timeout test (halts at next rule boundary, then 408) |

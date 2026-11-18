@@ -3,6 +3,8 @@ package com.company.drools.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.company.drools.config.TimeoutConfig;
+import com.company.drools.core.engine.CompiledRulesetRegistry;
+import com.company.drools.core.engine.DrlSanitizer;
 import com.company.drools.core.engine.DroolsEngineService;
 import com.company.drools.core.engine.RuleCompiler;
 import com.company.drools.core.engine.RuleExecutor;
@@ -20,8 +22,6 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.*;
-import org.kie.api.KieServices;
-import org.kie.api.runtime.KieContainer;
 import org.mockito.Mockito;
 
 /**
@@ -32,7 +32,6 @@ import org.mockito.Mockito;
 @DisplayName("Rule Execution Integration Tests")
 class RuleExecutionIntegrationTest {
 
-  private static KieServices kieServices;
   private static RuleCompiler ruleCompiler;
   private static ExecutorService executorService;
 
@@ -42,8 +41,7 @@ class RuleExecutionIntegrationTest {
 
   @BeforeAll
   static void initShared() {
-    kieServices = KieServices.Factory.get();
-    ruleCompiler = new RuleCompiler(kieServices, new com.company.drools.core.engine.DrlSanitizer());
+    ruleCompiler = new RuleCompiler(new DrlSanitizer());
     executorService = Executors.newFixedThreadPool(10);
   }
 
@@ -56,9 +54,6 @@ class RuleExecutionIntegrationTest {
   void setUp() {
     ruleExecutor = new RuleExecutor(executorService);
     meterRegistry = new SimpleMeterRegistry();
-
-    // Create an empty initial KieContainer
-    KieContainer emptyContainer = createEmptyKieContainer();
 
     // Use a no-op RuleStorage since we load rules directly
     RuleStorage noOpStorage =
@@ -117,24 +112,10 @@ class RuleExecutionIntegrationTest {
         new DroolsEngineService(
             ruleCompiler,
             ruleExecutor,
-            emptyContainer,
-            kieServices.getRepository(),
+            new CompiledRulesetRegistry(),
             noOpStorage,
             timeoutConfig,
             meterRegistry);
-  }
-
-  private KieContainer createEmptyKieContainer() {
-    // Must use the same groupId/artifactId that RuleCompiler emits, so updateToVersion(...)
-    // can resolve newly-built modules from the KieRepository.
-    var releaseId =
-        kieServices.newReleaseId(
-            RuleCompiler.GROUP_ID, RuleCompiler.ARTIFACT_ID, RuleCompiler.INITIAL_VERSION);
-    var kfs = kieServices.newKieFileSystem();
-    kfs.generateAndWritePomXML(releaseId);
-    var kb = kieServices.newKieBuilder(kfs);
-    kb.buildAll();
-    return kieServices.newKieContainer(releaseId);
   }
 
   private Rule loadSampleRule(String ruleId) throws IOException {
@@ -428,7 +409,7 @@ class RuleExecutionIntegrationTest {
           droolsEngineService.executeRule("pricing.discount.simple", firstInput);
       assertThat(firstResult.isSuccess()).isTrue();
 
-      // Second execution - should reuse the same compiled KieContainer
+      // Second execution - should reuse the same compiled KieBase
       Map<String, Object> secondInput = new HashMap<>();
       secondInput.put("amount", 200.0);
       RuleExecutor.ExecutionResult secondResult =

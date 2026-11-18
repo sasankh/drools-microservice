@@ -3,6 +3,8 @@ package com.company.drools.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.company.drools.config.TimeoutConfig;
+import com.company.drools.core.engine.CompiledRuleset;
+import com.company.drools.core.engine.CompiledRulesetRegistry;
 import com.company.drools.core.engine.DrlSanitizer;
 import com.company.drools.core.engine.DroolsEngineService;
 import com.company.drools.core.engine.RuleCompiler;
@@ -24,9 +26,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.kie.api.KieServices;
-import org.kie.api.builder.ReleaseId;
-import org.kie.api.runtime.KieContainer;
 import org.mockito.Mockito;
 
 /**
@@ -38,17 +37,16 @@ import org.mockito.Mockito;
 @DisplayName("Rule Refresh Integration Tests")
 class RuleRefreshIntegrationTest {
 
-  private static KieServices kieServices;
   private static RuleCompiler ruleCompiler;
   private static ExecutorService executorService;
 
   private DroolsEngineService droolsEngineService;
   private RuleExecutor ruleExecutor;
+  private CompiledRulesetRegistry registry;
 
   @BeforeAll
   static void initShared() {
-    kieServices = KieServices.Factory.get();
-    ruleCompiler = new RuleCompiler(kieServices, new DrlSanitizer());
+    ruleCompiler = new RuleCompiler(new DrlSanitizer());
     executorService = Executors.newFixedThreadPool(4);
   }
 
@@ -62,7 +60,7 @@ class RuleRefreshIntegrationTest {
     ruleExecutor = new RuleExecutor(executorService);
     MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
-    KieContainer initialContainer = createEmptyKieContainer();
+    registry = new CompiledRulesetRegistry();
 
     RuleStorage noOpStorage =
         new RuleStorage() {
@@ -117,24 +115,7 @@ class RuleRefreshIntegrationTest {
 
     droolsEngineService =
         new DroolsEngineService(
-            ruleCompiler,
-            ruleExecutor,
-            initialContainer,
-            kieServices.getRepository(),
-            noOpStorage,
-            timeoutConfig,
-            meterRegistry);
-  }
-
-  private KieContainer createEmptyKieContainer() {
-    ReleaseId releaseId =
-        kieServices.newReleaseId(
-            RuleCompiler.GROUP_ID, RuleCompiler.ARTIFACT_ID, RuleCompiler.INITIAL_VERSION);
-    var kfs = kieServices.newKieFileSystem();
-    kfs.generateAndWritePomXML(releaseId);
-    var kb = kieServices.newKieBuilder(kfs);
-    kb.buildAll();
-    return kieServices.newKieContainer(releaseId);
+            ruleCompiler, ruleExecutor, registry, noOpStorage, timeoutConfig, meterRegistry);
   }
 
   /** Builds a tiny DRL whose LHS matches a Map containing a specific marker key. */
@@ -174,10 +155,23 @@ class RuleRefreshIntegrationTest {
     assertThat(executeAndGetMarker("test.refresh.ruleB", "bravo")).isTrue();
     assertThat(executeAndGetMarker("test.refresh.ruleC", "charlie")).isTrue();
 
+    CompiledRuleset handleA = registry.get("test.refresh.ruleA").orElseThrow();
+    CompiledRuleset handleB = registry.get("test.refresh.ruleB").orElseThrow();
+    CompiledRuleset handleC = registry.get("test.refresh.ruleC").orElseThrow();
+
     // Single-rule refresh of ruleB. Bug behaviour was: ruleA and ruleC stop firing.
     Rule ruleBv2 = markerRule("test.refresh.ruleB", "com.company.rules.refresh.b", "bravo");
     boolean refresh = droolsEngineService.loadOrReplaceRule(ruleBv2);
     assertThat(refresh).isTrue();
+
+    // Per-ID isolation (ADR-025): only ruleB was recompiled; A and C keep the very same handle.
+    assertThat(registry.get("test.refresh.ruleA")).containsSame(handleA);
+    assertThat(registry.get("test.refresh.ruleC")).containsSame(handleC);
+    CompiledRuleset newHandleB = registry.get("test.refresh.ruleB").orElseThrow();
+    assertThat(newHandleB).isNotSameAs(handleB);
+    // Same DRL text -> same content digest, even though it is a fresh compile.
+    assertThat(newHandleB.contentDigest()).isEqualTo(handleB.contentDigest());
+    assertThat(registry.size()).isEqualTo(3);
 
     // Fix: all three rules MUST still fire after the single-rule refresh.
     assertThat(executeAndGetMarker("test.refresh.ruleA", "alpha"))
@@ -189,6 +183,81 @@ class RuleRefreshIntegrationTest {
     assertThat(executeAndGetMarker("test.refresh.ruleC", "charlie"))
         .as("ruleC should still fire after single-rule refresh of ruleB")
         .isTrue();
+  }
+
+  @Test
+  @DisplayName("content change produces a new handle with a new digest and new behaviour")
+  void contentChange_swapsHandleAndDigest() {
+    Rule ruleA = markerRule("test.refresh.ruleA", "com.company.rules.refresh.a", "alpha");
+    Rule ruleB = markerRule("test.refresh.ruleB", "com.company.rules.refresh.b", "bravo");
+    assertThat(droolsEngineService.loadRules(List.of(ruleA, ruleB))).isTrue();
+
+    CompiledRuleset handleA = registry.get("test.refresh.ruleA").orElseThrow();
+    CompiledRuleset handleB = registry.get("test.refresh.ruleB").orElseThrow();
+    assertThat(handleB.contentDigest()).isEqualTo(RuleCompiler.sha256(ruleB.getContent()));
+
+    // ruleB v2 matches a different marker key.
+    Rule ruleBv2 = markerRule("test.refresh.ruleB", "com.company.rules.refresh.b", "bravo2");
+    assertThat(droolsEngineService.loadOrReplaceRule(ruleBv2)).isTrue();
+
+    CompiledRuleset newHandleB = registry.get("test.refresh.ruleB").orElseThrow();
+    assertThat(newHandleB.contentDigest())
+        .isNotEqualTo(handleB.contentDigest())
+        .isEqualTo(RuleCompiler.sha256(ruleBv2.getContent()));
+    assertThat(registry.get("test.refresh.ruleA")).containsSame(handleA);
+
+    assertThat(executeAndGetMarker("test.refresh.ruleB", "bravo2")).isTrue();
+    assertThat(executeAndGetMarker("test.refresh.ruleB", "bravo")).isFalse();
+    assertThat(executeAndGetMarker("test.refresh.ruleA", "alpha")).isTrue();
+  }
+
+  @Test
+  @DisplayName("a broken update keeps the previous version serving and records the error")
+  void brokenUpdate_keepsPreviousVersionServing() {
+    Rule ruleA = markerRule("test.refresh.ruleA", "com.company.rules.refresh.a", "alpha");
+    Rule ruleB = markerRule("test.refresh.ruleB", "com.company.rules.refresh.b", "bravo");
+    assertThat(droolsEngineService.loadRules(List.of(ruleA, ruleB))).isTrue();
+    CompiledRuleset handleB = registry.get("test.refresh.ruleB").orElseThrow();
+
+    Rule brokenB =
+        new Rule(
+            "test.refresh.ruleB",
+            "package com.company.rules.refresh.b\nrule \"broken\" when then $x.oops( end",
+            RuleMetadata.createNew());
+    assertThat(droolsEngineService.loadOrReplaceRule(brokenB)).isFalse();
+
+    assertThat(registry.get("test.refresh.ruleB")).containsSame(handleB);
+    RuleMetadata metadata = droolsEngineService.getRuleMetadata("test.refresh.ruleB");
+    assertThat(metadata.getStatus()).isEqualTo(RuleMetadata.RuleStatus.ACTIVE);
+    assertThat(metadata.getErrorMessage()).isNotBlank();
+    assertThat(executeAndGetMarker("test.refresh.ruleB", "bravo")).isTrue();
+    assertThat(executeAndGetMarker("test.refresh.ruleA", "alpha")).isTrue();
+  }
+
+  @Test
+  @DisplayName("removeRule and a smaller full reload remove only the absent IDs")
+  void removal_affectsOnlyThatId() {
+    Rule ruleA = markerRule("test.refresh.ruleA", "com.company.rules.refresh.a", "alpha");
+    Rule ruleB = markerRule("test.refresh.ruleB", "com.company.rules.refresh.b", "bravo");
+    Rule ruleC = markerRule("test.refresh.ruleC", "com.company.rules.refresh.c", "charlie");
+    assertThat(droolsEngineService.loadRules(List.of(ruleA, ruleB, ruleC))).isTrue();
+    CompiledRuleset handleA = registry.get("test.refresh.ruleA").orElseThrow();
+
+    assertThat(droolsEngineService.removeRule("test.refresh.ruleC")).isTrue();
+    assertThat(registry.ruleIds())
+        .containsExactlyInAnyOrder("test.refresh.ruleA", "test.refresh.ruleB");
+    assertThat(
+            droolsEngineService
+                .executeRule("test.refresh.ruleC", new HashMap<>())
+                .getErrorMessage())
+        .contains("Rule not found");
+
+    DroolsEngineService.LoadReport report = droolsEngineService.loadRulesReport(List.of(ruleA));
+    assertThat(report.removed()).containsExactly("test.refresh.ruleB");
+    assertThat(registry.ruleIds()).containsExactly("test.refresh.ruleA");
+    assertThat(executeAndGetMarker("test.refresh.ruleA", "alpha")).isTrue();
+    // A full reload recompiles the IDs it contains.
+    assertThat(registry.get("test.refresh.ruleA").orElseThrow()).isNotSameAs(handleA);
   }
 
   /** Executes the named rule with a single-key map and returns whether the rule's marker fired. */

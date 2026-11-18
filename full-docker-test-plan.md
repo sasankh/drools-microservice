@@ -172,7 +172,7 @@ curl -s http://localhost:8080/admin/rules -H "X-Admin-API-Key: admin-secret" | j
 
 ## Step 4: Rule Execution (10 Representative Sample Rules — values checked)
 
-All 17 sample rules are loaded into one KieBase, and every rule whose conditions match the input fires. **Rules stack.** For example, `pricing.discount.simple` (10% on `amount >= 50`) also applies on top of VIP, bulk and similar discounts. The expected values below include that stacking. The other 7 rules (accumulate, exists, salience, temporal, forall, notempty, compound) are checked by `scripts/run-docker-test-plan.sh` (X1.x) and `RuleExecutionIntegrationTest`.
+Each `rule_id` runs **only the rules in its own DRL file** ([ADR-025](project-documentation/36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)). Rules do not stack: `pricing.discount.vip` gives 20% off and nothing else, even though `pricing.discount.simple` (10% on `amount >= 50`) would also match the same data. The other 7 rules (accumulate, exists, salience, temporal, forall, notempty, compound) are checked by `scripts/run-docker-test-plan.sh` (X1.x) and `RuleExecutionIntegrationTest`. X1.K checks that a forall request whose items have no `price` succeeds (it used to crash in the bundle rule), and X1.11 checks that `pricing.discount.simple` with VIP fields gives 90 only.
 
 All responses follow:
 ```json
@@ -183,20 +183,20 @@ All responses follow:
 | # | Request `data` (`rule_id`) | Expected `result` |
 |---|---|---|
 | 4.1 | `{"amount":100}` (`pricing.discount.simple`) | `amount` 90.0, `discount` 10.0 |
-| 4.2 | `{"customerType":"VIP","amount":100}` (`pricing.discount.vip`) | `amount` 72.0 (100 × 0.8 × 0.9) |
-| 4.3 | `{"quantity":15,"amount":200}` (`pricing.discount.bulk`) | `amount` 153.0 (200 × 0.85 × 0.9) |
-| 4.4 | `{"isFirstTimeCustomer":true,"amount":100}` (`pricing.discount.first-time`) | `amount` 85.5 |
+| 4.2 | `{"customerType":"VIP","amount":100}` (`pricing.discount.vip`) | `amount` 80.0, `discount` 20.0 |
+| 4.3 | `{"quantity":15,"amount":200}` (`pricing.discount.bulk`) | `amount` 170.0, `discount` 30.0 |
+| 4.4 | `{"isFirstTimeCustomer":true,"amount":100}` (`pricing.discount.first-time`) | `amount` 95.0, `discount` 5.0 |
 | 4.5 | `{"shippingType":"standard","weight":0.5}` (`pricing.shipping.standard`) | `shippingCost` 5.99, `estimatedDays` 5 |
 | 4.6 | `{"shippingType":"express","weight":3,"amount":150}` (`pricing.shipping.express`) | `freeShipping` true, `shippingCost` 0.0 |
-| 4.7 | `{"promotionCode":"BLACK2024","amount":200}` (`seasonal.holiday.blackfriday`) | `amount` 135.0, `promotionValid` true |
-| 4.8 | `{"isHolidaySeason":true,"amount":100}` (`seasonal.holiday.discount`) | `amount` 79.2 |
+| 4.7 | `{"promotionCode":"BLACK2024","amount":200}` (`seasonal.holiday.blackfriday`) | `amount` 150.0, `promotionValid` true |
+| 4.8 | `{"isHolidaySeason":true,"amount":100}` (`seasonal.holiday.discount`) | `amount` 88.0, `discount` 12.0 |
 | 4.9 | `{"customerAge":15}` (`validation.customer.age`) | `validationResult` REJECTED, `eligible` false |
 | 4.10 | `{"creditScore":720,"requestedAmount":10000}` (`validation.customer.credit`) | `creditTier` Good, `approvedAmount` 5000.0 |
 
 Example:
 ```bash
 curl -s -X POST http://localhost:8080/execute-rule -H "Content-Type: application/json" \
-  -d '{"rule_id": "pricing.discount.vip", "data": {"customerType": "VIP", "amount": 100}}' | jq .result.amount   # 72.0
+  -d '{"rule_id": "pricing.discount.vip", "data": {"customerType": "VIP", "amount": 100}}' | jq .result.amount   # 80.0
 ```
 
 ---
@@ -268,7 +268,7 @@ done
 HEAP_AFTER=$(curl -s http://localhost:8080/admin/memory/info -H "X-Admin-API-Key: admin-secret" | jq '.heap.usedMB')
 echo "Heap after 3 refreshes: ${HEAP_AFTER}MB"
 ```
-**Expected**: Heap usage is stable and under 500MB. Should not grow by more than ~100MB per refresh cycle (temporary allocation is normal; `KieContainer.updateToVersion` + `KieRepository.removeKieModule` prevent leaks).
+**Expected**: Heap usage is stable and under 500MB. Should not grow by more than ~100MB per refresh cycle (temporary allocation is normal; each refresh swaps in new per-rule-ID KieBases and the old ones are garbage-collected once no request uses them).
 
 ---
 
@@ -522,13 +522,13 @@ curl -s -X POST http://localhost:8080/admin/refresh-rules -H "X-Admin-API-Key: a
 | 3.3 | Refresh single rule | `status` = `"success"` | |
 | 3.4 | Rules after refresh | `total_rules` still 17 | |
 | 4.1 | Simple discount | `amount` 90.0 | |
-| 4.2 | VIP discount (stacked) | `amount` 72.0 | |
-| 4.3 | Bulk discount (stacked) | `amount` 153.0 | |
-| 4.4 | First-time discount (stacked) | `amount` 85.5 | |
+| 4.2 | VIP discount | `amount` 80.0 | |
+| 4.3 | Bulk discount | `amount` 170.0 | |
+| 4.4 | First-time discount | `amount` 95.0 | |
 | 4.5 | Standard shipping | `shippingCost` 5.99 | |
 | 4.6 | Express shipping | free shipping (amount ≥ 100) | |
-| 4.7 | Black Friday (stacked) | `amount` 135.0, `promotionValid` true | |
-| 4.8 | Holiday discount (stacked) | `amount` 79.2 | |
+| 4.7 | Black Friday | `amount` 150.0, `promotionValid` true | |
+| 4.8 | Holiday discount | `amount` 88.0 | |
 | 4.9 | Age validation | 15 → REJECTED | |
 | 4.10 | Credit validation | 720 → Good, 5000 | |
 | 5.1 | Non-existent rule | `error.code` = `"RULE_NOT_FOUND"` | |

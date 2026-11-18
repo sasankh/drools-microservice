@@ -54,10 +54,10 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 ### 🏛️ Architect / design reviewer
 
 1. [01-project-overview.md](01-project-overview.md) — capabilities + non-goals
-2. [04-architecture.md](04-architecture.md) — full architecture (8 security layers, threading, Drools 10 `updateToVersion`)
+2. [04-architecture.md](04-architecture.md) — full architecture (8 security layers, threading, per-rule-ID KieBase isolation)
 3. [14-security-architecture.md](14-security-architecture.md) — threat model + 8 layers
 4. [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md) — failure handling
-5. [36-architecture-decision-records.md](36-architecture-decision-records.md) — 23 ADRs (001–024; 015 reserved) explaining "why"
+5. [36-architecture-decision-records.md](36-architecture-decision-records.md) — 24 ADRs (001–025; 015 reserved) explaining "why"
 
 ### ⚙️ Operator / SRE
 
@@ -217,9 +217,9 @@ This is the elevator-pitch version. Full detail in [04-architecture.md](04-archi
 4. RateLimitingFilter (Order 1) — checks per-client limit, keyed on source IP
 5. RequestSizeValidationFilter (no Order) — 1 MiB body cap
 6. RuleExecutionController — @ValidRuleId / @ValidRuleData via Jakarta Validation
-7. DroolsEngineService.executeRule() — atomic, lock-free read of compiled KieBase
+7. DroolsEngineService.executeRule() — lock-free lookup of THIS rule_id's compiled KieBase (ADR-025)
 8. RuleExecutor — submits to thread pool; CompletableFuture.get(timeout=30s)
-   - Inside: new KieSession, insert data Map, fireAllRules(maxRuleFirings=10000)
+   - Inside: new KieSession on that KieBase only, insert data Map, fireAllRules(maxRuleFirings=10000)
 9. Metrics emitted (Micrometer); LogSanitizer scrubs response before logging
 10. Response: {rule_id, result: <modified data>, error: null, execution_time_ms}
 ```
@@ -232,12 +232,12 @@ Typical cached-hit latency: 1-40ms.
 
 If you take only one thing from this overview:
 
-1. **Sample rules stack multiplicatively**. VIP $100 → $72 (not $80), because both `pricing.discount.vip` and `pricing.discount.simple` fire and the discounts compound. **Production rules need `salience` or `activation-group`** — the samples deliberately don't, to demonstrate the unmanaged behavior. See [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md).
+1. **A request runs only its own rule file**. `rule_id` is an execution boundary: each rule ID is compiled into its own KieBase, so VIP $100 → $80, and no other loaded rule fires. Before 2026-11-18 every matching rule fired and discounts stacked (VIP $100 → $72); that is gone, with no fallback. To combine discounts, call each `rule_id`. See [ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18) and [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md).
 2. **`ADMIN_API_KEY` empty = admin endpoints are open — but only in `local`/`dev`**. In those profiles a blank key leaves `/admin/*` open with a startup WARN. In `prod`/`docker` a blank key is a hard error: the app **fails to start**. See [15-admin-authentication.md](15-admin-authentication.md).
 3. **`eval()` is BANNED in DRL** — and the sample rules don't need it. See [16-drl-sandboxing.md](16-drl-sandboxing.md).
 4. **Redis is a real cache when `REDIS_ENABLED=true`** — `RedisCachedRuleStorage` decorates the base storage with read-through caching; `RuleRefreshPublisher`/`Subscriber` provide cross-task fan-out via `drools:rule:events` channel. Replaced the old dead `LocalLRUCache`/`RedisRuleCache` layer on 2026-05-20. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20).
 5. **Rate-limit buckets are keyed on source IP only**. `X-API-Key` / `Authorization` / `X-Client-Id` do **not** create separate buckets (keying on unauthenticated headers would let callers defeat the limiter). `X-Forwarded-For` is ignored by default; set `DROOLS_RATE_LIMITING_TRUST_PROXY=true` only behind a trusted proxy that overwrites it. See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md).
-6. **Rule refresh doesn't block readers** — single long-lived `KieContainer` updated in place via `KieContainer.updateToVersion(ReleaseId)` (compile happens outside the write lock). See [ADR-003](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal) and [39-load-test-findings.md](39-load-test-findings.md).
+6. **Rule refresh doesn't block readers** — refreshing one rule ID recompiles only that ID and swaps its immutable handle in the `CompiledRulesetRegistry`; execution takes no lock, and in-flight requests finish on the version they took. See [ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18).
 7. **JSON uses snake_case (`rule_id`)** — not camelCase. The Java field is `ruleId` but mapped via `@JsonProperty`. See [ADR-008](36-architecture-decision-records.md#adr-008-snake_case-json-via-jsonproperty).
 
 ---

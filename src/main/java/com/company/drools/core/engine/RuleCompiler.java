@@ -1,137 +1,148 @@
 package com.company.drools.core.engine;
 
 import com.company.drools.core.model.Rule;
-import java.util.ArrayList;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
-import org.kie.api.KieServices;
-import org.kie.api.builder.*;
+import java.util.Map;
+import org.drools.kiesession.rulebase.InternalKnowledgeBase;
+import org.drools.kiesession.rulebase.KnowledgeBaseFactory;
+import org.kie.api.io.ResourceType;
+import org.kie.internal.builder.KnowledgeBuilder;
+import org.kie.internal.builder.KnowledgeBuilderFactory;
+import org.kie.internal.builder.ResultSeverity;
+import org.kie.internal.io.ResourceFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+/**
+ * Compiles ONE rule ID (one DRL file) into its own {@link org.kie.api.KieBase} (ADR-025).
+ *
+ * <p>Uses {@code KnowledgeBuilder} + {@code KnowledgeBaseFactory}: no KieModule or KieRepository
+ * involvement, so there is no module bookkeeping to leak. Chosen in the 2026-11-18 spike for the
+ * lowest heap/metaspace and a ~3.6 ms single-rule rebuild at 1,000 resident IDs. {@code
+ * KnowledgeBaseFactory} is an internal Drools API; it is confined to this class, and the tests
+ * compile and execute all sample rules through it, so a Drools upgrade that changes it fails the
+ * build here.
+ */
 @Component
 public class RuleCompiler {
 
-  // Shared artifact identity for the in-memory rules KieModule.
-  // DroolsConfig must use the same groupId/artifactId when it creates the initial KieContainer
-  // so subsequent kieContainer.updateToVersion(...) calls can resolve newly-built modules from
-  // the KieRepository — updateToVersion requires matching groupId:artifactId.
-  public static final String GROUP_ID = "com.company.drools";
-  public static final String ARTIFACT_ID = "rules-runtime";
-  public static final String INITIAL_VERSION = "1.0.0";
-
   private static final Logger log = LoggerFactory.getLogger(RuleCompiler.class);
 
-  private final KieServices kieServices;
   private final DrlSanitizer drlSanitizer;
-  private final AtomicLong versionCounter = new AtomicLong(0);
 
-  public RuleCompiler(KieServices kieServices, DrlSanitizer drlSanitizer) {
-    this.kieServices = kieServices;
+  public RuleCompiler(DrlSanitizer drlSanitizer) {
     this.drlSanitizer = drlSanitizer;
   }
 
-  public CompilationResult compileRules(List<Rule> rules) {
-    log.debug("Compiling {} rules", rules.size());
-
+  /**
+   * Policy-check and compile a single rule ID in isolation. Never throws: failures are returned.
+   */
+  public RuleCompilation compileRule(Rule rule) {
+    String ruleId = rule.getRuleId();
     try {
-      List<String> allViolations = new ArrayList<>();
-      for (Rule rule : rules) {
-        DrlSanitizer.SanitizationResult result =
-            drlSanitizer.sanitize(rule.getRuleId(), rule.getContent());
-        if (!result.isAccepted()) {
-          allViolations.add(rule.getRuleId() + ": " + result.getViolations());
-        }
-      }
-      if (!allViolations.isEmpty()) {
-        log.error("DRL sanitization rejected {} rule(s): {}", allViolations.size(), allViolations);
-        return CompilationResult.failure(
-            "DRL security violations: " + String.join("; ", allViolations));
+      DrlSanitizer.SanitizationResult policy = drlSanitizer.sanitize(ruleId, rule.getContent());
+      if (!policy.isAccepted()) {
+        log.error("DRL policy check rejected rule {}: {}", ruleId, policy.getViolations());
+        return RuleCompilation.failure(
+            ruleId, "DRL security violations: " + policy.getViolations());
       }
 
-      long versionNumber = versionCounter.incrementAndGet();
-      ReleaseId releaseId = kieServices.newReleaseId(GROUP_ID, ARTIFACT_ID, "1.0." + versionNumber);
+      KnowledgeBuilder builder = KnowledgeBuilderFactory.newKnowledgeBuilder();
+      builder.add(
+          ResourceFactory.newByteArrayResource(rule.getContent().getBytes(StandardCharsets.UTF_8))
+              .setSourcePath("rules/" + ruleId.replace('.', '/') + ".drl"),
+          ResourceType.DRL);
 
-      KieFileSystem kieFileSystem = kieServices.newKieFileSystem();
-      kieFileSystem.generateAndWritePomXML(releaseId);
-
-      java.util.Set<String> seenRuleIds = new java.util.HashSet<>();
-      for (Rule rule : rules) {
-        if (!seenRuleIds.add(rule.getRuleId())) {
-          log.warn(
-              "Duplicate rule ID '{}' in this load — the later definition silently overwrites the"
-                  + " earlier one (last-wins). Check the source for a duplicate.",
-              rule.getRuleId());
-        }
-        String resourcePath =
-            "src/main/resources/rules/" + rule.getRuleId().replace(".", "/") + ".drl";
-        kieFileSystem.write(resourcePath, rule.getContent());
-        log.debug("Added rule {} to KieFileSystem at path {}", rule.getRuleId(), resourcePath);
+      if (builder.hasErrors()) {
+        log.error("Rule {} failed to compile: {}", ruleId, builder.getErrors());
+        return RuleCompilation.failure(ruleId, "Compilation errors: " + builder.getErrors());
+      }
+      if (builder.hasResults(ResultSeverity.WARNING)) {
+        log.warn(
+            "Rule {} compiled with warnings: {}",
+            ruleId,
+            builder.getResults(ResultSeverity.WARNING));
       }
 
-      KieBuilder kieBuilder = kieServices.newKieBuilder(kieFileSystem);
-      kieBuilder.buildAll();
+      InternalKnowledgeBase kieBase = KnowledgeBaseFactory.newKnowledgeBase();
+      kieBase.addPackages(builder.getKnowledgePackages());
 
-      Results results = kieBuilder.getResults();
-      if (results.hasMessages(Message.Level.ERROR)) {
-        log.error("Rule compilation failed with errors:");
-        for (Message message : results.getMessages(Message.Level.ERROR)) {
-          log.error("  - {}", message.getText());
-        }
-        return CompilationResult.failure(
-            "Compilation errors: " + results.getMessages(Message.Level.ERROR));
+      List<String> ruleNames =
+          kieBase.getKiePackages().stream()
+              .flatMap(p -> p.getRules().stream())
+              .map(org.kie.api.definition.rule.Rule::getName)
+              .sorted()
+              .toList();
+      if (ruleNames.isEmpty()) {
+        log.warn("Rule {} compiled but contains no rules", ruleId);
       }
 
-      if (results.hasMessages(Message.Level.WARNING)) {
-        log.warn("Rule compilation completed with warnings:");
-        for (Message message : results.getMessages(Message.Level.WARNING)) {
-          log.warn("  - {}", message.getText());
-        }
-      }
-
-      // KieBuilder auto-registers the resulting KieModule in the KieRepository under releaseId.
-      // The engine service will call kieContainer.updateToVersion(releaseId) to swap the running
-      // KieBase to the new module without disrupting the long-lived KieContainer.
-      log.info(
-          "Successfully compiled {} rules at release {}", rules.size(), releaseId.getVersion());
-      return CompilationResult.success(releaseId);
+      CompiledRuleset compiled =
+          new CompiledRuleset(ruleId, sha256(rule.getContent()), kieBase, Instant.now(), ruleNames);
+      log.debug(
+          "Compiled rule {} ({} DRL rule(s), digest {})",
+          ruleId,
+          ruleNames.size(),
+          compiled.shortDigest());
+      return RuleCompilation.success(compiled);
 
     } catch (Exception e) {
-      log.error("Failed to compile rules", e);
-      return CompilationResult.failure("Compilation exception: " + e.getMessage());
+      log.error("Failed to compile rule {}", ruleId, e);
+      return RuleCompilation.failure(ruleId, "Compilation exception: " + e.getMessage());
     }
   }
 
-  public static class CompilationResult {
-    private final boolean success;
-    private final ReleaseId releaseId;
-    private final String errorMessage;
+  /**
+   * Compile each rule ID independently. One failure never affects the others. A duplicate rule ID
+   * in the input keeps the later definition (last wins) and logs a warning.
+   *
+   * @return per-ID results, in input order
+   */
+  public Map<String, RuleCompilation> compileRules(List<Rule> rules) {
+    Map<String, Rule> unique = new LinkedHashMap<>();
+    for (Rule rule : rules) {
+      if (unique.put(rule.getRuleId(), rule) != null) {
+        log.warn(
+            "Duplicate rule ID '{}' in this load — the later definition overwrites the earlier one"
+                + " (last-wins). Check the source for a duplicate.",
+            rule.getRuleId());
+      }
+    }
+    Map<String, RuleCompilation> results = new LinkedHashMap<>();
+    unique.forEach((id, rule) -> results.put(id, compileRule(rule)));
+    return results;
+  }
 
-    private CompilationResult(boolean success, ReleaseId releaseId, String errorMessage) {
-      this.success = success;
-      this.releaseId = releaseId;
-      this.errorMessage = errorMessage;
+  /** SHA-256 hex digest of DRL source text (UTF-8). */
+  public static String sha256(String content) {
+    try {
+      MessageDigest md = MessageDigest.getInstance("SHA-256");
+      return HexFormat.of().formatHex(md.digest(content.getBytes(StandardCharsets.UTF_8)));
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-256 not available", e);
+    }
+  }
+
+  /** Result of compiling one rule ID. */
+  public record RuleCompilation(String ruleId, CompiledRuleset ruleset, String errorMessage) {
+
+    public static RuleCompilation success(CompiledRuleset ruleset) {
+      return new RuleCompilation(ruleset.ruleId(), ruleset, null);
     }
 
-    public static CompilationResult success(ReleaseId releaseId) {
-      return new CompilationResult(true, releaseId, null);
-    }
-
-    public static CompilationResult failure(String errorMessage) {
-      return new CompilationResult(false, null, errorMessage);
+    public static RuleCompilation failure(String ruleId, String errorMessage) {
+      return new RuleCompilation(ruleId, null, errorMessage);
     }
 
     public boolean isSuccess() {
-      return success;
-    }
-
-    public ReleaseId getReleaseId() {
-      return releaseId;
-    }
-
-    public String getErrorMessage() {
-      return errorMessage;
+      return ruleset != null;
     }
   }
 }
