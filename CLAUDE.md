@@ -17,6 +17,33 @@ The legacy consolidated context file at `.ai-workspace/ai-initial-context/ai-ini
 
 ## ⚠️ Important: Recent change log (most recent first)
 
+### Pre-merge fixes for PR #9 (2026-11-17)
+Found by a full end-to-end run on Linux with Docker Engine 29.10. Plan and checklist: [`.ai-workspace/project-plans/pre-merge-fixes-plan-2026-11-17.md`](.ai-workspace/project-plans/pre-merge-fixes-plan-2026-11-17.md).
+- **Admin auth bypass closed (ADR-024).** `/admin;x/health` and `/%61dmin/health` returned 200 without a key: filters matched the raw `getRequestURI()`, but Spring MVC routes the decoded, `;`-stripped path.
+  - New [`StrictRequestPathFilter`](src/main/java/com/company/drools/api/filter/StrictRequestPathFilter.java) (`@Order(-1)`) returns 400 `INVALID_INPUT` for raw paths containing `;`, `%`, `\`, `//` or `.`/`..` segments.
+  - `SecurityHeadersFilter` moved to `@Order(-2)`.
+  - New [`RequestPaths.normalizedPath`](src/main/java/com/company/drools/common/RequestPaths.java) is used by `AdminAuthFilter`, `RateLimitingFilter` and `RequestSizeValidationFilter` (the last now matches by prefix, not `contains`).
+  - New real-Tomcat regression test `PathBypassIntegrationTest`.
+- **Linux fresh-clone crash loop fixed.** Bind-mounted `./gc-logs` / `./heap-dumps` were created root-owned, so the non-root JVM couldn't open `gc.log` and wouldn't start.
+  - Compose now uses **named volumes**, and the Dockerfile creates both directories owned by `appuser`.
+  - Read them with `docker compose exec app tail -f /tmp/gc-logs/gc.log` and `docker compose cp app:/tmp/heap-dumps ./heap-dumps`.
+  - The `ENTRYPOINT` now uses `exec java`, so graceful shutdown actually runs.
+- **Dependency CVEs (CI's OWASP gate).**
+  - Spring Boot 3.5.3 → **3.5.16** (Spring 6.2.19).
+  - Pins declared **above** the imported Boot BOM: Tomcat 10.1.62, Netty 4.1.141, Jackson 2.21.8, Log4j 2.26.1.
+  - Resilience4j **2.4.0**, which **removes kotlin-stdlib** entirely.
+  - Micrometer CloudWatch is now Boot-managed (1.15.12; the old version skew is gone).
+  - dependency-check 12.2.2.
+- **CI.** `ci.yml` now triggers on `develop` (plus `main`) and has `permissions: contents: read`. A missing IT now fails the build.
+  - Testcontainers **1.21.4** (Boot-managed) works with Docker Engine 29; 1.21.2 couldn't find Docker on the ubuntu-26.04 runner.
+  - The Redis IT now uses the production serializer (`RedisConfig.createRuleJsonSerializer()`).
+- **Test tooling.** `scripts/e2e-load-test.sh` gave a false PASS on Linux: per-request `curl` connections exhausted the ephemeral ports in ~30 s, and the workers died silently.
+  - New [`scripts/lib/e2e_load.py`](scripts/lib/e2e_load.py): keep-alive connections, per-response **value** checks (stacking-aware), stall detection.
+  - The e2e script uses the loadtest overlay (no sed edits) and needs no AWS CLI.
+  - New [`scripts/run-docker-test-plan.sh`](scripts/run-docker-test-plan.sh) automates [`full-docker-test-plan.md`](full-docker-test-plan.md) (Steps 1–12 + value checks + Step 12.7 path bypass).
+- **Linux note:** if Podman is installed and `DOCKER_HOST` points at it, run Docker commands with `DOCKER_HOST=unix:///var/run/docker.sock`.
+- **Counts**: Java source files **63**; test files **51**; **591** tests in `mvn test` (incl. plain ITs) + **20** Testcontainers ITs; coverage **90.7% instruction / 80.1% branch** (measured 2026-11-17). ADR index extended to 024.
+
 ### Re-review production/public-readiness hardening (2026-08-20)
 - **Admin auth fail-closed on prod/docker.** [`AdminAuthFilter`](src/main/java/com/company/drools/api/filter/AdminAuthFilter.java) now hard-fails startup (`IllegalStateException`) when `ADMIN_API_KEY` is blank on the `prod`/`docker` profiles (`KEY_REQUIRED_PROFILES`); only `local`/`dev` retain the open-with-WARN dev bypass. Key compare moved to constant-time `MessageDigest.isEqual`. 401 body is the nested `error.code`/`error.message` shape. docker-compose sets `ADMIN_API_KEY=admin-secret` and its healthcheck sends the header; actuator `8081` bound to `127.0.0.1`. (ADR-006 addendum + ADR-017)
 - **Rate limiter keys on IP only.** [`RateLimitingFilter`](src/main/java/com/company/drools/api/filter/RateLimitingFilter.java) keys on `request.getRemoteAddr()` only; `X-API-Key`/`Authorization`/`X-Client-Id` are no longer read (forgeable on the public API). `X-Forwarded-For` honored (left-most) only when `drools.rate-limiting.trust-proxy=true` (default false). (ADR-010 addendum + ADR-018)
@@ -75,7 +102,7 @@ Docker must be running; the MCP launches `mcp/sonarqube` per session. See [`.env
 ### Load test + sample-rules expansion + rule-loading rework (2026-05-10)
 - **Drools 10 rule-loading rework**: `DroolsEngineService` now holds a **single long-lived `KieContainer`** updated in place via `KieContainer.updateToVersion(ReleaseId)`, with an explicit `KieRepository.removeKieModule(oldReleaseId)` after each swap (Drools 10 does **not** auto-clean). Replaces the earlier two-container atomic-swap-with-`dispose()` pattern. See [ADR-003 2026-05-10 update](project-documentation/36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal).
 - **LOADING-marker bug fix**: latent at 10-rule scale (sub-ms compile); surfaced at 1000 rules (~46s compile) as a 1.5% error rate during refresh windows. Fixed in [`DroolsEngineService.loadOrReplaceRule`](src/main/java/com/company/drools/core/engine/DroolsEngineService.java).
-- **Sample-rules cookbook 10 → 17**: added 7 rules covering `accumulate`, `exists`, `not`, `salience`, regex, temporal, and accumulate-with-collect patterns. All under [`sample-rules/`](sample-rules/); cookbook in [`19-sample-rules-cookbook.md`](project-documentation/19-sample-rules-cookbook.md).
+- **Sample-rules cookbook 10 → 17**: added 7 rules covering `accumulate`, `exists`, `not`, `salience`, compound &&/|| + regex `matches`, temporal, and `forall` patterns. All under [`sample-rules/`](sample-rules/); cookbook in [`19-sample-rules-cookbook.md`](project-documentation/19-sample-rules-cookbook.md).
 - **Load test orchestrator**: `scripts/run-load-test.sh` runs the full Phase 0–8 suite end-to-end (1000 rules, JMeter, mixed-workload soak). Findings in [`project-documentation/39-load-test-findings.md`](project-documentation/39-load-test-findings.md).
 - **Test count**: 589 → 598 (load test session) → 597 (Sonar Wave 4B parameterized consolidation); **test files**: 45 at the time (48 as of 2026-08-20).
 
@@ -109,9 +136,9 @@ See [`project-documentation/14-security-architecture.md`](project-documentation/
 
 This is a Drools Rule Engine Microservice designed for high-performance business rule execution (100-1000 RPS). Rules are stored in AWS S3 and executed via REST API.
 
-**Tech Stack**: Java 25 (enforced), Spring Boot 3.5.3, Drools 10.2.0, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
+**Tech Stack**: Java 25 (enforced), Spring Boot 3.5.16, Drools 10.2.0, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
 
-**Health Status**: 9/10 - 536 unit tests + 14 Testcontainers integration tests (CI-only, surefire-excluded on macOS-DinD), 90.1%/78.4% coverage (measured 2026-08-19, Java 25), most security findings addressed with two tracked-open (B1 DRL-sandbox-is-not-a-boundary RCE, deferred; #28 Redis TLS/auth, enforced on prod), load-tested at 1000 rules (single-container 2026-05-10) + 3-replica multi-container + Redis-kill failure mode (Phase 9.4 2026-05-24), Sonar QG OK (0 maintainability / 0 reliability / 0 security issues)
+**Health Status**: 9/10 - 591 tests in `mvn test` + 20 Testcontainers integration tests (CI-only, surefire-excluded on macOS-DinD), 90.7%/80.1% coverage (measured 2026-11-17, Java 25; full E2E + stress verified on Linux / Docker Engine 29), most security findings addressed with two tracked-open (B1 DRL-sandbox-is-not-a-boundary RCE, deferred; #28 Redis TLS/auth, enforced on prod), load-tested at 1000 rules (single-container 2026-05-10) + 3-replica multi-container + Redis-kill failure mode (Phase 9.4 2026-05-24), Sonar QG OK (0 maintainability / 0 reliability / 0 security issues)
 
 ## Common Commands
 
@@ -295,7 +322,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 ## Development Workflow
 
-1. **Current Status**: most security findings addressed, two tracked-open (B1 DRL-sandbox-is-not-a-boundary RCE deferred + documented in `SECURITY.md`; #28 Redis TLS/auth enforced on prod via `RedisSecurityValidator`) (Phases 1–9 2026-02-26 + 2026-08-20 re-review hardening); stack modernized 2026-05-09 (Java 25, Spring Boot 3.5.3, Drools 10.2.0); Drools 10 rule-loading rework + sample-rules expansion + 1000-rule load test 2026-05-10; Sonar Wave 4 (maintainability 178→0, reliability 5→0, 2 security hotspots resolved) 2026-05-11; Redis cache + pub/sub layer + Phase 9 load-test harness + Phase 9.4 hardening (SCAN-CB-wrap, REDIS_TIMEOUT, pub/sub recovery backoff) 2026-05-20 → 2026-05-24; 2026-08-20 re-review hardening (admin fail-closed, IP-only rate limiting + trust-proxy, Redis prod TLS, timeout-halt + load-shed 503, refreshLock split, CI + verify-bound gates, LICENSE/SECURITY.md/CONTRIBUTING.md); **536 unit tests + 14 integration**; 90.1% / 78.4% coverage (measured 2026-08-19); documentation rebuild 2026-05-08 with refreshes through 2026-08-20 (40 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
+1. **Current Status**: most security findings addressed, two tracked-open (B1 DRL-sandbox-is-not-a-boundary RCE deferred + documented in `SECURITY.md`; #28 Redis TLS/auth enforced on prod via `RedisSecurityValidator`) (Phases 1–9 2026-02-26 + 2026-08-20 re-review hardening); stack modernized 2026-05-09 (Java 25, Spring Boot 3.5.3, Drools 10.2.0); Drools 10 rule-loading rework + sample-rules expansion + 1000-rule load test 2026-05-10; Sonar Wave 4 (maintainability 178→0, reliability 5→0, 2 security hotspots resolved) 2026-05-11; Redis cache + pub/sub layer + Phase 9 load-test harness + Phase 9.4 hardening (SCAN-CB-wrap, REDIS_TIMEOUT, pub/sub recovery backoff) 2026-05-20 → 2026-05-24; 2026-08-20 re-review hardening (admin fail-closed, IP-only rate limiting + trust-proxy, Redis prod TLS, timeout-halt + load-shed 503, refreshLock split, CI + verify-bound gates, LICENSE/SECURITY.md/CONTRIBUTING.md); 2026-11-17 pre-merge fixes (path-bypass ADR-024, Linux named volumes, Spring Boot 3.5.16 + CVE pins, CI on develop, value-checking E2E harness); **591 tests + 20 Testcontainers ITs**; 90.7% / 80.1% coverage (measured 2026-11-17); documentation rebuild 2026-05-08 with refreshes through 2026-08-20 (40 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
 
 2. **One-Command Development Environment**: Complete automated setup with validation
    ```bash
@@ -339,7 +366,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
    # Test container startup and health
    docker run -d --name test-container -p 9080:8080 -p 9081:8081 \
      -e RULE_SOURCE=local drools-rule-engine:latest
-   curl http://localhost:9081/admin/health
+   curl http://localhost:9080/admin/health   # /admin/* is on the main port (8080 → 9080 here)
    docker stop test-container && docker rm test-container
    ```
 
@@ -388,11 +415,12 @@ All phases shipped:
 10. ✅ Sonar quality gates — Maintainability 178→0, Reliability 5→0, Security hotspots 2→0 (2026-05-11)
 11. ✅ Redis cache + pub/sub layer — `RedisCachedRuleStorage` decorator + `RuleRefreshPublisher`/`Subscriber`; dead `RuleCache`/`LocalLRUCache`/`RedisRuleCache` deleted (~600 LOC); env-var migration (ADR-016, 2026-05-20)
 12. ✅ Phase 9 load-test harness (3-replica + nginx + Redis-kill failure mode) + Phase 9.4 production hardening (SCAN-CB-wrap, `REDIS_TIMEOUT` env var lowering Lettuce timeout 2000ms→500ms, `RedisMessageListenerContainer.setRecoveryBackoff(FixedBackOff(2s, ∞))`) (2026-05-24)
+14. ✅ Pre-merge fixes for PR #9 (2026-11-17) — request-path bypass closed (ADR-024), Linux gc-logs crash loop fixed (named volumes), Spring Boot 3.5.16 + CVE pins + Kotlin removed, CI on `develop` + Testcontainers 1.21.4 (Docker 29), value-checking E2E harness + automated docker test plan
 13. ✅ Re-review production/public-readiness hardening (2026-08-20) — admin fail-closed on prod/docker + constant-time compare (ADR-017), IP-only rate limiting + trust-proxy (ADR-018), exec timeout-halt/408 + pool load-shed 503 (ADR-019), refreshLock split from the write lock (ADR-020), Redis prod TLS/auth via `RedisSecurityValidator` + Jackson-typing removal (ADR-021), storage delegate `AtomicReference` (ADR-022), CI + verify-bound quality gates (ADR-023); added LICENSE/SECURITY.md/CONTRIBUTING.md; **security posture reframed** — "39/42" retired, two tracked-open (B1 DRL-sandbox RCE deferred, #28 Redis TLS/auth enforced on prod)
 
 Current snapshot:
 - **Health Score**: 9/10
-- **Test Coverage**: 90.1% instruction / 78.4% branch (measured 2026-08-19 on Java 25 via `mvn test jacoco:report`, unit tests only; enforced by a `jacoco:check` floor of 88% / 74% bound to `verify`). Supersedes the earlier unverified 96.2% / 89.7% pre-modernization baseline.
+- **Test Coverage**: 90.7% instruction / 80.1% branch (measured 2026-11-17 via `mvn clean verify`, excluding the Testcontainers ITs; enforced by a `jacoco:check` floor of 88% / 74% bound to `verify`). Previous: 90.1% / 78.4% (2026-08-19).
 - **Security**: most findings addressed; two tracked-open — B1 (DRL sandbox is not a sound boundary → rule-store write access ≈ RCE; deferred, documented in `SECURITY.md`) and #28 (Redis TLS/auth, enforced on the prod profile via `RedisSecurityValidator`)
 - **Performance**: 100–1000 RPS target, P99 < 100ms cached / < 500ms cache miss (load-tested at 1000 rules — see [`39-load-test-findings.md`](project-documentation/39-load-test-findings.md))
 
@@ -404,10 +432,11 @@ For the canonical narrative — phase history, ADRs, performance targets, testin
 - [`set-java-env.sh`](set-java-env.sh) — Java 25 environment setup script
 - [`setup-dev-environment.sh`](setup-dev-environment.sh) — one-command local dev setup
 - [`init-localstack.sh`](init-localstack.sh) — LocalStack bootstrap (reads from `sample-rules/`)
-- [`sample-rules/`](sample-rules/) — 17 sample DRL files (single source of truth: 10 original + 7 added 2026-05-10 covering accumulate/exists/not/salience/regex/temporal/accumulate-with-collect patterns)
+- [`sample-rules/`](sample-rules/) — 17 sample DRL files (single source of truth: 10 original + 7 added 2026-05-10 covering accumulate/exists/not/salience/compound-regex/temporal/forall patterns)
 - [`scripts/test-localstack.sh`](scripts/test-localstack.sh) — validates LocalStack S3 bucket and uploaded rules
 - [`scripts/docker-build-test.sh`](scripts/docker-build-test.sh) — automated Docker build and validation
-- [`scripts/e2e-load-test.sh`](scripts/e2e-load-test.sh) — one-command E2E + 5-min load test with hot reload
+- [`scripts/e2e-load-test.sh`](scripts/e2e-load-test.sh) — one-command E2E + 5-min keep-alive load test with value checks and hot reload
+- [`scripts/run-docker-test-plan.sh`](scripts/run-docker-test-plan.sh) — automated `full-docker-test-plan.md` (Steps 1–12, PASS/FAIL table)
 - [`scripts/run-load-test.sh`](scripts/run-load-test.sh) — full load-test orchestrator (Phase 0–8, 1000 rules, JMeter)
 - GC log + heap dumps — written inside the container to `/tmp/gc-logs` / `/tmp/heap-dumps` on **named volumes** (`gc-logs`, `heap-dumps`); read with `docker compose exec app tail -f /tmp/gc-logs/gc.log` or `docker compose cp app:/tmp/heap-dumps ./heap-dumps`
 - [`.ai-workspace/snap-memory/`](.ai-workspace/snap-memory/) — session memory files for `snap-memory` AI workflow

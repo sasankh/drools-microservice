@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Created** | 2026-11-17 |
-| **Status** | 🟡 Plan approved — Phase 0 done, waiting for go-ahead to start Phase 1 |
+| **Status** | 🟢 Phases 0–7 done and verified (2026-11-17); Phase 8 (push to PR #9, CI + OWASP, PR description) waiting on the user |
 | **Work branch** | `pre-merge-fixes` (git worktree `.claude/worktrees/pre-merge-fixes`, based on `118f843`) |
 | **Delivered to** | `re-review-fable-4` → updates **PR #9** (`re-review-fable-4` → `develop`); `amd-review-restart-11-17-2026` fast-forwarded to the same commit |
 | **Release target** | v3.3.0 on `develop` (tag created by the user after merge) |
@@ -417,90 +417,90 @@ Found during the 2026-11-17 review and E2E. To be planned after the merge:
 - [x] Worktree `.claude/worktrees/pre-merge-fixes` on branch `pre-merge-fixes` at `118f843`
 - [x] Worktree hidden from the main checkout via `.git/info/exclude` (no repo change)
 - [x] This plan + checklist written (`pre-merge-fixes-plan-2026-11-17.md`)
-- [ ] **User go-ahead to start Phase 1**
+- [x] **User go-ahead to start Phase 1** (given 2026-11-17)
 
 ### B1. Phase 1 — F1 path bypass
-- [ ] `common/RequestPaths.normalizedPath()` (UrlPathHelper decode + `;` strip + `//` collapse)
-- [ ] `api/filter/StrictRequestPathFilter` — 400 `INVALID_INPUT` on `;` `%` `\` `//` `.`/`..`; `@Order(-1)`; standard error body
-- [ ] `SecurityHeadersFilter` → `@Order(-2)` (headers present on the 400)
-- [ ] `AdminAuthFilter.shouldAuthenticate` uses the normalized path; covers `/admin` exactly
-- [ ] `RateLimitingFilter.shouldApplyRateLimit` uses the normalized path
-- [ ] `RequestSizeValidationFilter` uses the normalized path + `startsWith("/execute-rule")`
-- [ ] `StrictRequestPathFilterTest` (rejected + allowed cases)
-- [ ] `RequestPathsTest`
-- [ ] `AdminAuthFilterTest` / `RateLimitingFilterTest` / `RequestSizeValidationFilterTest` updated
-- [ ] `PathBypassIntegrationTest` (real Tomcat): 400 / 401 / 200 cases + security headers on 400
-- [ ] ADR-024 + index; docs 00, 04, 12, 13, 14, 15; `SECURITY.md`
-- [ ] Gate: `mvn -B clean verify` green (coverage ≥ 88/74)
-- [ ] Gate: live probes → 400; `/admin/health` 401 / 200; `/execute-rule` 200
-- [ ] Commit
+- [x] `common/RequestPaths.normalizedPath()` (context-path strip + `;` strip + `UriUtils.decode` + `//` collapse)
+- [x] `api/filter/StrictRequestPathFilter` — 400 `INVALID_INPUT` on `;` `%` `\` `//` `.`/`..`; `@Order(-1)`; standard error body
+- [x] `SecurityHeadersFilter` → `@Order(-2)` (headers present on the 400)
+- [x] `AdminAuthFilter.shouldAuthenticate` uses the normalized path; covers `/admin` exactly
+- [x] `RateLimitingFilter.shouldApplyRateLimit` uses the normalized path
+- [x] `RequestSizeValidationFilter` uses the normalized path + `startsWith("/execute-rule")`
+- [x] `StrictRequestPathFilterTest` (rejected + allowed cases)
+- [x] `RequestPathsTest`
+- [x] `AdminAuthFilterTest` / `RateLimitingFilterTest` / `RequestSizeValidationFilterTest` updated
+- [x] `PathBypassIntegrationTest` (real Tomcat): 400 / 401 / 200 cases + security headers on 400
+- [x] ADR-024 + index; docs 00, 04, 12, 13, 14, 15; `SECURITY.md`
+- [x] Gate: `mvn -B clean verify` green (coverage ≥ 88/74)
+- [x] Gate: live probes → 400; `/admin/health` 401 / 200; `/execute-rule` 200
+- [x] Commit
 
 ### B2. Phase 2 — F2 Linux startup
-- [ ] Dockerfile: appuser-owned `/tmp/gc-logs`, `/tmp/heap-dumps`
-- [ ] Dockerfile: `exec java $JAVA_OPTS -jar app.jar`
-- [ ] `docker-compose.yml`: named volumes `gc-logs`, `heap-dumps` (declared)
-- [ ] `scripts/docker-compose.loadtest*.yml` checked/updated
-- [ ] Docs: CLAUDE.md, README, 07, 25, 30, 31 (new commands + Linux note); `scripts/lib/heap-dump.sh` still OK
-- [ ] Gate: fresh copy (no host dirs) → healthy; `gc.log` written in the container
-- [ ] Gate: `docker compose stop app` → graceful shutdown logged
-- [ ] Gate: `mvn -B clean verify` green
-- [ ] Commit
+- [x] Dockerfile: appuser-owned `/tmp/gc-logs`, `/tmp/heap-dumps`
+- [x] Dockerfile: `exec java $JAVA_OPTS -jar app.jar`
+- [x] `docker-compose.yml`: named volumes `gc-logs`, `heap-dumps` (declared)
+- [x] `scripts/docker-compose.loadtest*.yml` checked/updated
+- [x] Docs: CLAUDE.md, README, 07, 25, 30, 31 (new commands + Linux note); `scripts/lib/heap-dump.sh` still OK
+- [x] Gate: fresh copy (no host dirs) → healthy; `gc.log` written in the container
+- [x] Gate: `docker compose stop app` → graceful shutdown logged
+- [x] Gate: `mvn -B clean verify` green
+- [x] Commit
 
 ### B3. Phase 3 — F4a dependencies
-- [ ] `spring.boot.version` 3.5.16
-- [ ] Tomcat 10.1.62 explicit entries above the Boot BOM
-- [ ] `netty-bom` 4.1.141.Final above the Boot BOM
-- [ ] `jackson-bom` 2.21.8 above the Boot BOM
-- [ ] `log4j-bom` 2.26.1 above the Boot BOM
-- [ ] Resilience4j 2.4.0
-- [ ] `micrometer-registry-cloudwatch2` version removed (Boot-managed); `micrometer.version` property removed
-- [ ] `testcontainers-bom` import + property removed (Boot → 1.21.4)
-- [ ] dependency-check-maven 12.2.2
-- [ ] Gate: `dependency:tree -Dincludes=org.jetbrains.kotlin` empty
-- [ ] Gate: `dependency:list` shows the expected versions
-- [ ] Gate: `mvn -B clean verify` green
-- [ ] Commit
+- [x] `spring.boot.version` 3.5.16
+- [x] Tomcat 10.1.62 explicit entries above the Boot BOM
+- [x] `netty-bom` 4.1.141.Final above the Boot BOM
+- [x] `jackson-bom` 2.21.8 above the Boot BOM
+- [x] `log4j-bom` 2.26.1 above the Boot BOM
+- [x] Resilience4j 2.4.0
+- [x] `micrometer-registry-cloudwatch2` version removed (Boot-managed); `micrometer.version` property removed
+- [x] `testcontainers-bom` import + property removed (Boot → 1.21.4)
+- [x] dependency-check-maven 12.2.2
+- [x] Gate: `dependency:tree -Dincludes=org.jetbrains.kotlin` empty
+- [x] Gate: `dependency:list` shows the expected versions
+- [x] Gate: `mvn -B clean verify` green
+- [x] Commit
 - [ ] OWASP run (Phase 8 CI dispatch) — residuals triaged with the user per A5.4
 
 ### B4. Phase 4 — F4b–d CI
-- [ ] Triggers `push` / `pull_request` on `develop` + `main`
-- [ ] `permissions: contents: read`
-- [ ] `-Dsurefire.failIfNoSpecifiedTests=false` removed
-- [ ] `RedisCachedStorageIntegrationTest` uses the production serializer; dead helper removed
-- [ ] Gate: 3 Testcontainers ITs pass locally on Docker 29 (20 tests)
-- [ ] Gate: `mvn -B clean verify` green
-- [ ] Commit
+- [x] Triggers `push` / `pull_request` on `develop` + `main`
+- [x] `permissions: contents: read`
+- [x] `-Dsurefire.failIfNoSpecifiedTests=false` removed
+- [x] `RedisCachedStorageIntegrationTest` uses the production serializer; dead helper removed
+- [x] Gate: 3 Testcontainers ITs pass locally on Docker 29 (20 tests)
+- [x] Gate: `mvn -B clean verify` green
+- [x] Commit
 - [ ] (User, optional) `NVD_API_KEY` repo secret
 
 ### B5. Phase 5 — F3 test tooling
-- [ ] `scripts/lib/e2e_load.py` (keep-alive, value checks, stall detection, exit codes)
-- [ ] `scripts/e2e-load-test.sh` reworked (overlay, no host aws, real payloads + values, healthcheck wait, flags, real gates)
-- [ ] `scripts/run-docker-test-plan.sh` (Steps 1–12 + X1 + rate-limit spoof + 408 + RULE_DELETED + 12.7 bypass; no tracked-file edits; exit code)
-- [ ] `full-docker-test-plan.md` updated (5.4, compose v2, no brew, Step 4 payloads, 12.7, 8.2, notes, header)
-- [ ] `scripts/README.md` + `README.md` Testing section
-- [ ] Gate: `bash -n` both scripts; `e2e-load-test.sh --duration 60` PASS; `run-docker-test-plan.sh` PASS
-- [ ] Gate: `mvn -B clean verify` green
-- [ ] Commit
+- [x] `scripts/lib/e2e_load.py` (keep-alive, value checks, stall detection, exit codes)
+- [x] `scripts/e2e-load-test.sh` reworked (overlay, no host aws, real payloads + values, healthcheck wait, flags, real gates)
+- [x] `scripts/run-docker-test-plan.sh` (Steps 1–12 + X1 + rate-limit spoof + 408 + RULE_DELETED + 12.7 bypass; no tracked-file edits; exit code)
+- [x] `full-docker-test-plan.md` updated (5.4, compose v2, no brew, Step 4 payloads, 12.7, 8.2, notes, header)
+- [x] `scripts/README.md` + `README.md` Testing section
+- [x] Gate: `bash -n` both scripts; `e2e-load-test.sh --duration 60` PASS; `run-docker-test-plan.sh` PASS
+- [x] Gate: `mvn -B clean verify` green
+- [x] Commit
 
 ### B6. Phase 6 — Docs
-- [ ] CLAUDE.md change log + versions + counts + 9081→9080 + `forall` note
-- [ ] README versions
-- [ ] `03-tech-stack.md` versions
-- [ ] `28-testing-guide.md` tests / ITs / scripts
-- [ ] `00-system-overview.md` numbers
-- [ ] `SECURITY.md` `main` → `develop`
-- [ ] Commit
+- [x] CLAUDE.md change log + versions + counts + 9081→9080 + `forall` note
+- [x] README versions
+- [x] `03-tech-stack.md` versions
+- [x] `28-testing-guide.md` tests / ITs / scripts
+- [x] `00-system-overview.md` numbers
+- [x] `SECURITY.md` `main` → `develop`
+- [x] Commit
 
 ### B7. Phase 7 — Full verification (record numbers)
-- [ ] `mvn -B clean verify`: tests ____ / 0 failures; coverage ____ % / ____ %
-- [ ] Testcontainers ITs: 20 / 20
-- [ ] `e2e-load-test.sh` 300 s: requests ____, RPS ____, errors 0, wrong 0, p99 ____ ms
-- [ ] `run-docker-test-plan.sh`: PASS ____ / FAIL 0
-- [ ] Stress 50/100/200 × 60 s + reloads: errors 0, wrong 0; p99 ____ / ____ / ____ ms
-- [ ] `ab -k -c 400`: RPS ____; non-2xx only 503 under saturation; recovery OK
-- [ ] Live bypass probes → 400 / 401 / 200
-- [ ] Graceful shutdown logged
-- [ ] Worktree clean; main checkout unchanged
+- [x] `mvn -B clean verify`: tests **591** / 0 failures (spotless, spotbugs, jacoco:check all pass); coverage **90.7 % / 80.1 %**
+- [x] Testcontainers ITs: **20 / 20** on Docker Engine 29.10
+- [x] `e2e-load-test.sh` 300 s: requests **1,727,453**, RPS **~5,750**, errors 0, wrong 0, p99 **8.6 ms** (p999 53 ms); hot reload at 120 s 17/17 in 1.1 s; retained heap 46 → 47 MB after 5 reloads
+- [x] `run-docker-test-plan.sh`: PASS **58** / FAIL 0 / INFO 3 (known backlog issues: bundle-rule NPE, GET/text-plain → 500)
+- [x] Stress 50/100/200 × 60 s + reloads: errors 0, wrong 0; 4,312 / 5,737 / 5,680 RPS; p99 **86.7 / 45.6 / 91.9 ms**; 12 reloads all 17/17
+- [x] `ab -k -c 400`: RPS **8,545** (384,537 req, 45 s); 58 non-2xx = 503 load-shed (pool-saturated log lines present); p50 8 ms, p99 1,078 ms at saturation; next request after → 200
+- [x] Live bypass probes: `/admin;x/health`, `/%61dmin/health`, POST `/%61dmin/refresh-rules`, POST `/%61dmin/memory/gc`, POST `/%65xecute-rule` → 400; `/admin/health` no key → 401
+- [x] Graceful shutdown logged (`docker compose stop app` took 1 s)
+- [x] Worktree clean; main checkout unchanged
 
 ### B8. Phase 8 — Deliver
 - [ ] Pushed `pre-merge-fixes` → `re-review-fable-4` (fast-forward)
@@ -514,4 +514,4 @@ Found during the 2026-11-17 review and E2E. To be planned after the merge:
 
 ---
 
-_Plan created: 2026-11-17 · Last updated: 2026-11-17 (Phase 0 complete; awaiting go-ahead for Phase 1)_
+_Plan created: 2026-11-17 · Last updated: 2026-11-17 (Phases 0–7 complete and verified; Phase 8 — push, CI/OWASP, PR description — pending user permission)_

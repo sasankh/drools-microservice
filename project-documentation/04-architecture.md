@@ -1586,7 +1586,7 @@ Response:
 | Component | Technology | Version | Purpose |
 |-----------|-----------|---------|---------|
 | **Runtime** | Java | 25 LTS | Application runtime (enforced) |
-| **Framework** | Spring Boot | 3.5.3 | Application framework |
+| **Framework** | Spring Boot | 3.5.16 | Application framework |
 | **Rule Engine** | Drools | 10.2.0 | Business rule execution |
 | **Build Tool** | Maven | 3.9+ | Dependency management, build |
 | **Container** | Docker | 24.0+ | Containerization |

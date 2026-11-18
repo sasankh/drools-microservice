@@ -4,14 +4,17 @@
 |---|---|
 | **Audience** | Developers, AI agents inspecting test coverage |
 | **Purpose** | Test suite map, how to run tests, how to add new ones, and the test cases that prove the most important behaviors |
-| **Last verified against** | All `src/test/java/com/company/drools/**/*.java` on 2026-08-20 (48 test files; 536 unit tests after `@ParameterizedTest` expansion; 14 Testcontainers integration tests, surefire-excluded by default) |
+| **Last verified against** | All `src/test/java/com/company/drools/**/*.java` on 2026-11-17 (51 test files; 591 tests in `mvn test` after `@ParameterizedTest` expansion, incl. the plain integration tests; 20 Testcontainers integration tests, surefire-excluded by default) |
 | **Related docs** | [27-development-setup.md](27-development-setup.md), [16-drl-sandboxing.md](16-drl-sandboxing.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
 
 ## TL;DR
 
-- **48 test files**, **536 unit tests + 14 Testcontainers integration tests**, **90.1% instruction / 78.4% branch** coverage (JaCoCo, remeasured post-modernization). Unit count went 597 → 545 with the deletion of the dead `RuleCache` layer on 2026-05-20, then 545 → 548 with the SCAN-CB-wrap tests on 2026-05-24, and now sits at 536 after subsequent consolidation. A coverage floor is enforced at `verify` (INSTRUCTION ≥ 0.88, BRANCH ≥ 0.74).
+- **51 test files**, **591 tests in `mvn test`** (unit tests plus plain integration tests such as `RuleExecutionIntegrationTest`, `RuleRefreshIntegrationTest` and `PathBypassIntegrationTest`) and **20 Testcontainers integration tests** (Redis cache 10, pub/sub 4, S3 6). Coverage is **90.7% instruction / 80.1% branch** (JaCoCo, 2026-11-17). Earlier docs said "14 ITs", which undercounted: the 6 S3 tests were missing.
+  - Count history: 597 → 545 (dead `RuleCache` layer deleted, 2026-05-20) → 548 (SCAN-CB-wrap, 2026-05-24) → 536 (2026-08-20) → 591 (+55 path-bypass tests, 2026-11-17).
+  - A coverage floor is enforced at `verify`: INSTRUCTION ≥ 0.88, BRANCH ≥ 0.74.
+- **End-to-end:** `scripts/e2e-load-test.sh` (keep-alive load test with value checks) and `scripts/run-docker-test-plan.sh` (automated `full-docker-test-plan.md`). See [scripts/README.md](../scripts/README.md).
 - Run all: `mvn test`
 - Run one: `mvn test -Dtest=DroolsEngineServiceTest`
 - Coverage report: `mvn test jacoco:report` → `target/site/jacoco/index.html`
@@ -46,11 +49,12 @@ Counts are `@Test` + `@ParameterizedTest` annotations per file (verified 2026-08
 | [`ExceptionTest.java`](../src/test/java/com/company/drools/api/exception/ExceptionTest.java) | 9 | Custom exception types (RuleNotFoundException, TimeoutException, etc.) |
 | [`GlobalExceptionHandlerTest.java`](../src/test/java/com/company/drools/api/exception/GlobalExceptionHandlerTest.java) | 10 | HTTP status mapping for every handled exception type — see [12-error-code-catalog.md](12-error-code-catalog.md) |
 
-### `api/filter/` — 37 tests across 4 files
+### `api/filter/` — 5 files
 
 | File | Tests | Notable |
 |---|---:|---|
-| [`AdminAuthFilterTest.java`](../src/test/java/com/company/drools/api/filter/AdminAuthFilterTest.java) | 13 | Verifies local/dev bypass when `ADMIN_API_KEY` empty; fail-closed startup under `prod`/`docker`; 401 when wrong/missing key; non-admin paths skip filter |
+| [`AdminAuthFilterTest.java`](../src/test/java/com/company/drools/api/filter/AdminAuthFilterTest.java) | 21 | Verifies local/dev bypass when `ADMIN_API_KEY` empty; fail-closed startup under `prod`/`docker`; 401 when wrong/missing key; non-admin paths skip filter; **normalized-path matching** (`/admin;x/…`, `/%61dmin/…`, `//admin/…`, `/admin` → key required; `/administrator` not) |
+| [`StrictRequestPathFilterTest.java`](../src/test/java/com/company/drools/api/filter/StrictRequestPathFilterTest.java) | 21 | 400 `INVALID_INPUT` for raw paths with `;` `%` `\` `//` `.`/`..`; normal paths (incl. dotted rule IDs) pass through (ADR-024) |
 | [`RateLimitingFilterTest.java`](../src/test/java/com/company/drools/api/filter/RateLimitingFilterTest.java) | 13 | Verifies `/admin/*` exemption, per-client (IP-keyed) buckets, `X-Forwarded-For` ignored unless `trust-proxy=true` |
 | [`RequestSizeValidationFilterTest.java`](../src/test/java/com/company/drools/api/filter/RequestSizeValidationFilterTest.java) | 10 | Content-Length check + chunked stream wrapping |
 | [`SecurityHeadersFilterTest.java`](../src/test/java/com/company/drools/api/filter/SecurityHeadersFilterTest.java) | 1 | All 7 headers verified present with exact values |
@@ -78,11 +82,12 @@ The dead `LocalLRUCacheTest` / `RedisRuleCacheTest` / `CacheStatisticsTest` file
 | [`RedisCachedStorageIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisCachedStorageIntegrationTest.java) | Testcontainers — cold→warm cache, TTL, bulk SCAN+MGET (hot/cold), refreshCache, refreshRule, write-through, Redis-kill CB fallback. **Excluded from default `mvn test`** (see `pom.xml` surefire `<excludes>`); requires host-side Docker daemon. |
 | [`RedisPubSubIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisPubSubIntegrationTest.java) | Testcontainers — two-instance fan-out (single + bulk + delete), wire-format end-to-end. **Excluded from default `mvn test`**. |
 
-### `common/` — 24 tests
+### `common/` — 2 files
 
 | File | Tests |
 |---|---:|
 | [`LogSanitizerTest.java`](../src/test/java/com/company/drools/common/LogSanitizerTest.java) | 24 — credit card masking, SSN masking, nested map recursion, false-positive avoidance |
+| [`RequestPathsTest.java`](../src/test/java/com/company/drools/common/RequestPathsTest.java) | 13 — normalization used by all filters: percent-decoding, `;` stripping, `//` collapse, context path (ADR-024) |
 
 ### `config/` — 11 files
 
@@ -125,7 +130,7 @@ The dead `LocalLRUCacheTest` / `RedisRuleCacheTest` / `CacheStatisticsTest` file
 | [`InMemoryRuleStorageTest.java`](../src/test/java/com/company/drools/storage/InMemoryRuleStorageTest.java) | 19 |
 | [`StorageFactoryTest.java`](../src/test/java/com/company/drools/storage/StorageFactoryTest.java) | 5 |
 
-### `integration/` — 5 files (Testcontainers, slower; surefire-excluded by default)
+### `integration/` — 6 files (3 plain ITs run by default; 3 Testcontainers ITs surefire-excluded, run in CI)
 
 > **Pinned container images.** The Testcontainers ITs pin their images: **`localstack/localstack:2.3`** and **`redis:7.4-alpine`** (`DockerImageName.parse(...)`). `S3Config` also disables SDK request/response checksums for LocalStack endpoints, since LocalStack 2.3 rejects the SDK's default CRC32 request checksum.
 
@@ -134,6 +139,7 @@ The dead `LocalLRUCacheTest` / `RedisRuleCacheTest` / `CacheStatisticsTest` file
 | [`RuleExecutionIntegrationTest.java`](../src/test/java/com/company/drools/integration/RuleExecutionIntegrationTest.java) | Real Drools KieBase + sample rules from filesystem; includes the `SampleRulesExecution` nested class that pin-tests outputs for all 17 sample rules |
 | [`S3StorageIntegrationTest.java`](../src/test/java/com/company/drools/integration/S3StorageIntegrationTest.java) | Real LocalStack S3 via Testcontainers |
 | [`RuleRefreshIntegrationTest.java`](../src/test/java/com/company/drools/integration/RuleRefreshIntegrationTest.java) | Refresh-path integration including `KieRepository.removeKieModule` cleanup verification (Drools 10 pattern) |
+| [`PathBypassIntegrationTest.java`](../src/test/java/com/company/drools/integration/PathBypassIntegrationTest.java) | **Real embedded Tomcat** (`@SpringBootTest(RANDOM_PORT)`, `local` profile) + `java.net.http.HttpClient` sending raw paths: `/admin;x/health`, `/%61dmin/health`, `/%65xecute-rule`, … → 400 (with security headers); `/admin/health` → 401 / 200. Regression guard for ADR-024. Runs in default `mvn test` (no Docker). |
 | [`RedisCachedStorageIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisCachedStorageIntegrationTest.java) | Redis decorator end-to-end (cold→warm cache, TTL, bulk SCAN+MGET, refreshCache, refreshRule, write-through, Redis-kill CB fallback) |
 | [`RedisPubSubIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisPubSubIntegrationTest.java) | Two-instance pub/sub fan-out (single + bulk + delete events, wire-format end-to-end, source-instance dedup) |
 
@@ -177,7 +183,7 @@ Use this for tests that exercise the real Drools engine, real storage layer, or 
 mvn test
 ```
 
-Takes ~30-60 seconds. Output ends with `BUILD SUCCESS` and a summary like `Tests run: 536, Failures: 0, Errors: 0, Skipped: 0`. (Integration tests under `*IntegrationTest` are excluded from the default surefire run; explicitly include them with `mvn test -Dtest='*IntegrationTest'`.)
+Takes ~30-60 seconds. Output ends with `BUILD SUCCESS` and a summary like `Tests run: 591, Failures: 0, Errors: 0, Skipped: 0`. Plain integration tests (`RuleExecutionIntegrationTest`, `RuleRefreshIntegrationTest`, and `PathBypassIntegrationTest`, which uses a real embedded Tomcat) run by default. The 3 Testcontainers classes are surefire-excluded; run them with `mvn test -Dtest='S3StorageIntegrationTest,RedisCachedStorageIntegrationTest,RedisPubSubIntegrationTest'`. This needs a Docker daemon, and Testcontainers ≥ 1.21.4 for Docker Engine 29.
 
 ### Single class
 

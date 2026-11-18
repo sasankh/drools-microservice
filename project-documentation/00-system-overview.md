@@ -49,7 +49,7 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 2. [27-development-setup.md](27-development-setup.md) — local Java + Maven setup, conventions
 3. [02-project-structure.md](02-project-structure.md) — annotated directory tree (clickable)
 4. [04-architecture.md](04-architecture.md) — system design
-5. [28-testing-guide.md](28-testing-guide.md) — test suite map (48 files, 536 unit + 14 integration tests)
+5. [28-testing-guide.md](28-testing-guide.md) — test suite map (51 files, 591 tests + 20 Testcontainers ITs)
 
 ### 🏛️ Architect / design reviewer
 
@@ -57,7 +57,7 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 2. [04-architecture.md](04-architecture.md) — full architecture (8 security layers, threading, Drools 10 `updateToVersion`)
 3. [14-security-architecture.md](14-security-architecture.md) — threat model + 8 layers
 4. [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md) — failure handling
-5. [36-architecture-decision-records.md](36-architecture-decision-records.md) — 15 ADRs explaining "why"
+5. [36-architecture-decision-records.md](36-architecture-decision-records.md) — 23 ADRs (001–024; 015 reserved) explaining "why"
 
 ### ⚙️ Operator / SRE
 
@@ -101,12 +101,12 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 | Layer | Choice | Version |
 |---|---|---|
 | Language | Java (LTS) | 25 (enforced) |
-| Framework | Spring Boot | 3.5.3 |
+| Framework | Spring Boot | 3.5.16 |
 | Rule engine | Drools | 10.2.0 |
 | Storage | AWS S3 (via SDK v2) | 2.34.0 |
 | Cache | `RedisCachedRuleStorage` decorator (opt-in via `REDIS_ENABLED`) + Redis pub/sub fan-out | — |
-| Resilience | Resilience4j | 2.3.0 |
-| Metrics | Micrometer (CloudWatch registry) | 1.14.7 |
+| Resilience | Resilience4j | 2.4.0 |
+| Metrics | Micrometer (CloudWatch registry) | 1.15.12 |
 | Logging | Logback + logstash-logback-encoder | 7.4 |
 | Test | JUnit 5, Mockito, AssertJ, Testcontainers | — |
 | Container | Amazon Corretto 25 Alpine | — |
@@ -120,10 +120,10 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 | Stat | Value |
 |---|---|
 | Total documentation files | **40** (including this one) |
-| Total Java source files | 61 |
-| Total test files | 48 |
-| Total tests (`@Test` + `@ParameterizedTest`) | **536** unit + 14 Testcontainers integration (surefire-excluded; CI-only) |
-| Test coverage (instruction / branch) | 90.1% / 78.4% (measured 2026-08-19, Java 25) |
+| Total Java source files | 63 |
+| Total test files | 51 |
+| Total tests (`@Test` + `@ParameterizedTest`) | **591** in `mvn test` (unit + plain ITs) + 20 Testcontainers integration (surefire-excluded; CI-only) |
+| Test coverage (instruction / branch) | 90.7% / 80.1% (measured 2026-11-17, Java 25) |
 | Sample rules in `sample-rules/` | 17 |
 | Environment variables actually read | 68 |
 | Distinct error codes | 10 |
@@ -195,7 +195,7 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 - [35-faq.md](35-faq.md) — 65+ Q&A
 
 ### Advanced (36-39)
-- [36-architecture-decision-records.md](36-architecture-decision-records.md) — 15 ADRs + extension points
+- [36-architecture-decision-records.md](36-architecture-decision-records.md) — 23 ADRs (001–024) + extension points
 - [37-glossary.md](37-glossary.md) — every term defined
 - [38-for-ai-agents.md](38-for-ai-agents.md) — verification rules and pitfalls for AI sessions working on this repo
 - [39-load-test-findings.md](39-load-test-findings.md) — measured numbers, architectural trade-offs, production-planning guidance from the 2026-05-10 single-container load test (1,000 rules, mixed-workload soak) + 2026-05-24 Phase 9.4 addendum (3-replica + pub/sub convergence + Redis-kill failure mode)
