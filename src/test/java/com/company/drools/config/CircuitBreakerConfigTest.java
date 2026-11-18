@@ -86,6 +86,33 @@ class CircuitBreakerConfigTest {
   }
 
   @Test
+  @DisplayName("s3CircuitBreaker records wrapped bulk-read failures (RuleStorageException)")
+  void testS3CircuitBreakerRecordsRuleStorageException() {
+    CircuitBreakerRegistry registry = config.circuitBreakerRegistry(meterRegistry);
+    CircuitBreaker cb = config.s3CircuitBreaker(registry);
+    java.util.function.Predicate<Throwable> record =
+        cb.getCircuitBreakerConfig().getRecordExceptionPredicate();
+
+    assertThat(
+            record.test(
+                new com.company.drools.api.exception.RuleStorageException(
+                    "read failed", new RuntimeException("boom"))))
+        .as("a wrapped bulk-read failure must count toward the S3 breaker")
+        .isTrue();
+    assertThat(
+            record.test(
+                software.amazon.awssdk.core.exception.SdkClientException.create("sdk failure")))
+        .isTrue();
+    assertThat(
+            cb.getCircuitBreakerConfig()
+                .getIgnoreExceptionPredicate()
+                .test(
+                    software.amazon.awssdk.services.s3.model.NoSuchKeyException.builder().build()))
+        .as("missing objects are ignored")
+        .isTrue();
+  }
+
+  @Test
   @DisplayName("redisCircuitBreaker records the 5 expected exception classes as failures")
   void testRedisCircuitBreakerRecordsExpectedExceptions() {
     // Guards against the Phase 9.4 bug where Lettuce's RedisCommandTimeoutException

@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, operators, AI agents (the lookup table for "what env var controls X?") |
 | **Purpose** | Exhaustive catalog of every environment variable the code reads. The single source of truth for runtime configuration. |
-| **Last verified against** | [`application.yml`](../src/main/resources/application.yml) and `@Value` annotations in `src/main/java/com/company/drools/config/` on 2026-08-20 |
+| **Last verified against** | [`application.yml`](../src/main/resources/application.yml) and `@Value` annotations in `src/main/java/com/company/drools/config/` on 2026-11-18 |
 | **Related docs** | [05-environments-and-profiles.md](05-environments-and-profiles.md), [08-configuration.md](08-configuration.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
@@ -30,7 +30,7 @@ When this doc says "Default", it means the value used if nothing higher-priority
 
 - [Server & Spring](#server--spring) (8 vars)
 - [Storage backend](#storage-backend) (5 vars)
-- [Cache & rule lifecycle](#cache--rule-lifecycle) (4 vars)
+- [Cache & rule lifecycle](#cache--rule-lifecycle) (6 vars)
 - [Timeouts](#timeouts) (5 vars)
 - [Circuit breakers](#circuit-breakers) (8 vars)
 - [Thread pools](#thread-pools) (8 vars)
@@ -44,7 +44,7 @@ When this doc says "Default", it means the value used if nothing higher-priority
 - [Metrics](#metrics) (2 vars)
 - [Drools system properties](#drools-system-properties) (3, JVM-args only)
 
-**Total: 68 distinct env vars catalogued below.**
+**Total: 73 distinct env vars catalogued below.**
 
 ---
 
@@ -69,7 +69,7 @@ When this doc says "Default", it means the value used if nothing higher-priority
 
 | Variable | Default | Valid values | What it controls |
 |---|---|---|---|
-| `RULE_SOURCE` | **`local`** | `local`, `file`, `s3` | Storage backend selected by [`StorageFactory`](../src/main/java/com/company/drools/storage/StorageFactory.java). `local` → `InMemoryRuleStorageAdapter` (built-in sample rules). `file` → `LocalFileStorage` (filesystem). `s3` → `S3RuleStorage`. Unrecognized values fall through to in-memory with a warning logged. |
+| `RULE_SOURCE` | **`local`** | `local`, `file`, `s3` | Storage backend selected by [`StorageFactory`](../src/main/java/com/company/drools/storage/StorageFactory.java). `local` → `InMemoryRuleStorageAdapter` (built-in sample rules). `file` → `LocalFileStorage` (filesystem). `s3` → `S3RuleStorage`. Any other value **fails startup** (`IllegalStateException`; before 2026-11-18 it fell back to the in-memory demo rules). Every profile block reads it as `${RULE_SOURCE:<profile default>}`, so the env var wins over the profile default (`local` → `local`; `dev`/`prod`/`docker` → `s3`). |
 | `RULE_BUCKET_NAME` | `local-rules` | string | S3 bucket name. Only used when `RULE_SOURCE=s3`. |
 | `LOCAL_RULES_DIRECTORY` | `src/main/resources/rules` | path | Filesystem directory for `RULE_SOURCE=file`. Path is `normalize()`d and traversal-checked. |
 | `AWS_ENDPOINT` | *(empty)* | URL | S3 endpoint override. Set to `http://localhost:4566` for LocalStack. Empty = real AWS. Validated against scheme + host allowlist in [`S3Config`](../src/main/java/com/company/drools/config/S3Config.java) — SSRF protection. |
@@ -81,9 +81,12 @@ When this doc says "Default", it means the value used if nothing higher-priority
 
 | Variable | Default | Type | What it controls |
 |---|---|---|---|
-| `RULE_EXECUTION_TIMEOUT_SECONDS` | `30` | int (seconds) | Per-execution cap. `RuleExecutor` uses this to time out rule firing via `CompletableFuture.get(...)`; on timeout it calls `future.cancel(true)`. |
-| `AUTO_REFRESH_ENABLED` | `false` | bool | If true, scheduled background reload from S3 at the interval below. Default `true` only in `prod` profile. |
-| `AUTO_REFRESH_INTERVAL_MINUTES` | `5` | int (minutes) | Refresh cadence when auto-refresh is enabled. |
+| `RULE_EXECUTION_TIMEOUT_SECONDS` | `30` | int (seconds) | Binds `drools.cache.execution-timeout-seconds`, which **no code reads**. The execution timeout is `DROOLS_RULE_EXECUTION_TIMEOUT` (see [Timeouts](#timeouts)). |
+| `AUTO_REFRESH_ENABLED` | `false` (`true` on `prod`) | bool | Scheduled reconcile ([`RuleReconcileScheduler`](../src/main/java/com/company/drools/config/RuleReconcileScheduler.java)). Each interval it reads storage **directly** (bypassing Redis), recompiles only changed rule IDs, adds new ones and removes deleted ones. Unchanged rules are skipped by SHA-256 digest. It never publishes pub/sub events. Repairs missed pub/sub events and picks up direct bucket edits. Before 2026-11-18 this key was documented but nothing read it. |
+| `AUTO_REFRESH_INTERVAL_MINUTES` | `5` | int (minutes) | Reconcile interval; also the delay before the first run. |
+| `DROOLS_REFRESH_ALLOW_EMPTY` | `false` | bool | `drools.refresh.allow-empty`. When `false`, a complete storage read with **0 rules** while rules are loaded is refused (admin bulk refresh → 409 `rejected_empty`; nothing changes). Set `true` only if emptying the engine is intended. Also lets the `rules` readiness indicator be UP with 0 rules. |
+| `DROOLS_STARTUP_FAIL_ON_LOAD_ERROR` | `false` | bool | `drools.startup.fail-on-load-error`. `true`: the app exits if the startup load can't read storage (or is refused as empty). `false`: it starts but stays **not ready** (readiness DOWN, `/admin/health` 503) until a reconcile or admin refresh succeeds. Per-rule compile errors never stop startup. |
+| `DROOLS_MAX_RULE_FIRINGS` | `10000` | int (1 … 2147483646) | `drools.execution.max-rule-firings`. Max rule firings per request. Exceeding it (usually a rule loop) fails the request with **422 `RULE_LIMIT_EXCEEDED`** and no result. |
 
 > `LRU_CACHE_MAX_SIZE` was removed on 2026-05-20 with the deletion of `LocalLRUCache`. Cache configuration now lives under the Redis section below. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20).
 
@@ -97,7 +100,7 @@ All values are seconds.
 |---|---|---|
 | `DROOLS_HTTP_CONNECTION_TIMEOUT` | `10` | HTTP client connection timeout for outgoing calls. |
 | `DROOLS_HTTP_READ_TIMEOUT` | `30` | HTTP client read timeout. |
-| `DROOLS_RULE_EXECUTION_TIMEOUT` | `30` | Same as `RULE_EXECUTION_TIMEOUT_SECONDS` — both bind to `drools.timeout.rule-execution`. **Use only one to avoid confusion.** |
+| `DROOLS_RULE_EXECUTION_TIMEOUT` | `30` | Per-request rule-execution timeout (`drools.timeout.rule-execution`). On expiry `RuleExecutor` halts the session and interrupts the worker (`FutureTask.cancel(true)`); the request returns 408. A rule body that never yields keeps its thread (gauge `drools.rule.execution.stuck`). |
 | `DROOLS_STORAGE_OPERATION_TIMEOUT` | `60` | Time the storage layer (S3 / file / memory) has to complete a fetch. |
 | `DROOLS_CACHE_OPERATION_TIMEOUT` | `5` | Time a Redis cache operation has to complete (legacy umbrella; the Lettuce-level cap is `REDIS_TIMEOUT=500ms`, which fires first in practice). |
 
@@ -146,7 +149,7 @@ Two separate executors: `ruleExecutionExecutor` (rule firing) and `storageExecut
 |---|---|---|
 | `DROOLS_THREAD_POOL_CORE_SIZE` | `10` | Always-alive threads. |
 | `DROOLS_THREAD_POOL_MAX_SIZE` | `50` | Burst capacity ceiling. |
-| `DROOLS_THREAD_POOL_QUEUE_CAPACITY` | `100` | Queue when pool is full. After queue fills, rejection policy kicks in (`CallerRunsPolicy` — see ADR for the trade-off). |
+| `DROOLS_THREAD_POOL_QUEUE_CAPACITY` | `100` | Queue when pool is full. After the queue fills, new executions are rejected (`AbortPolicy`) and the request returns 503 `SERVICE_UNAVAILABLE` (ADR-019). |
 | `DROOLS_THREAD_POOL_KEEP_ALIVE` | `60` | Seconds before idle non-core threads are reaped. |
 
 **Profile overrides**: `prod`: 20/100/200/300. `docker`: 8/20/50/120.
@@ -220,13 +223,13 @@ See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) for
 
 ## Redis
 
-Refactored 2026-05-20 — see [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20). When `REDIS_ENABLED=true`, `StorageFactory` wraps the base `RuleStorage` with `RedisCachedRuleStorage` (read-through cache of DRL text). When `REDIS_PUBSUB_ENABLED=true` (default when Redis is on), `RuleRefreshPublisher` emits events on `drools:rule:events` after every refresh; `RuleRefreshSubscriber` receives and refreshes this task's compiled rulesets.
+Refactored 2026-05-20 — see [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20). When `REDIS_ENABLED=true`, `StorageFactory` wraps the base `RuleStorage` with `RedisCachedRuleStorage` (read-through cache of DRL text). When `REDIS_PUBSUB_ENABLED=true` (default when Redis is on), `RuleRefreshPublisher` emits events on `drools:rule:events` after every admin refresh; `RuleRefreshSubscriber` receives them and refreshes this task's compiled rulesets. A missed event is repaired by the scheduled reconcile (`AUTO_REFRESH_ENABLED`).
 
 | Variable | Default | What it does |
 |---|---|---|
 | `REDIS_ENABLED` | `false` | If true, the storage chain is wrapped with `RedisCachedRuleStorage`. When false, the service goes directly to the base storage with no caching. |
 | `REDIS_URL` | `redis://localhost:6379` | Lettuce-format URL. Examples: `redis://user:pass@host:6379`, `rediss://host:6379` (TLS). |
-| `REDIS_DRL_RULES_TTL_MINUTES` | `15` | TTL for cached DRL rule entries. Acts as eventual-consistency ceiling for cross-service consumers (if the writer's pub/sub event is missed, stale entries expire within this window). |
+| `REDIS_DRL_RULES_TTL_MINUTES` | `15` | TTL for cached DRL rule entries. Startup and pub/sub reads may be answered from this cache; reconcile and admin refreshes don't use it (reconcile bypasses it, admin refreshes invalidate it first). |
 | `REDIS_DRL_RULES_KEY_PREFIX` | `drools:rule:` | Key prefix for cached rule entries. Namespaced to support future Redis uses by this service. |
 | `REDIS_PUBSUB_ENABLED` | `true` (when Redis on) | Enables `RuleRefreshPublisher` and `RuleRefreshSubscriber`. Set `false` to use Redis as cache only (no cross-task fan-out). |
 | `REDIS_REFRESH_CHANNEL` | `drools:rule:events` | Channel name for refresh events. Cross-service consumers can subscribe here. |

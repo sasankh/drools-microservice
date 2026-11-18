@@ -4,15 +4,15 @@
 |---|---|
 | **Audience** | Developers, AI agents inspecting test coverage |
 | **Purpose** | Test suite map, how to run tests, how to add new ones, and the test cases that prove the most important behaviors |
-| **Last verified against** | All `src/test/java/com/company/drools/**/*.java` on 2026-11-17 (51 test files; 591 tests in `mvn test` after `@ParameterizedTest` expansion, incl. the plain integration tests; 20 Testcontainers integration tests, surefire-excluded by default) |
+| **Last verified against** | All `src/test/java/com/company/drools/**/*.java` on 2026-11-18 (55 test files; 766 tests in `mvn test` after `@ParameterizedTest` expansion, incl. the plain integration tests; 22 Testcontainers integration tests, surefire-excluded by default) |
 | **Related docs** | [27-development-setup.md](27-development-setup.md), [16-drl-sandboxing.md](16-drl-sandboxing.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
 
 ## TL;DR
 
-- **51 test files**, **591 tests in `mvn test`** (unit tests plus plain integration tests such as `RuleExecutionIntegrationTest`, `RuleRefreshIntegrationTest` and `PathBypassIntegrationTest`) and **20 Testcontainers integration tests** (Redis cache 10, pub/sub 4, S3 6). Coverage is **90.7% instruction / 80.1% branch** (JaCoCo, 2026-11-17). Earlier docs said "14 ITs", which undercounted: the 6 S3 tests were missing.
-  - Count history: 597 → 545 (dead `RuleCache` layer deleted, 2026-05-20) → 548 (SCAN-CB-wrap, 2026-05-24) → 536 (2026-08-20) → 591 (+55 path-bypass tests, 2026-11-17).
+- **55 test files**, **766 tests in `mvn test`** (unit tests plus plain integration tests such as `RuleExecutionIntegrationTest`, `RuleIsolationIntegrationTest`, `RuleRefreshIntegrationTest`, `ReadinessProbeIntegrationTest` and `PathBypassIntegrationTest`) and **22 Testcontainers integration tests** (S3 6, Redis cache 12, pub/sub 4). Coverage is **93.9% instruction / 86.1% branch** (JaCoCo, 2026-11-18).
+  - Count history: 597 → 545 (dead `RuleCache` layer deleted, 2026-05-20) → 548 (SCAN-CB-wrap, 2026-05-24) → 536 (2026-08-20) → 591 (+55 path-bypass tests, 2026-11-17) → 620 (per-rule-ID isolation) → 695 (refresh/storage/startup) → 766 (limits/security) (engine isolation & hardening, 2026-11-18).
   - A coverage floor is enforced at `verify`: INSTRUCTION ≥ 0.88, BRANCH ≥ 0.74.
 - **End-to-end:** `scripts/e2e-load-test.sh` (keep-alive load test with value checks) and `scripts/run-docker-test-plan.sh` (automated `full-docker-test-plan.md`). See [scripts/README.md](../scripts/README.md).
 - Run all: `mvn test`
@@ -25,16 +25,16 @@
 
 ## Test inventory by package
 
-Counts are `@Test` + `@ParameterizedTest` annotations per file (verified 2026-08-20).
+Counts are `@Test` + `@ParameterizedTest` annotations per file (`grep`, verified 2026-11-18). A parameterized method counts once here but runs once per argument in `mvn test`, so these numbers add up to 678, not 766.
 
-### `api/controller/` — 62 tests across 3 test files (+1 config helper)
+### `api/controller/` — 72 tests across 3 test files (+1 config helper)
 
 | File | Tests | What it covers |
 |---|---:|---|
-| [`AdminControllerTest.java`](../src/test/java/com/company/drools/api/controller/AdminControllerTest.java) | 35 | `/admin/health`, `/admin/info`, `/admin/rules`, `/admin/refresh-rules`, `/admin/refresh-rules/{id}`, `/admin/thread-pools` — full controller behavior including error paths |
+| [`AdminControllerTest.java`](../src/test/java/com/company/drools/api/controller/AdminControllerTest.java) | 44 | `/admin/health` UP / DEGRADED / DOWN (503), `/admin/info`, `/admin/rules`, bulk refresh 200 / 500 `failed` / 409 `rejected_empty` with per-ID errors and counts, single refresh `success` / `unchanged` / `removed` / 404 / 500, always-publish to siblings, caller address passed to the audit log |
 | [`MemoryControllerTest.java`](../src/test/java/com/company/drools/api/controller/MemoryControllerTest.java) | 12 | `/admin/memory/info`, `/admin/memory/snapshot`, `/admin/memory/gc` |
-| [`RuleExecutionControllerTest.java`](../src/test/java/com/company/drools/api/controller/RuleExecutionControllerTest.java) | 15 | `POST /execute-rule` happy path + error envelope shapes |
-| `TestValidationConfig.java` | 1 | Test-only config class (provides validators with mocked `ValidationConfig`) |
+| [`RuleExecutionControllerTest.java`](../src/test/java/com/company/drools/api/controller/RuleExecutionControllerTest.java) | 16 | `POST /execute-rule` happy path + error envelope shapes, incl. 422 passthrough |
+| `TestValidationConfig.java` | 0 | Test-only config class (provides validators with mocked `ValidationConfig`) |
 
 ### `api/dto/` — 37 tests
 
@@ -42,21 +42,21 @@ Counts are `@Test` + `@ParameterizedTest` annotations per file (verified 2026-08
 |---|---:|
 | [`DtoTest.java`](../src/test/java/com/company/drools/api/dto/DtoTest.java) | 37 — DTO equality, JSON roundtripping (`@JsonProperty("rule_id")` mapping verified here) |
 
-### `api/exception/` — 19 tests
+### `api/exception/` — 20 tests
 
 | File | Tests | What it covers |
 |---|---:|---|
 | [`ExceptionTest.java`](../src/test/java/com/company/drools/api/exception/ExceptionTest.java) | 9 | Custom exception types (RuleNotFoundException, TimeoutException, etc.) |
-| [`GlobalExceptionHandlerTest.java`](../src/test/java/com/company/drools/api/exception/GlobalExceptionHandlerTest.java) | 10 | HTTP status mapping for every handled exception type — see [12-error-code-catalog.md](12-error-code-catalog.md) |
+| [`GlobalExceptionHandlerTest.java`](../src/test/java/com/company/drools/api/exception/GlobalExceptionHandlerTest.java) | 11 | HTTP status mapping for every handled exception type, incl. `RuleLimitExceededException` → 422 — see [12-error-code-catalog.md](12-error-code-catalog.md) |
 
-### `api/filter/` — 5 files
+### `api/filter/` — 43 tests across 5 files
 
 | File | Tests | Notable |
 |---|---:|---|
-| [`AdminAuthFilterTest.java`](../src/test/java/com/company/drools/api/filter/AdminAuthFilterTest.java) | 21 | Verifies local/dev bypass when `ADMIN_API_KEY` empty; fail-closed startup under `prod`/`docker`; 401 when wrong/missing key; non-admin paths skip filter; **normalized-path matching** (`/admin;x/…`, `/%61dmin/…`, `//admin/…`, `/admin` → key required; `/administrator` not) |
-| [`StrictRequestPathFilterTest.java`](../src/test/java/com/company/drools/api/filter/StrictRequestPathFilterTest.java) | 21 | 400 `INVALID_INPUT` for raw paths with `;` `%` `\` `//` `.`/`..`; normal paths (incl. dotted rule IDs) pass through (ADR-024) |
+| [`AdminAuthFilterTest.java`](../src/test/java/com/company/drools/api/filter/AdminAuthFilterTest.java) | 14 | Verifies local/dev bypass when `ADMIN_API_KEY` empty; fail-closed startup under `prod`/`docker`; 401 when wrong/missing key; non-admin paths skip filter; **normalized-path matching** (`/admin;x/…`, `/%61dmin/…`, `//admin/…`, `/admin` → key required; `/administrator` not) |
+| [`StrictRequestPathFilterTest.java`](../src/test/java/com/company/drools/api/filter/StrictRequestPathFilterTest.java) | 4 (parameterized) | 400 `INVALID_INPUT` for raw paths with `;` `%` `\` `//` `.`/`..`; normal paths (incl. dotted rule IDs) pass through (ADR-024) |
 | [`RateLimitingFilterTest.java`](../src/test/java/com/company/drools/api/filter/RateLimitingFilterTest.java) | 13 | Verifies `/admin/*` exemption, per-client (IP-keyed) buckets, `X-Forwarded-For` ignored unless `trust-proxy=true` |
-| [`RequestSizeValidationFilterTest.java`](../src/test/java/com/company/drools/api/filter/RequestSizeValidationFilterTest.java) | 10 | Content-Length check + chunked stream wrapping |
+| [`RequestSizeValidationFilterTest.java`](../src/test/java/com/company/drools/api/filter/RequestSizeValidationFilterTest.java) | 11 | Content-Length check + chunked stream wrapping |
 | [`SecurityHeadersFilterTest.java`](../src/test/java/com/company/drools/api/filter/SecurityHeadersFilterTest.java) | 1 | All 7 headers verified present with exact values |
 
 ### `api/validation/` — 45 tests
@@ -66,52 +66,55 @@ Counts are `@Test` + `@ParameterizedTest` annotations per file (verified 2026-08
 | [`RuleIdValidatorTest.java`](../src/test/java/com/company/drools/api/validation/RuleIdValidatorTest.java) | 17 | Pattern check, length check, path traversal rejection |
 | [`RuleDataValidatorTest.java`](../src/test/java/com/company/drools/api/validation/RuleDataValidatorTest.java) | 28 | Field count, string length, number magnitude, dangerous patterns |
 
-### `cache/` — pub/sub fan-out tests
+### `cache/` — 22 tests (pub/sub fan-out)
 
-| File | Tests |
-|---|---:|
-| [`RefreshEventTest.java`](../src/test/java/com/company/drools/cache/RefreshEventTest.java) | Wire-format serde for `RefreshEvent` (event_type / rule_id / source_instance_id / timestamp) |
-| [`RuleRefreshPublisherTest.java`](../src/test/java/com/company/drools/cache/RuleRefreshPublisherTest.java) | Channel + payload assertions; circuit-breaker fall-through; failure → `drools.refresh.failed{layer=publisher}` |
-| [`RuleRefreshSubscriberTest.java`](../src/test/java/com/company/drools/cache/RuleRefreshSubscriberTest.java) | Self-dedup via `source_instance_id`; dispatch to `engine.loadOrReplaceRule` / `loadRules`; malformed JSON tolerance |
+| File | Tests | What it covers |
+|---|---:|---|
+| [`RefreshEventTest.java`](../src/test/java/com/company/drools/cache/RefreshEventTest.java) | 3 | Wire-format serde for `RefreshEvent` (event_type / rule_id / source_instance_id / timestamp) |
+| [`RuleRefreshPublisherTest.java`](../src/test/java/com/company/drools/cache/RuleRefreshPublisherTest.java) | 6 | Channel + payload assertions; circuit-breaker fall-through; failure → `drools.refresh.failed{layer=publisher}` |
+| [`RuleRefreshSubscriberTest.java`](../src/test/java/com/company/drools/cache/RuleRefreshSubscriberTest.java) | 13 | Self-dedup via `source_instance_id`; dispatch to `RuleRefreshService`; every bulk event refreshes (no coalescing); compile failures and failed refreshes counted in `drools.refresh.failed{layer=subscriber}`; `RULE_DELETED` removes the rule; unsafe rule IDs and malformed JSON rejected |
 
 The dead `LocalLRUCacheTest` / `RedisRuleCacheTest` / `CacheStatisticsTest` files were deleted on 2026-05-20 along with the legacy cache layer. The Redis decorator itself is covered under `storage/`:
 
 | File | Tests |
 |---|---:|
-| [`RedisCachedRuleStorageTest.java`](../src/test/java/com/company/drools/storage/RedisCachedRuleStorageTest.java) | Read-through, write-through, bulk SCAN+MGET, circuit-breaker fall-through (Mockito) |
-| [`RedisCachedStorageIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisCachedStorageIntegrationTest.java) | Testcontainers — cold→warm cache, TTL, bulk SCAN+MGET (hot/cold), refreshCache, refreshRule, write-through, Redis-kill CB fallback. **Excluded from default `mvn test`** (see `pom.xml` surefire `<excludes>`); requires host-side Docker daemon. |
-| [`RedisPubSubIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisPubSubIntegrationTest.java) | Testcontainers — two-instance fan-out (single + bulk + delete), wire-format end-to-end. **Excluded from default `mvn test`**. |
+| [`RedisCachedRuleStorageTest.java`](../src/test/java/com/company/drools/storage/RedisCachedRuleStorageTest.java) | 23 — read-through, write-through, bulk SCAN+MGET, circuit-breaker fall-through, delegate failures propagate (never a partial set), `getAllRulesFromSource` bypasses the cache (Mockito) |
+| [`RedisCachedStorageIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisCachedStorageIntegrationTest.java) | 12 — Testcontainers — cold→warm cache, TTL, bulk SCAN+MGET (hot/cold), refreshCache, refreshRule, write-through, Redis-kill CB fallback. **Excluded from default `mvn test`** (see `pom.xml` surefire `<excludes>`); requires host-side Docker daemon. |
+| [`RedisPubSubIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisPubSubIntegrationTest.java) | 4 — Testcontainers — two-instance fan-out (single + bulk + delete), wire-format end-to-end. **Excluded from default `mvn test`**. |
 
-### `common/` — 2 files
+### `common/` — 29 tests across 2 files
 
 | File | Tests |
 |---|---:|
 | [`LogSanitizerTest.java`](../src/test/java/com/company/drools/common/LogSanitizerTest.java) | 24 — credit card masking, SSN masking, nested map recursion, false-positive avoidance |
-| [`RequestPathsTest.java`](../src/test/java/com/company/drools/common/RequestPathsTest.java) | 13 — normalization used by all filters: percent-decoding, `;` stripping, `//` collapse, context path (ADR-024) |
+| [`RequestPathsTest.java`](../src/test/java/com/company/drools/common/RequestPathsTest.java) | 5 (parameterized) — normalization used by all filters: percent-decoding, `;` stripping, `//` collapse, context path (ADR-024) |
 
-### `config/` — 10 files
+### `config/` — 88 tests across 12 files
 
 | File | Tests |
 |---|---:|
 | `CircuitBreakerConfigTest.java` | 6 |
 | `InstanceIdConfigTest.java` | 2 (per-instance UUID bean used by pub/sub layer, added 2026-05-20) |
 | `LoggingConfigTest.java` | 9 |
-| `MetricsConfigTest.java` | 13 |
+| `MetricsConfigTest.java` | 12 (incl. `drools.rules.loaded` bound to the registry size) |
 | `RateLimitingConfigTest.java` | 18 |
 | `RedisConfigTest.java` | 7 |
 | `RequestTimeoutConfigTest.java` | 4 |
-| `RuleLoadingConfigTest.java` | 5 |
+| `RuleLoadingConfigTest.java` | 7 (startup load outcomes; `fail-on-load-error=true` exits on a storage failure) |
+| [`RuleReconcileSchedulerTest.java`](../src/test/java/com/company/drools/config/RuleReconcileSchedulerTest.java) | 4 (no drift → DEBUG; drift or failures → INFO with counts; storage failed / rejected empty → WARN) |
+| [`RulesHealthIndicatorTest.java`](../src/test/java/com/company/drools/config/RulesHealthIndicatorTest.java) | 7 (DOWN until the startup load succeeds; DOWN with 0 rules unless `allow-empty`; per-ID errors listed, max 20, but still UP) |
 | `S3ConfigTest.java` | 8 |
 | `ThreadPoolConfigTest.java` | 4 |
 
-### `core/engine/` — 54 tests across 4 files
+### `core/engine/` — 134 tests across 5 files
 
 | File | Tests | What it proves |
 |---|---:|---|
-| [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) | 8 | Every sandbox rule: import allowlist/blocklist, blocked classes, blocked methods, eval() rejection, static imports rejected (8 methods across 6 `@Nested` classes; parameterized methods expand over all blocked entries) |
-| [`DroolsEngineServiceTest.java`](../src/test/java/com/company/drools/core/engine/DroolsEngineServiceTest.java) | 25 | Rule lookup, per-rule-ID install/replace/remove (`PerIdIsolation`), failed compile keeps last good version, `removeRule`, TOCTOU-safe lookup, metrics |
-| [`RuleCompilerTest.java`](../src/test/java/com/company/drools/core/engine/RuleCompilerTest.java) | 9 | Per-rule-ID DRL compilation into its own KieBase, sanitizer integration, error reporting |
-| [`RuleExecutorTest.java`](../src/test/java/com/company/drools/core/engine/RuleExecutorTest.java) | 12 | Async execution, timeout → `KieSession.halt()` + `future.cancel(true)`, pool-saturation → `ServiceUnavailableException` (503), maxRuleFirings cap |
+| [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) | 22 | Import allowlist/blocklist, blocked classes, blocked methods, `eval()` rejection, static imports rejected. New nested groups (2026-11-18): `NormalizationResistant` (comment-hidden imports, `System .exit`, fully-qualified names, narrowed `java.util.`; all 17 samples accepted), `Normalize` (comment/string stripping, whitespace around `.`), `ReviewRegressions` (unicode escapes rejected; an unterminated quote can't hide an import). 9 `@Nested` groups; parameterized methods expand over every blocked entry |
+| [`DroolsEngineServiceTest.java`](../src/test/java/com/company/drools/core/engine/DroolsEngineServiceTest.java) | 32 | Rule lookup, per-rule-ID install/replace/remove (`PerIdIsolation`), failed compile keeps last good version, digest skip, `removeRule`, TOCTOU-safe lookup, metrics |
+| [`RuleCompilerTest.java`](../src/test/java/com/company/drools/core/engine/RuleCompilerTest.java) | 18 | Per-rule-ID DRL compilation into its own KieBase, policy-check integration, error reporting, duplicate rule name inside one file |
+| [`RuleExecutorTest.java`](../src/test/java/com/company/drools/core/engine/RuleExecutorTest.java) | 22 | Async execution, timeout → `KieSession.halt()` + 408, pool saturation → `ServiceUnavailableException` (503). New nested groups (2026-11-18): `RuleFiringLimit` (a loop rule over the cap → `RuleLimitExceededException`; exactly `cap` firings succeeds; cap bounds 1 … `Integer.MAX_VALUE-1`) and `TimeoutInterruption` (`FutureTask.cancel(true)` interrupts a sleeping worker; a non-interruptible worker is counted in `drools.rule.execution.stuck`, which returns to 0 when it ends) |
+| [`RuleRefreshServiceTest.java`](../src/test/java/com/company/drools/core/engine/RuleRefreshServiceTest.java) | 40 | New 2026-11-18. `refreshAll`: a storage failure changes nothing; empty set refused unless `allow-empty`; invalidate-then-read vs cached vs source reads; identical DRL → `unchanged`; only the changed rule recompiles; partial failure. `RuleLoadState` phase transitions. `refreshOne`: installed / unchanged / failed keeps previous / removed / not found / storage failed. `reconcile`: drift counted in `drools.reconcile.changed`. `AuditLog`: one `AUDIT` line per action, IDs capped at 50, no DRL text |
 
 ### `core/model/` — 38 tests
 
@@ -120,28 +123,30 @@ The dead `LocalLRUCacheTest` / `RedisRuleCacheTest` / `CacheStatisticsTest` file
 | `RuleTest.java` | 12 |
 | `RuleMetadataTest.java` | 26 — incremental averaging (Welford's method), no-arg constructor for Jackson |
 
-### `storage/` — 61 tests
+### `storage/` — 90 tests across 5 files
 
-| File | Tests |
-|---|---:|
-| [`S3RuleStorageTest.java`](../src/test/java/com/company/drools/storage/S3RuleStorageTest.java) | 29 |
-| [`LocalFileStorageTest.java`](../src/test/java/com/company/drools/storage/LocalFileStorageTest.java) | 8 |
-| [`InMemoryRuleStorageTest.java`](../src/test/java/com/company/drools/storage/InMemoryRuleStorageTest.java) | 19 |
-| [`StorageFactoryTest.java`](../src/test/java/com/company/drools/storage/StorageFactoryTest.java) | 5 |
+| File | Tests | Notable |
+|---|---:|---|
+| [`S3RuleStorageTest.java`](../src/test/java/com/company/drools/storage/S3RuleStorageTest.java) | 30 | One unreadable object aborts the whole read (`testThrowsOnIndividualFailure`); an object deleted mid-listing is skipped; listing errors throw |
+| [`LocalFileStorageTest.java`](../src/test/java/com/company/drools/storage/LocalFileStorageTest.java) | 12 | Missing directory, a path that is a file, and an IO error on one file all throw; an empty directory returns `[]` |
+| [`InMemoryRuleStorageTest.java`](../src/test/java/com/company/drools/storage/InMemoryRuleStorageTest.java) | 19 | |
+| [`RedisCachedRuleStorageTest.java`](../src/test/java/com/company/drools/storage/RedisCachedRuleStorageTest.java) | 23 | See `cache/` above |
+| [`StorageFactoryTest.java`](../src/test/java/com/company/drools/storage/StorageFactoryTest.java) | 6 | `local` / `file` / `s3`; an unknown source throws; the storage is built once |
 
-### `integration/` — 6 files (3 plain ITs run by default; 3 Testcontainers ITs surefire-excluded, run in CI)
+### `integration/` — 60 tests across 8 files (5 plain ITs, 38 tests, run by default; 3 Testcontainers ITs, 22 tests, surefire-excluded, run in CI)
 
 > **Pinned container images.** The Testcontainers ITs pin their images: **`localstack/localstack:2.3`** and **`redis:7.4-alpine`** (`DockerImageName.parse(...)`). `S3Config` also disables SDK request/response checksums for LocalStack endpoints, since LocalStack 2.3 rejects the SDK's default CRC32 request checksum.
 
-| File | Stack |
-|---|---|
-| [`RuleExecutionIntegrationTest.java`](../src/test/java/com/company/drools/integration/RuleExecutionIntegrationTest.java) | Real Drools KieBase + sample rules from filesystem; includes the `SampleRulesExecution` nested class that pin-tests outputs for all 17 sample rules |
-| [`S3StorageIntegrationTest.java`](../src/test/java/com/company/drools/integration/S3StorageIntegrationTest.java) | Real LocalStack S3 via Testcontainers |
-| [`RuleRefreshIntegrationTest.java`](../src/test/java/com/company/drools/integration/RuleRefreshIntegrationTest.java) | Refresh-path integration (full and single-rule refresh against the per-rule-ID registry) |
-| [`RuleIsolationIntegrationTest.java`](../src/test/java/com/company/drools/integration/RuleIsolationIntegrationTest.java) | Rule-ID isolation with all 17 sample rules loaded ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)): VIP $100 → 80 and simple with VIP fields → 90 (no stacking), forall without `price` succeeds, same-package files isolate, salience order inside one file, unknown IDs never fall back, broken refresh keeps last good version, replace recompiles only that ID, in-flight request finishes on the old version, concurrent IDs don't cross-contaminate |
-| [`PathBypassIntegrationTest.java`](../src/test/java/com/company/drools/integration/PathBypassIntegrationTest.java) | **Real embedded Tomcat** (`@SpringBootTest(RANDOM_PORT)`, `local` profile) + `java.net.http.HttpClient` sending raw paths: `/admin;x/health`, `/%61dmin/health`, `/%65xecute-rule`, … → 400 (with security headers); `/admin/health` → 401 / 200. Regression guard for ADR-024. Runs in default `mvn test` (no Docker). |
-| [`RedisCachedStorageIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisCachedStorageIntegrationTest.java) | Redis decorator end-to-end (cold→warm cache, TTL, bulk SCAN+MGET, refreshCache, refreshRule, write-through, Redis-kill CB fallback) |
-| [`RedisPubSubIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisPubSubIntegrationTest.java) | Two-instance pub/sub fan-out (single + bulk + delete events, wire-format end-to-end, source-instance dedup) |
+| File | Tests | Stack |
+|---|---:|---|
+| [`RuleExecutionIntegrationTest.java`](../src/test/java/com/company/drools/integration/RuleExecutionIntegrationTest.java) | 15 | Real Drools KieBase + sample rules from filesystem; includes the `SampleRulesExecution` nested class that pin-tests outputs for the sample rules |
+| [`RuleIsolationIntegrationTest.java`](../src/test/java/com/company/drools/integration/RuleIsolationIntegrationTest.java) | 14 | Rule-ID isolation with all 17 sample rules loaded ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)): VIP $100 → 80 and simple with VIP fields → 90 (no stacking), forall without `price` succeeds, same-package files isolate, salience order inside one file, unknown IDs never fall back, broken refresh keeps last good version, replace recompiles only that ID, in-flight request finishes on the old version, concurrent IDs don't cross-contaminate |
+| [`RuleRefreshIntegrationTest.java`](../src/test/java/com/company/drools/integration/RuleRefreshIntegrationTest.java) | 4 | Refresh-path integration: a single-rule refresh doesn't degrade others; a content change swaps handle and digest; a broken update keeps the previous version; removal affects only that ID |
+| [`ReadinessProbeIntegrationTest.java`](../src/test/java/com/company/drools/integration/ReadinessProbeIntegrationTest.java) | 2 | **Real server** (`@SpringBootTest(RANDOM_PORT)`, `local` profile): `/actuator/health/readiness` is 200 UP and includes the `rules` indicator; `/actuator/health/liveness` is 200 and doesn't depend on rules. Runs in default `mvn test` (no Docker). |
+| [`PathBypassIntegrationTest.java`](../src/test/java/com/company/drools/integration/PathBypassIntegrationTest.java) | 3 (parameterized) | **Real embedded Tomcat** (`@SpringBootTest(RANDOM_PORT)`, `local` profile) + `java.net.http.HttpClient` sending raw paths: `/admin;x/health`, `/%61dmin/health`, `/%65xecute-rule`, … → 400 (with security headers); `/admin/health` → 401 / 200. Regression guard for ADR-024. Runs in default `mvn test` (no Docker). |
+| [`S3StorageIntegrationTest.java`](../src/test/java/com/company/drools/integration/S3StorageIntegrationTest.java) | 6 | Real LocalStack S3 via Testcontainers |
+| [`RedisCachedStorageIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisCachedStorageIntegrationTest.java) | 12 | Redis decorator end-to-end (cold→warm cache, TTL, bulk SCAN+MGET, refreshCache, refreshRule, write-through, Redis-kill CB fallback) |
+| [`RedisPubSubIntegrationTest.java`](../src/test/java/com/company/drools/integration/RedisPubSubIntegrationTest.java) | 4 | Two-instance pub/sub fan-out (single + bulk + delete events, wire-format end-to-end, source-instance dedup) |
 
 ### `testutil/` — helpers
 
@@ -183,7 +188,7 @@ Use this for tests that exercise the real Drools engine, real storage layer, or 
 mvn test
 ```
 
-Takes ~30-60 seconds. Output ends with `BUILD SUCCESS` and a summary like `Tests run: 591, Failures: 0, Errors: 0, Skipped: 0`. Plain integration tests (`RuleExecutionIntegrationTest`, `RuleRefreshIntegrationTest`, and `PathBypassIntegrationTest`, which uses a real embedded Tomcat) run by default. The 3 Testcontainers classes are surefire-excluded; run them with `mvn test -Dtest='S3StorageIntegrationTest,RedisCachedStorageIntegrationTest,RedisPubSubIntegrationTest'`. This needs a Docker daemon, and Testcontainers ≥ 1.21.4 for Docker Engine 29.
+Takes ~30-60 seconds. Output ends with `BUILD SUCCESS` and a summary like `Tests run: 766, Failures: 0, Errors: 0, Skipped: 0`. Plain integration tests (`RuleExecutionIntegrationTest`, `RuleIsolationIntegrationTest`, `RuleRefreshIntegrationTest`, and `ReadinessProbeIntegrationTest` / `PathBypassIntegrationTest`, which use a real embedded Tomcat) run by default. The 3 Testcontainers classes are surefire-excluded; run them with `mvn test -Dtest='S3StorageIntegrationTest,RedisCachedStorageIntegrationTest,RedisPubSubIntegrationTest'`. This needs a Docker daemon, and Testcontainers ≥ 1.21.4 for Docker Engine 29.
 
 ### Single class
 
@@ -201,7 +206,7 @@ mvn test -Dtest=DroolsEngineServiceTest#testExecuteRule
 
 ```bash
 mvn test -Dtest='*FilterTest'        # all filter tests
-mvn test -Dtest='*IntegrationTest'   # only Testcontainers tests (slower)
+mvn test -Dtest='*IntegrationTest'   # all 8 integration classes (-Dtest overrides the excludes; the 3 Testcontainers ones need Docker)
 ```
 
 ### With coverage report
@@ -237,17 +242,30 @@ These are claims that are **proven by tests** — when this doc says "X is enfor
 | Request size limit blocks oversized bodies | `RequestSizeValidationFilterTest` | content-length and chunked variants |
 | `eval()` blocked in DRL | `DrlSanitizerTest` (`EvalBlocking` nested class) | `testRejectsEvalInWhen` |
 | Blocked imports rejected | `DrlSanitizerTest` (`BlockedImports` nested) | various |
+| Comments, whitespace and fully-qualified names can't bypass the policy check; unicode escapes rejected | `DrlSanitizerTest` (`NormalizationResistant`, `ReviewRegressions`) | `rejects`, `unicodeEscapeRejected`, `unterminatedQuoteDoesNotHideImport` |
+| All 17 sample rules pass the policy check | `DrlSanitizerTest` (`NormalizationResistant`) | `acceptsAllSampleRules` |
 | Allowed imports accepted | `DrlSanitizerTest` (`AllowedRules` nested) | various |
 | Static imports rejected | `DrlSanitizerTest` (`BlockedImports` nested) | dedicated test |
 | A request runs only its own rule ID's rules (no stacking) | `RuleIsolationIntegrationTest` | `simpleDoesNotRunVip`, `vipGivesEighty` |
 | Per-rule-ID refresh recompiles only that ID | `RuleIsolationIntegrationTest`, `DroolsEngineServiceTest` (`PerIdIsolation`) | `replaceOnlyRecompilesThatId` |
 | TOCTOU-safe lookup | `DroolsEngineServiceTest` | tested via concurrent access |
-| `maxRuleFirings = 10000` cap | `RuleExecutorTest` | bounded execution test |
-| Timeout calls `KieSession.halt()` + `future.cancel(true)` | `RuleExecutorTest` | timeout test (halts at next rule boundary, then 408) |
+| Over the firing cap → `RuleLimitExceededException` (422); exactly `cap` firings succeeds | `RuleExecutorTest` (`RuleFiringLimit`) | `loopExceedsCap`, `exactlyCapSucceeds` |
+| `RuleLimitExceededException` → 422 `RULE_LIMIT_EXCEEDED` | `GlobalExceptionHandlerTest` | `testHandleRuleLimitExceeded` |
+| Timeout halts the session and interrupts the worker; a non-yielding worker is counted as stuck | `RuleExecutorTest` (`TimeoutInterruption`) | `timeoutInterruptsWorker`, `nonInterruptibleWorkCountedAsStuck` |
+| A failed storage read changes nothing | `RuleRefreshServiceTest` | `storageFailureLeavesEngineUntouched` |
+| An empty read can't remove loaded rules unless `allow-empty` | `RuleRefreshServiceTest` | `emptySetRejected`, `allowEmptyRemovesAll` |
+| Identical DRL is not recompiled | `RuleRefreshServiceTest` | `identicalRefreshIsUnchanged`, `onlyChangedRuleRecompiled` |
+| One unreadable S3 object aborts the whole read | `S3RuleStorageTest` | `testThrowsOnIndividualFailure` |
+| A missing rules directory throws (not `[]`) | `LocalFileStorageTest` | `testGetAllRules_MissingDirectory_Throws` |
+| Reconcile counts drift | `RuleRefreshServiceTest` (`Reconcile`) | `countsDrift`, `noDrift` |
+| Readiness DOWN until the startup load succeeds and with 0 rules | `RulesHealthIndicatorTest`, `ReadinessProbeIntegrationTest` | `downUntilLoaded`, `downWithZeroRules`, `readinessUpWithRulesComponent` |
+| `/admin/health` DEGRADED (200) when storage is down, DOWN (503) when rules can't serve | `AdminControllerTest` | `testHealth_StorageDown_ReturnsDegraded`, `testHealth_StartupLoadNotSucceeded_ReturnsDown` |
+| Bulk refresh 500 / 409, single refresh 404 with body | `AdminControllerTest` | `testRefreshAllRules_StorageFailed_Returns500`, `testRefreshAllRules_RejectedEmpty_Returns409`, `testRefreshRule_NotFound_Returns404` |
+| Every refresh writes an `AUDIT` line without DRL text | `RuleRefreshServiceTest` (`AuditLog`) | `bulkAdminRefresh`, `refreshRuleCompileFailed` |
 | Pool saturation → 503 `ServiceUnavailableException` | `RuleExecutorTest` | AbortPolicy rejection test |
 | Path traversal rejected (S3) | `S3RuleStorageTest` | path validation tests |
 | Path traversal rejected (LocalFile) | `LocalFileStorageTest` | normalize() check |
-| `StorageFactory` recognizes `local`/`file`/`s3` | `StorageFactoryTest` | one test per case |
+| `StorageFactory` recognizes `local`/`file`/`s3`; an unknown value fails | `StorageFactoryTest` | one test per case, `testUnknownSource` |
 | Circuit breaker `ignoreExceptions(NoSuchKeyException)` | `CircuitBreakerConfigTest` / `S3RuleStorageTest` | NoSuchKey doesn't trip breaker |
 | LogSanitizer masks credit cards | `LogSanitizerTest` | `testCreditCardMasking` |
 | LogSanitizer masks SSN | `LogSanitizerTest` | `testSsnMasking` |
@@ -265,7 +283,7 @@ JaCoCo report (run `mvn test jacoco:report`):
 
 | | Instruction | Branch |
 |---|---:|---:|
-| **Total (remeasured post-modernization)** | **90.1%** | **78.4%** |
+| **Total (2026-11-18, `mvn clean verify`, Testcontainers ITs excluded)** | **93.9%** | **86.1%** |
 
 > The old per-package breakdown (`api/validation` 100%, `core/model` 100%, etc., totalling 96.2%/89.7%) was the pre-modernization baseline and is no longer accurate; the numbers above are the current remeasured totals.
 
@@ -290,7 +308,7 @@ JaCoCo report (run `mvn test jacoco:report`):
 </execution>
 ```
 
-So `mvn verify` fails if instruction coverage falls below 0.88 or branch coverage below 0.74. (The floor sits just under the current 90.1%/78.4% to catch regressions without being brittle.)
+So `mvn verify` fails if instruction coverage falls below 0.88 or branch coverage below 0.74. (The floor sits below the current 93.9%/86.1% to catch regressions without being brittle.)
 
 ---
 
@@ -376,7 +394,7 @@ void allRuleIdsHaveValidFormat(String ruleId) {
 }
 ```
 
-Counts as one entry in our `@Test`/`@ParameterizedTest` annotation count, but multiple in `mvn test` output (one per parameter set). The raw unit-test annotation count is ~494; surefire reports 536 after parameterized expansion.
+Counts as one entry in our `@Test`/`@ParameterizedTest` annotation count, but multiple in `mvn test` output (one per parameter set). The raw annotation count is 678 (656 outside the 3 Testcontainers classes); surefire reports 766 after parameterized expansion.
 
 ---
 
@@ -425,7 +443,7 @@ class MyServiceTest extends BaseUnitTest {
 }
 ```
 
-The `DrlSanitizerTest` is a good example — 6 nested groups (one per check).
+The `DrlSanitizerTest` is a good example — 9 nested groups (one per kind of check).
 
 ### Don't test the framework
 
@@ -443,6 +461,24 @@ Tests should verify *our* logic, not Spring/Mockito/Drools. If a test is just ve
 | Tests pass locally, fail in CI | Probably timezone / locale / file separators | Always use `Paths.get(...)` not string concatenation; set `-Duser.timezone=UTC` |
 | Flaky test on slow machine | Timeout-based assertions | Use Awaitility (`await().atMost(...).until(...)`) instead of `Thread.sleep` |
 | Test pollutes shared state | Subsequent test fails when run together | Reset state in `@AfterEach`; tests must be order-independent |
+
+---
+
+## Docker test plan (end-to-end)
+
+[`scripts/run-docker-test-plan.sh`](../scripts/run-docker-test-plan.sh) automates [`full-docker-test-plan.md`](../full-docker-test-plan.md) against the real compose stack and prints a PASS/FAIL table. Result on 2026-11-18: **72 PASS / 0 FAIL** (Steps 1–13). Checks added by the engine-isolation work:
+
+| Step | What it proves |
+|---|---|
+| 12.5b | After the runaway rule (12.5, 408), `drools.rule.execution.stuck` ≥ 1 |
+| 12.8 | A rule that re-triggers itself → 422 `RULE_LIMIT_EXCEEDED`, `result` is `null`, and the service still answers 200 afterwards |
+| 12.9 | `AUDIT` lines for bulk and single refreshes, with the caller's address as actor and no DRL text |
+| 13.1 | `/actuator/health/readiness` is 200 |
+| 13.2–13.3 | LocalStack stopped → bulk refresh 500 `failed`, all 17 rules still serve; LocalStack back → 200, 17 `unchanged` |
+| 13.4 | Empty bucket → 409 `rejected_empty`, 17 kept |
+| 13.5–13.6 | App started against an empty bucket → readiness and `/admin/health` 503; rules restored → the scheduled reconcile loads 17 with no admin call |
+| 13.7 | A direct S3 edit is picked up by reconcile (reads S3, bypassing Redis) |
+| 13.8–13.9 | Deleted in S3 → single refresh `removed`; the same DRL again → `unchanged` |
 
 ---
 

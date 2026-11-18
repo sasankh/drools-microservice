@@ -17,6 +17,31 @@ The legacy consolidated context file at `.ai-workspace/ai-initial-context/ai-ini
 
 ## ⚠️ Important: Recent change log (most recent first)
 
+### Engine isolation & hardening (2026-11-18)
+Plan and checklist: [`.ai-workspace/project-plans/engine-isolation-hardening-plan-2026-11-18.md`](.ai-workspace/project-plans/engine-isolation-hardening-plan-2026-11-18.md).
+- **⚠️ BREAKING: `rule_id` is an execution boundary (ADR-025).** A request runs only the rules in its own DRL file. Before, it ran every loaded rule, so results stacked (VIP $100 → 72; now **80**).
+  - **Migration:** callers that relied on stacking must call each `rule_id` they need. An explicit composition feature may come later. There is no legacy fallback.
+- **Phase 2 — per-rule-ID KieBase.** [`RuleCompiler`](src/main/java/com/company/drools/core/engine/RuleCompiler.java) builds one KieBase per rule ID with `KnowledgeBuilder`.
+  - Immutable [`CompiledRuleset`](src/main/java/com/company/drools/core/engine/CompiledRuleset.java) handles live in [`CompiledRulesetRegistry`](src/main/java/com/company/drools/core/engine/CompiledRulesetRegistry.java). Execution takes its handle and holds **no lock**.
+  - Refresh is per rule ID. A bad update keeps the last good version; a bad new ID is `ERROR` and never falls back to other rules.
+  - The shared `KieContainer`, `updateToVersion` and `KieRepository` bookkeeping are gone (ADR-003 addendum).
+- **Phase 3 — refresh, storage, startup.** [`RuleRefreshService`](src/main/java/com/company/drools/core/engine/RuleRefreshService.java) owns every refresh (startup, admin, pub/sub, reconcile) and holds one lock around the storage read and the apply.
+  - `RuleStorage.getAllRules()` returns the complete set or throws: S3 per-object and listing errors, and a missing local directory, now throw. A failed read changes nothing.
+  - An empty read while rules are loaded is refused (admin **409 `rejected_empty`**) unless `drools.refresh.allow-empty=true`.
+  - SHA-256 digest per rule: identical DRL is not recompiled (`unchanged`).
+  - Scheduled reconcile ([`RuleReconcileScheduler`](src/main/java/com/company/drools/config/RuleReconcileScheduler.java)) reads the source directly, bypassing Redis. On by default only on `prod`. It never publishes.
+  - Pub/sub: the subscriber acts on outcomes; bulk coalescing removed; listener overflow is dropped and counted. Admin refreshes always publish to siblings (ADR-016 addendum).
+  - [`RulesHealthIndicator`](src/main/java/com/company/drools/config/RulesHealthIndicator.java) (`rules`) is in the readiness group: `/actuator/health/readiness`, `/actuator/health/liveness`. `/admin/health` is UP / DEGRADED / DOWN, and 503 only when DOWN.
+  - An unknown `RULE_SOURCE` fails startup. Profiles now honour `RULE_SOURCE`.
+  - Admin bulk refresh: 200 `completed` / `completed_with_errors` (per-ID `errors`, `rules_unchanged`, `rules_removed`), 500 `failed`, 409 `rejected_empty`. Single: `success` / `unchanged` / `removed`, 404 `not_found` with a body, 500 `error`.
+- **Phase 4 — limits and security.** The firing cap is configurable; exceeding it returns **422 `RULE_LIMIT_EXCEEDED`** ([`RuleLimitExceededException`](src/main/java/com/company/drools/api/exception/RuleLimitExceededException.java)) with no result.
+  - The timeout now interrupts the worker (`FutureTask`). A rule body that never yields still keeps its thread; gauge `drools.rule.execution.stuck` counts them.
+  - [`DrlSanitizer`](src/main/java/com/company/drools/core/engine/DrlSanitizer.java) is a **policy check, not a sandbox**: normalization, fully-qualified-name blocks, unicode escapes rejected, narrowed `java.util.`.
+  - `AUDIT` logger: one line per refresh / reconcile / remove (actor, rule IDs, digests; never DRL). `SECURITY.md` has a threat model ("DRL is code").
+- **New config**: `drools.refresh.auto-enabled` / `interval-minutes` (`AUTO_REFRESH_ENABLED`, `AUTO_REFRESH_INTERVAL_MINUTES`; now real, before they were dead config), `drools.refresh.allow-empty` (`DROOLS_REFRESH_ALLOW_EMPTY`), `drools.startup.fail-on-load-error` (`DROOLS_STARTUP_FAIL_ON_LOAD_ERROR`), `drools.execution.max-rule-firings` (`DROOLS_MAX_RULE_FIRINGS`, default 10000).
+- **New metrics**: `drools.rules.loaded` (now real), `drools.rule.compile.time{result}`, `drools.rule.compile.error{rule_id}`, `drools.refresh.runs{source,result}`, `drools.reconcile.changed`, `drools.refresh.failed{layer,reason}`, `drools.rule.execution.stuck`, `drools.api.errors{error_type=limit_exceeded}`.
+- **Counts**: Java source files **70**; test files **55**; **766** tests in `mvn test` + **22** Testcontainers ITs; coverage **93.9% instruction / 86.1% branch** (measured 2026-11-18). Docker test plan 72 PASS / 0 FAIL (Steps 1–13). ADR index extended to 025.
+
 ### Pre-merge fixes for PR #9 (2026-11-17)
 Found by a full end-to-end run on Linux with Docker Engine 29.10. Plan and checklist: [`.ai-workspace/project-plans/pre-merge-fixes-plan-2026-11-17.md`](.ai-workspace/project-plans/pre-merge-fixes-plan-2026-11-17.md).
 - **Admin auth bypass closed (ADR-024).** `/admin;x/health` and `/%61dmin/health` returned 200 without a key: filters matched the raw `getRequestURI()`, but Spring MVC routes the decoded, `;`-stripped path.
@@ -139,7 +164,7 @@ This is a Drools Rule Engine Microservice designed for high-performance business
 
 **Tech Stack**: Java 25 (enforced), Spring Boot 3.5.16, Drools 10.2.0, AWS S3, Redis (optional), Micrometer, Resilience4j, Docker & Docker Compose, AWS ECS
 
-**Health Status**: 9/10 - 591 tests in `mvn test` + 20 Testcontainers integration tests (CI-only, surefire-excluded on macOS-DinD), 90.7%/80.1% coverage (measured 2026-11-17, Java 25; full E2E + stress verified on Linux / Docker Engine 29), most security findings addressed with two tracked-open (B1 DRL-sandbox-is-not-a-boundary RCE, deferred; #28 Redis TLS/auth, enforced on prod), load-tested at 1000 rules (single-container 2026-05-10) + 3-replica multi-container + Redis-kill failure mode (Phase 9.4 2026-05-24), Sonar QG OK (0 maintainability / 0 reliability / 0 security issues)
+**Health Status**: 9/10 - 766 tests in `mvn test` + 22 Testcontainers integration tests (CI-only, surefire-excluded on macOS-DinD), 93.9%/86.1% coverage (measured 2026-11-18, Java 25; full E2E + stress verified on Linux / Docker Engine 29), `rule_id` isolation (ADR-025), most security findings addressed with two tracked-open (B1 DRL-sandbox-is-not-a-boundary RCE, deferred; #28 Redis TLS/auth, enforced on prod), load-tested at 1000 rules (single-container 2026-05-10) + 3-replica multi-container + Redis-kill failure mode (Phase 9.4 2026-05-24), Sonar QG OK (0 maintainability / 0 reliability / 0 security issues)
 
 ## Common Commands
 
@@ -247,8 +272,9 @@ com.company.drools/
 2. **Caching Strategy** (refactored 2026-05-20):
    - When `REDIS_ENABLED=true`: `RedisCachedRuleStorage` decorates the base `RuleStorage` — read-through Redis cache of DRL text with configurable TTL (default 15 min via `REDIS_DRL_RULES_TTL_MINUTES`)
    - When `REDIS_ENABLED=false`: direct base storage, no caching layer
-   - **Cross-task convergence**: when `REDIS_PUBSUB_ENABLED=true` (default when Redis is on), `RuleRefreshPublisher` emits events on `drools:rule:events` channel after refresh; sibling ECS tasks' `RuleRefreshSubscriber` receives and refreshes their own `kieContainer` within ~1 sec (single-rule) or ~7 min (bulk). Self-emitted events filtered via per-instance UUID
-   - Execution path: `DroolsEngineService.kieContainer` (all compiled rules, no eviction) — Redis stores raw DRL text only, compiled KieBases live exclusively in the long-lived `KieContainer`
+   - **Cross-task convergence**: when `REDIS_PUBSUB_ENABLED=true` (default when Redis is on), `RuleRefreshPublisher` emits events on `drools:rule:events` channel after every admin refresh; sibling ECS tasks' `RuleRefreshSubscriber` refreshes its own compiled rules (unchanged DRL is skipped by digest). Self-emitted events filtered via per-instance UUID
+   - **Reconcile** (2026-11-18): with `AUTO_REFRESH_ENABLED=true` (default on `prod`), each instance re-reads storage directly every `AUTO_REFRESH_INTERVAL_MINUTES` (default 5) and applies only differences, so a missed pub/sub event or a direct bucket edit is picked up within one interval
+   - Execution path: `CompiledRulesetRegistry` (one compiled KieBase per rule ID, all resident, no eviction) — Redis stores raw DRL text only; storage and Redis are never on the request path
    - **Replaces dead `RuleCache` layer** (LocalLRUCache + old RedisRuleCache) — those were written to but never read from; deleted in Phase 4+5
 
 3. **API Design**:
@@ -256,7 +282,7 @@ com.company.drools/
    - Admin API on port 8080 (`/admin/*`) — same port as main API
    - Actuator API on port 8081 (`/actuator/*`) — Spring Boot management port
 
-4. **Thread Safety**: Each rule execution uses a new KieSession (stateless)
+4. **Thread Safety / isolation** (ADR-025, 2026-11-18): each rule ID has its own immutable compiled KieBase. A request opens a new KieSession on its own rule ID's base only (unrelated rules never fire) and closes it. Execution takes no lock; refreshes swap one handle atomically and are serialized by `RuleRefreshService`
 
 5. **Rule ID Transformation**: `pricing.discount.black-friday` → `pricing/discount/black-friday.drl`
 
@@ -289,7 +315,7 @@ com.company.drools/
 Critical environment variables for local development:
 ```bash
 # Rule source
-RULE_SOURCE=s3                    # or 'local' for development
+RULE_SOURCE=s3                    # local | file | s3; any other value fails startup
 RULE_BUCKET_NAME=local-rules      # S3 bucket name
 AWS_ENDPOINT=http://localhost:4566 # LocalStack endpoint
 
@@ -301,8 +327,15 @@ REDIS_DRL_RULES_KEY_PREFIX=drools:rule:
 REDIS_PUBSUB_ENABLED=true                # only active when REDIS_ENABLED=true
 REDIS_REFRESH_CHANNEL=drools:rule:events
 
+# Refresh / startup (2026-11-18)
+AUTO_REFRESH_ENABLED=false               # scheduled reconcile; default true on the prod profile
+AUTO_REFRESH_INTERVAL_MINUTES=5          # reconcile interval
+DROOLS_REFRESH_ALLOW_EMPTY=false         # allow an empty storage read to remove every loaded rule
+DROOLS_STARTUP_FAIL_ON_LOAD_ERROR=false  # true: exit if the startup load can't read storage
+
 # Performance
-RULE_EXECUTION_TIMEOUT_SECONDS=30
+RULE_EXECUTION_TIMEOUT_SECONDS=30        # not read by the code; the execution timeout is DROOLS_RULE_EXECUTION_TIMEOUT
+DROOLS_MAX_RULE_FIRINGS=10000            # per request; exceeding it → 422 RULE_LIMIT_EXCEEDED
 DROOLS_THREAD_POOL_MAX_SIZE=50
 AWS_S3_MAX_CONNECTIONS=50
 
@@ -323,7 +356,7 @@ JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 ## Development Workflow
 
-1. **Current Status**: most security findings addressed, two tracked-open (B1 DRL-sandbox-is-not-a-boundary RCE deferred + documented in `SECURITY.md`; #28 Redis TLS/auth enforced on prod via `RedisSecurityValidator`) (Phases 1–9 2026-02-26 + 2026-08-20 re-review hardening); stack modernized 2026-05-09 (Java 25, Spring Boot 3.5.3, Drools 10.2.0); Drools 10 rule-loading rework + sample-rules expansion + 1000-rule load test 2026-05-10; Sonar Wave 4 (maintainability 178→0, reliability 5→0, 2 security hotspots resolved) 2026-05-11; Redis cache + pub/sub layer + Phase 9 load-test harness + Phase 9.4 hardening (SCAN-CB-wrap, REDIS_TIMEOUT, pub/sub recovery backoff) 2026-05-20 → 2026-05-24; 2026-08-20 re-review hardening (admin fail-closed, IP-only rate limiting + trust-proxy, Redis prod TLS, timeout-halt + load-shed 503, refreshLock split, CI + verify-bound gates, LICENSE/SECURITY.md/CONTRIBUTING.md); 2026-11-17 pre-merge fixes (path-bypass ADR-024, Linux named volumes, Spring Boot 3.5.16 + CVE pins, CI on develop, value-checking E2E harness); **591 tests + 20 Testcontainers ITs**; 90.7% / 80.1% coverage (measured 2026-11-17); documentation rebuild 2026-05-08 with refreshes through 2026-08-20 (40 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
+1. **Current Status**: most security findings addressed, two tracked-open (B1 DRL-sandbox-is-not-a-boundary RCE deferred + documented in `SECURITY.md`; #28 Redis TLS/auth enforced on prod via `RedisSecurityValidator`) (Phases 1–9 2026-02-26 + 2026-08-20 re-review hardening); stack modernized 2026-05-09 (Java 25, Spring Boot 3.5.3, Drools 10.2.0); Drools 10 rule-loading rework + sample-rules expansion + 1000-rule load test 2026-05-10; Sonar Wave 4 (maintainability 178→0, reliability 5→0, 2 security hotspots resolved) 2026-05-11; Redis cache + pub/sub layer + Phase 9 load-test harness + Phase 9.4 hardening (SCAN-CB-wrap, REDIS_TIMEOUT, pub/sub recovery backoff) 2026-05-20 → 2026-05-24; 2026-08-20 re-review hardening (admin fail-closed, IP-only rate limiting + trust-proxy, Redis prod TLS, timeout-halt + load-shed 503, refreshLock split, CI + verify-bound gates, LICENSE/SECURITY.md/CONTRIBUTING.md); 2026-11-17 pre-merge fixes (path-bypass ADR-024, Linux named volumes, Spring Boot 3.5.16 + CVE pins, CI on develop, value-checking E2E harness); 2026-11-18 engine isolation & hardening (BREAKING: `rule_id` runs only its own DRL file, per-rule-ID KieBase ADR-025; complete-or-fail storage reads, digest skip, scheduled reconcile, readiness probes; firing cap 422, interrupting timeout, DRL policy check, audit log); **766 tests + 22 Testcontainers ITs**; 93.9% / 86.1% coverage (measured 2026-11-18); documentation rebuild 2026-05-08 with refreshes through 2026-08-20 (40 numbered docs in [`project-documentation/`](project-documentation/)). Canonical overview: [`project-documentation/00-system-overview.md`](project-documentation/00-system-overview.md).
 
 2. **One-Command Development Environment**: Complete automated setup with validation
    ```bash
@@ -418,10 +451,11 @@ All phases shipped:
 12. ✅ Phase 9 load-test harness (3-replica + nginx + Redis-kill failure mode) + Phase 9.4 production hardening (SCAN-CB-wrap, `REDIS_TIMEOUT` env var lowering Lettuce timeout 2000ms→500ms, `RedisMessageListenerContainer.setRecoveryBackoff(FixedBackOff(2s, ∞))`) (2026-05-24)
 14. ✅ Pre-merge fixes for PR #9 (2026-11-17) — request-path bypass closed (ADR-024), Linux gc-logs crash loop fixed (named volumes), Spring Boot 3.5.16 + CVE pins + Kotlin removed, CI on `develop` + Testcontainers 1.21.4 (Docker 29), value-checking E2E harness + automated docker test plan
 13. ✅ Re-review production/public-readiness hardening (2026-08-20) — admin fail-closed on prod/docker + constant-time compare (ADR-017), IP-only rate limiting + trust-proxy (ADR-018), exec timeout-halt/408 + pool load-shed 503 (ADR-019), refreshLock split from the write lock (ADR-020), Redis prod TLS/auth via `RedisSecurityValidator` + Jackson-typing removal (ADR-021), storage delegate `AtomicReference` (ADR-022), CI + verify-bound quality gates (ADR-023); added LICENSE/SECURITY.md/CONTRIBUTING.md; **security posture reframed** — "39/42" retired, two tracked-open (B1 DRL-sandbox RCE deferred, #28 Redis TLS/auth enforced on prod)
+15. ✅ Engine isolation & hardening (2026-11-18) — **BREAKING**: `rule_id` runs only its own DRL file (per-rule-ID KieBase, ADR-025); per-ID refresh keeps the last good version; `RuleRefreshService` + complete-or-fail storage reads + empty-set guard + digest skip + scheduled reconcile; `rules` readiness indicator, `/admin/health` UP/DEGRADED/DOWN; firing cap → 422, interrupting timeout + stuck gauge, DRL policy check (not a sandbox), `AUDIT` log, `SECURITY.md` threat model
 
 Current snapshot:
 - **Health Score**: 9/10
-- **Test Coverage**: 90.7% instruction / 80.1% branch (measured 2026-11-17 via `mvn clean verify`, excluding the Testcontainers ITs; enforced by a `jacoco:check` floor of 88% / 74% bound to `verify`). Previous: 90.1% / 78.4% (2026-08-19).
+- **Test Coverage**: 93.9% instruction / 86.1% branch (measured 2026-11-18 via `mvn clean verify`, excluding the Testcontainers ITs; enforced by a `jacoco:check` floor of 88% / 74% bound to `verify`). Previous: 90.7% / 80.1% (2026-11-17).
 - **Security**: most findings addressed; two tracked-open — B1 (DRL sandbox is not a sound boundary → rule-store write access ≈ RCE; deferred, documented in `SECURITY.md`) and #28 (Redis TLS/auth, enforced on the prod profile via `RedisSecurityValidator`)
 - **Performance**: 100–1000 RPS target, P99 < 100ms cached / < 500ms cache miss (load-tested at 1000 rules — see [`39-load-test-findings.md`](project-documentation/39-load-test-findings.md))
 
@@ -437,7 +471,8 @@ For the canonical narrative — phase history, ADRs, performance targets, testin
 - [`scripts/test-localstack.sh`](scripts/test-localstack.sh) — validates LocalStack S3 bucket and uploaded rules
 - [`scripts/docker-build-test.sh`](scripts/docker-build-test.sh) — automated Docker build and validation
 - [`scripts/e2e-load-test.sh`](scripts/e2e-load-test.sh) — one-command E2E + 5-min keep-alive load test with value checks and hot reload
-- [`scripts/run-docker-test-plan.sh`](scripts/run-docker-test-plan.sh) — automated `full-docker-test-plan.md` (Steps 1–12, PASS/FAIL table)
+- [`scripts/run-docker-test-plan.sh`](scripts/run-docker-test-plan.sh) — automated `full-docker-test-plan.md` (Steps 1–13, PASS/FAIL table; Step 13 = refresh safety, readiness, reconcile)
+- [`SECURITY.md`](SECURITY.md) — threat model ("DRL is code"): who may write rules, and what untrusted DRL would need first
 - [`scripts/run-load-test.sh`](scripts/run-load-test.sh) — full load-test orchestrator (Phase 0–8, 1000 rules, JMeter)
 - GC log + heap dumps — written inside the container to `/tmp/gc-logs` / `/tmp/heap-dumps` on **named volumes** (`gc-logs`, `heap-dumps`); read with `docker compose exec app tail -f /tmp/gc-logs/gc.log` or `docker compose cp app:/tmp/heap-dumps ./heap-dumps`
 - [`.ai-workspace/snap-memory/`](.ai-workspace/snap-memory/) — session memory files for `snap-memory` AI workflow

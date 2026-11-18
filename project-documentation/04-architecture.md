@@ -249,7 +249,10 @@ class RuleExecutionRequest {
 
 **Note on log sanitization**: `LogSanitizer` is a utility class in [`com.company.drools.common`](../src/main/java/com/company/drools/common/LogSanitizer.java), NOT a filter. It's called explicitly by controllers/services before logging request/response payloads.
 
-**Note on request timeout**: rule-execution timeout is enforced inside `RuleExecutor` via `CompletableFuture.get(30s)`; on timeout it calls `KieSession.halt()` (via a shared `AtomicReference<KieSession>`) to cooperatively stop the running `fireAllRules`, then `future.cancel(true)`, and throws `TimeoutException` → HTTP 408. It is not a separate filter. Separately, if the rule-execution pool is saturated the `AbortPolicy` raises `RejectedExecutionException` → `ServiceUnavailableException` → HTTP 503.
+**Note on request timeout**: the rule-execution timeout is enforced inside `RuleExecutor`, which runs each request as a `FutureTask` and waits `get(30s)`. It is not a separate filter.
+- **On timeout:** it calls `KieSession.halt()` (via a shared `AtomicReference<KieSession>`) to stop `fireAllRules` at the next rule boundary, then `cancel(true)`, which really interrupts the worker, unlike the earlier `CompletableFuture`. It throws `TimeoutException` → HTTP 408. A consequence that never yields keeps its thread and is counted by `drools.rule.execution.stuck`.
+- **Firing cap:** going past `drools.execution.max-rule-firings` → `RuleLimitExceededException` → HTTP 422.
+- **Saturation:** if the rule-execution pool is full, the `AbortPolicy` raises `RejectedExecutionException` → `ServiceUnavailableException` → HTTP 503.
 
 ---
 
@@ -585,7 +588,7 @@ When `REDIS_ENABLED=false` the decorator is not constructed; `StorageFactory` re
    - Verify the handle exists and metadata.status == ACTIVE
         ↓
 5. RULE EXECUTION (RuleExecutor)
-   - Submit to ruleExecutionExecutor (CompletableFuture)
+   - Submit to ruleExecutionExecutor (FutureTask; cap + 1 firings → 422)
    - Create new KieSession on THIS rule ID's KieBase only (ADR-025)
    - Insert data as Map into session
    - kieSession.fireAllRules(maxRuleFirings = 10000)  // cap prevents runaway loops
@@ -974,6 +977,17 @@ Properties:
 2. **Incremental refresh.** A single-rule refresh recompiles only that ID (~3.6 ms median at 1,000 resident IDs in the spike, versus ~510 ms for the old full recompile). A failed compile affects only its own ID.
 3. **No leak bookkeeping.** No `KieModule` or `KieRepository` is involved. A retired handle is garbage collected once no in-flight request holds it (spike: flat heap/metaspace over 2,000 refreshes).
 4. **No LOADING window.** Metadata is set to ACTIVE when the handle is installed; existing IDs keep serving their previous handle while a new one compiles.
+
+### Rule refresh orchestration (RuleRefreshService, 2026-11-18)
+
+Every way rules get (re)loaded goes through [`RuleRefreshService`](../src/main/java/com/company/drools/core/engine/RuleRefreshService.java): startup ([`RuleLoadingConfig`](../src/main/java/com/company/drools/config/RuleLoadingConfig.java)), the admin endpoints, pub/sub events ([`RuleRefreshSubscriber`](../src/main/java/com/company/drools/cache/RuleRefreshSubscriber.java)), and the scheduled reconcile ([`RuleReconcileScheduler`](../src/main/java/com/company/drools/config/RuleReconcileScheduler.java), `drools.refresh.auto-enabled`).
+
+- **One lock around read + apply.** The newest storage read is always the last one installed.
+- **All-or-nothing reads.** Storage returns the complete set or throws ([`RuleStorage`](../src/main/java/com/company/drools/storage/RuleStorage.java) contract). A failed read changes nothing. An empty read while rules are loaded is refused unless `drools.refresh.allow-empty=true`.
+- **Digest skip.** Rules whose SHA-256 matches the version already serving are not recompiled.
+- **Reconcile reads the source directly** (`getAllRulesFromSource`, bypassing the Redis DRL cache). It repairs missed pub/sub events and direct bucket edits within one interval.
+- **Load state.** [`RuleLoadState`](../src/main/java/com/company/drools/core/engine/RuleLoadState.java) records the phase and the last refresh. [`RulesHealthIndicator`](../src/main/java/com/company/drools/config/RulesHealthIndicator.java) (`rules`, in the readiness group) is DOWN until a full load succeeds and while 0 rules are compiled.
+- **Audit.** Every refresh writes one `AUDIT` log line (no DRL content).
 
 History: from 2026-05-10 to 2026-11-18 all rules were compiled into one KieBase inside a single long-lived `KieContainer`, swapped with `KieContainer.updateToVersion(ReleaseId)` under a brief write lock, followed by `KieRepository.removeKieModule(oldReleaseId)`. See [ADR-003](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal) and [39-load-test-findings.md](39-load-test-findings.md).
 

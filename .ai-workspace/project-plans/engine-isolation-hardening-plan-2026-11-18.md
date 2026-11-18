@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Created** | 2026-11-18 |
-| **Status** | 🟡 Phases 1–4 complete; Phase 5 (docs) and Phase 6 (full verification + benchmark) in progress |
+| **Status** | 🟢 Phases 0–6 complete and verified (2026-11-18); branch pushed to `improvements-1-11-18-2026`; PR to `develop` when the user asks |
 | **Work branch** | `engine-isolation` (git worktree `.claude/worktrees/engine-isolation`, based on `improvements-1-11-18-2026` @ `e1dd059` = `develop` after PR #10) |
 | **Delivered to** | `improvements-1-11-18-2026`, then one PR to `develop` (opened when the user asks) |
 | **Release target** | Next minor after v3.3.0. This contains a **breaking semantic change**: rule stacking is removed. |
@@ -418,6 +418,16 @@ Same as A4.8, plus live: a runaway rule → 408 and the stuck gauge = 1; a cap-l
 
 ---
 
+## A8.1 Verification outcome (2026-11-18)
+Everything in B6 passed. Extra fix found during Phase 5 review: failed bulk S3 reads are wrapped in `RuleStorageException` inside the circuit breaker, and the S3 breaker didn't record that type, so a failing bulk read never opened it. It is now in `recordExceptions`, with a test.
+
+Open follow-ups (not blockers):
+- Parallel or ETag-based S3 reads for full refresh (49 s at 1,000 rules).
+- `RULE_EXECUTION_TIMEOUT_SECONDS` is dead config; the real key is `DROOLS_RULE_EXECUTION_TIMEOUT`.
+- Profile literals for timeouts, breakers and pools still shadow their env vars.
+- 405/415 → 500 (X2 INFO).
+- Process isolation before any untrusted DRL.
+
 ## A9. Risk register
 
 | Risk | Likelihood | Impact | Mitigation |
@@ -465,7 +475,7 @@ Same as A4.8, plus live: a runaway rule → 408 and the stuck gauge = 1; a cap-l
 - [x] Measurements (1,000 IDs): KnowledgeBuilder cold 4.1 s (global 1.3 s), heap 52 MB (global 34.5), exec p50 14 µs (global 99), single-ID refresh 3.6 ms (global 281 ms), metaspace 44.4 MB (global 46.9); 2,000-refresh leak check flat. Parallel compile deferred to Phase 2 tuning
 - [x] ADR-025 written with numbers + decision (A2b KnowledgeBuilder); index row; placeholders renumbered 026–028
 - [x] Gate: spike green; `mvn -B clean verify` green — 613 tests, 0 failures, 2 skipped (measure + red test), coverage met
-- [ ] Commit
+- [x] Commit (e8ac9f7)
 
 ### B2. Phase 2 — Isolation
 - [x] `CompiledRuleset` + `CompiledRulesetRegistry` (atomic install/remove/get/snapshot, retirement)
@@ -509,25 +519,30 @@ Same as A4.8, plus live: a runaway rule → 408 and the stuck gauge = 1; a cap-l
 - [x] Commit
 
 ### B5. Phase 5 — Docs & bookkeeping
-- [ ] `CLAUDE.md` entry: breaking change + migration, new config, counts/coverage
-- [ ] Docs 04 / 05 / 09 / 10 / 12 / 28 / 29 / 30 / 00
-- [ ] ADR-025 final; addenda ADR-003 / ADR-016 / ADR-019
-- [ ] `pre-merge-fixes-plan-2026-11-17.md` §A11 items ticked
-- [ ] Commit
+- [x] `CLAUDE.md` entry: breaking change + migration, new config, counts/coverage
+- [x] Docs 04 / 05 / 09 / 10 / 12 / 28 / 29 / 30 / 31 / 35 / 39 / 00; scripts/README (benchmark)
+- [x] ADR-025 final; addenda ADR-003 / ADR-016 / ADR-019
+- [x] `pre-merge-fixes-plan-2026-11-17.md` §A11 items ticked
+- [x] Commit
 
 ### B6. Phase 6 — Verification (record numbers)
-- [ ] `mvn -B clean verify` on a fresh copy: tests ____ / 0 failures; coverage ____ % / ____ %
-- [ ] Testcontainers ITs: ____ / ____
-- [ ] `run-docker-test-plan.sh`: PASS ____ / FAIL 0 (X1.K PASS)
-- [ ] `e2e-load-test.sh` 300 s: requests ____, RPS ____, errors 0, wrong 0, p99 ____ ms
-- [ ] Stress 50/100/200 + reloads: errors 0, wrong 0; p99 ____ / ____ / ____ ms; `ab -c 400` only 503 load-shed
-- [ ] Benchmark (1,000 rules) vs 2026-05-10: cold load ____ s (was ~46–50 s); single-ID refresh ____ ms (was 510 ms); warm p99 ____ ms; heap after GC ____ MB; metaspace stable over 100 refreshes ____
-- [ ] Live probes: isolation 90 · S3-kill no loss · empty bucket 503 · cap 422 · runaway 408 + gauge · path bypass 400 · graceful stop
-- [ ] Numbers added to `39-load-test-findings.md`
-- [ ] Pushed `engine-isolation` → `improvements-1-11-18-2026`
+- [x] `mvn -B clean verify` on a fresh copy: tests **767** / 0 failures; coverage **93.9 % / 86.1 %**; 70 source / 55 test files
+- [x] Testcontainers ITs: **22 / 22**
+- [x] `run-docker-test-plan.sh`: **PASS 72 / FAIL 0** / INFO 2 (X1.K PASS; Steps 12.5b, 12.8, 12.9, 13.1–13.9 PASS)
+- [x] `e2e-load-test.sh` 300 s: requests **1,738,610**, RPS **~5,794**, errors 0, wrong 0, p99 **8.5 ms**; reload at 120 s 17/17; retained heap 46 → 46 MB
+- [x] Stress 50/100/200 × 60 s + reload every 15 s: errors 0, wrong 0; 4,336 / 5,723 / 5,697 RPS; p99 **85.6 / 44.6 / 91.4 ms**. `ab -k -c 400` 45 s: 415,283 req, **9,228 RPS**, all 2xx (no load-shed needed this run); next request 200
+- [x] Benchmark (1,000 rules, `scripts/run-rule-benchmark.sh`) vs 2026-05-10:
+  - Single-rule refresh **51 ms median / 158 ms max** (was ~510 ms median, under a write lock), and request p99 **4.6 ms** during refreshes (no spike).
+  - Paced 50 RPS p99 **11.0 ms** (was 9 ms, JMeter). Closed loop **5,744 RPS**, p99 9.0 ms.
+  - Heap after GC 106 → 95 MB over 100 refreshes (no growth). Restart → ready **14 s**.
+  - Full admin refresh: 60 s first load / 49 s unchanged with 0 recompiles. That time is sequential S3 reads after the Redis invalidation; follow-up: parallel reads / ETag compare.
+  - 0 errors / 0 wrong in every run.
+- [x] Live probes: isolation 90 (X1.11) · S3-kill no loss (13.2) · empty bucket 409 / start-empty 503 (13.4/13.5) · cap 422 (12.8) · runaway 408 + gauge 1 (12.5/12.5b) · path bypass 400 · graceful stop 1 s
+- [x] Numbers added to `39-load-test-findings.md` (new 2026-11-18 section)
+- [x] Pushed `engine-isolation` → `improvements-1-11-18-2026` (each phase)
 - [ ] (When asked) PR to `develop` with evidence
 - [ ] Worktree removed after merge
 
 ---
 
-_Plan created: 2026-11-18 · Last updated: 2026-11-18 (Phase 4 complete — limits/security; Phases 5–6 in progress)_
+_Plan created: 2026-11-18 · Last updated: 2026-11-18 (all phases complete and verified; awaiting PR)_

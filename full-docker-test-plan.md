@@ -494,6 +494,15 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST 'http://localhost:8080/%65xecut
 ```
 **Expected**: all 400 `INVALID_INPUT` ("Malformed request path"). Before the fix these reached the admin controller without a key (200).
 
+### 12.5b Stuck-worker gauge (2026-11-18)
+After 12.5, `curl -s localhost:8081/actuator/metrics/drools.rule.execution.stuck | jq .measurements[0].value` → **≥ 1**. The runaway consequence never yields, so its worker can't be interrupted; the gauge makes that visible (alert on it; restart clears it).
+
+### 12.8 Rule loop → 422 RULE_LIMIT_EXCEEDED (2026-11-18)
+Upload a rule whose consequence re-triggers itself (`update($d)` without `no-loop`), refresh it, execute it. **Expected:** HTTP 422, `error.code = "RULE_LIMIT_EXCEEDED"`, `result: null`, and the service still serves other rules (200). Then delete the rule and refresh it (→ `removed`).
+
+### 12.9 Audit trail (2026-11-18)
+`docker compose logs app | grep 'AUDIT action='` → at least one `action=refresh_all` and one `action=refresh_rule` line with `actor=<caller address>`, rule IDs and short digests, and **no** DRL text (`rule "`, `$data`, `then `).
+
 ### 12.6 RULE_DELETED propagates to the compiled corpus (S5)
 ```bash
 docker exec drools-microservice-redis-1 redis-cli PUBLISH drools:rule:events \
@@ -575,7 +584,10 @@ Automated by `scripts/run-docker-test-plan.sh` (runs after Step 10, because it p
 | 12.4 | Actuator w/ Redis off (P4) | `/actuator/health` = 200 when `REDIS_ENABLED=false` | |
 | 12.5 | Exec timeout (P3/P7) | runaway rule → 408, service responsive; saturation → 503 | |
 | 12.6 | RULE_DELETED (S5) | pub/sub delete removes rule (17→16), refresh restores 17 | |
+| 12.5b | Stuck-worker gauge | `drools.rule.execution.stuck` ≥ 1 after the runaway rule | |
 | 12.7 | Path bypass (ADR-024) | `/admin;x/…`, `/%61dmin/…`, `/%65xecute-rule` → 400 | |
+| 12.8 | Rule loop | 422 `RULE_LIMIT_EXCEEDED`, no result | |
+| 12.9 | Audit trail | AUDIT lines present, no DRL content | |
 | 13.1 | Readiness probe | `/actuator/health/readiness` 200 | |
 | 13.2 | S3 down during refresh | 500 `failed`, no rule lost | |
 | 13.3 | S3 back | 200, 17 unchanged | |

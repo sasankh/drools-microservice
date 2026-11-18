@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Everyone — the doc you reach for when you have one specific question |
 | **Purpose** | Quick answers to the questions most people actually ask, with links to full coverage |
-| **Last verified** | 2026-08-20 against running stack |
+| **Last verified** | 2026-08-20 against running stack; refresh, readiness, limits and DRL-policy answers checked against the code on 2026-11-18 |
 
 ---
 
@@ -68,7 +68,7 @@ curl -fsS http://localhost:8080/admin/rules -H "X-Admin-API-Key: admin-secret" |
 ### How do I add a new rule?
 
 1. Create a `.drl` file at the right path: rule ID `pricing.discount.gold` → `pricing/discount/gold.drl`. See [18-rule-id-and-storage-layout.md](18-rule-id-and-storage-layout.md).
-2. Verify it passes the sandbox: must use only allowed imports, no `eval()`, no blocked classes/methods. See [16-drl-sandboxing.md](16-drl-sandboxing.md).
+2. Verify it passes the DRL policy check: must use only allowed imports, no `eval()`, no blocked classes/methods. See [16-drl-sandboxing.md](16-drl-sandboxing.md).
 3. Upload to S3 (or place in your filesystem rules directory).
 4. Refresh: `curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/refresh-rules`.
 
@@ -79,11 +79,11 @@ Most likely the DrlSanitizer blocked it. Check the response from `/admin/refresh
 - `Blocked class reference: 'Runtime'` — process-execution denied.
 - `eval() is not allowed in DRL rules` — use pattern matching instead.
 
-Full sandbox reference: [16-drl-sandboxing.md](16-drl-sandboxing.md).
+Full policy-check reference: [16-drl-sandboxing.md](16-drl-sandboxing.md).
 
 ### Can I use `eval()` in my DRL?
 
-**No.** Banned by the sandbox. Use Drools pattern matching instead:
+**No.** Banned by the DRL policy check. Use Drools pattern matching instead:
 
 ```drools
 // REJECTED:
@@ -164,7 +164,7 @@ Full error code reference: [12-error-code-catalog.md](12-error-code-catalog.md).
 
 `POST /execute-rule` is **idempotent** — same input always produces the same output (rules don't have side effects on the service). Safe to retry.
 
-`POST /admin/refresh-rules` is **not** idempotent — each call may pick up new S3 contents.
+`POST /admin/refresh-rules` is **not** idempotent — each call may pick up new S3 contents. Repeating it with unchanged storage is cheap: identical DRL (same SHA-256) is not recompiled (`rules_unchanged`).
 
 ### How do I provide a correlation ID?
 
@@ -192,13 +192,13 @@ Full catalog: [09-environment-variables-reference.md](09-environment-variables-r
 
 ### Why is `RULE_SOURCE` defaulting to `local` instead of `s3`?
 
-Yes, it's `local` by default ([application.yml:59](../src/main/resources/application.yml#L59)). For S3, set `RULE_SOURCE=s3`. The compose stack does this automatically.
+Yes, it's `local` by default ([application.yml:80](../src/main/resources/application.yml#L80)). For S3, set `RULE_SOURCE=s3`. The compose stack does this automatically.
 
 ### What's the difference between the dev, prod, and docker profiles?
 
 - `local`: in-memory rules, no Redis, debug logging.
 - `dev`: S3 via LocalStack, Redis, looser circuit breakers, smaller thread pools.
-- `prod`: real AWS S3, Redis, **stricter** circuit breakers, larger thread pools, CloudWatch metrics, auto-refresh enabled, root logging at WARN.
+- `prod`: real AWS S3, Redis, **stricter** circuit breakers, larger thread pools, CloudWatch metrics, scheduled reconcile enabled, root logging at WARN.
 - `docker`: same as dev but with hostnames pointing to compose services.
 
 Full diff matrix: [05-environments-and-profiles.md](05-environments-and-profiles.md).
@@ -235,7 +235,7 @@ Caveats: per-replica caches and rate-limit buckets. See [30-runbooks-and-monitor
 
 ### How do I monitor production?
 
-Metrics via Micrometer → CloudWatch (when `CLOUDWATCH_METRICS_ENABLED=true`). Logs via stdout (capture with your log aggregation). Use `/admin/health` for component-level status, `/actuator/health` for simple liveness.
+Metrics via Micrometer → CloudWatch (when `CLOUDWATCH_METRICS_ENABLED=true`). Logs via stdout (capture with your log aggregation). Use `/admin/health` for component-level status (UP / DEGRADED / DOWN; 503 when DOWN). For the orchestrator, use `/actuator/health/readiness` (includes the `rules` indicator) and `/actuator/health/liveness` (process only).
 
 Recommended dashboards + alerts: [30-runbooks-and-monitoring.md](30-runbooks-and-monitoring.md#recommended-dashboards).
 
@@ -245,13 +245,14 @@ Recommended dashboards + alerts: [30-runbooks-and-monitoring.md](30-runbooks-and
 
 ### What if S3 goes down?
 
-503 `SERVICE_UNAVAILABLE` from new rule lookups after the S3 breaker trips. Already-loaded rules continue executing (each rule ID's compiled KieBase is in memory, no S3 touch per request). The breaker auto-recovers after `wait-duration` (60s default, 120s in prod) when S3 comes back.
+**Requests keep working.** Execution never touches S3: each rule ID's compiled KieBase is in memory. Refreshes fail safely: a bulk refresh returns 500 `failed` and changes nothing, a reconcile is skipped, and `/admin/health` reports `DEGRADED` (still 200). An instance that **starts** while S3 is down has no rules and stays not ready (503) until a refresh or reconcile succeeds. The breaker auto-recovers after `wait-duration` (60s default, 120s in prod).
 
 ### How often should I refresh rules in production?
 
-`AUTO_REFRESH_ENABLED=true` is on by default in `prod` profile, with 5-minute interval. So 12 refreshes/hour. Adjust via `AUTO_REFRESH_INTERVAL_MINUTES`.
+Call `POST /admin/refresh-rules` (or the single-rule form) after each rule change; it reaches every instance via pub/sub.
 
-Manual refresh after a known rule change: `POST /admin/refresh-rules`.
+As a safety net, the scheduled reconcile (`AUTO_REFRESH_ENABLED=true`, on by default only in `prod`) runs every `AUTO_REFRESH_INTERVAL_MINUTES` (default 5). It reads S3 directly, recompiles only changed rule IDs, and never publishes. It repairs missed pub/sub events and picks up direct bucket edits. When nothing changed it costs one S3 read.
+
 
 ### Can I refresh just one rule?
 
@@ -260,7 +261,15 @@ curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" \
   http://localhost:8080/admin/refresh-rules/pricing.discount.simple
 ```
 
-Faster than full refresh.
+Faster than full refresh: only that rule ID recompiles. Results: `success`, `unchanged` (same DRL), `removed` (deleted in storage), 404 `not_found`, or 500 `error` (the previous version keeps serving).
+
+### What does a 409 `rejected_empty` from refresh mean?
+
+Storage returned zero rules while rules are loaded. The service refuses to remove them all, so nothing changed. Check the bucket and `RULE_SOURCE`. If emptying the engine is intended, set `DROOLS_REFRESH_ALLOW_EMPTY=true`.
+
+### Why is my instance not ready (503)?
+
+It has no rules to serve: the startup load is still running, it couldn't read storage, or nothing compiled. One bad rule file does not make it unready. See [30-runbooks-and-monitoring.md](30-runbooks-and-monitoring.md#instance-not-ready).
 
 ### Where do heap dumps and GC logs go?
 
@@ -282,7 +291,7 @@ See [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md).
 
 ### How does multi-instance refresh stay consistent?
 
-`RuleRefreshPublisher` emits to `drools:rule:events` whenever `/admin/refresh-rules` succeeds; other instances' `RuleRefreshSubscriber` reload from storage and swap their own per-rule-ID compiled handles. Self-dedup via `source_instance_id == this.instanceId` prevents loop-back. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20). Without `REDIS_PUBSUB_ENABLED=true`, each instance must be refreshed manually or wait for TTL expiry + next refresh.
+`RuleRefreshPublisher` emits to `drools:rule:events` after every admin refresh that read storage completely (even if nothing changed locally); other instances' `RuleRefreshSubscriber` reload from storage and swap their own per-rule-ID compiled handles. Self-dedup via `source_instance_id == this.instanceId` prevents loop-back. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20). Pub/sub is fire-and-forget, so a missed event is repaired by the scheduled reconcile (`AUTO_REFRESH_ENABLED=true`). Without `REDIS_PUBSUB_ENABLED=true`, each instance must be refreshed manually or rely on the reconcile.
 
 ### Why was the old `LocalLRUCache` / `RedisRuleCache` layer removed?
 
@@ -324,7 +333,7 @@ Each rule ID has its own compiled KieBase, held in an immutable handle in the `C
 
 The rule ID doesn't exist in the loaded set. Possible causes:
 - Rule isn't uploaded to S3 yet → upload it.
-- Service hasn't refreshed since you uploaded → call `POST /admin/refresh-rules`.
+- Service hasn't refreshed since you uploaded → call `POST /admin/refresh-rules`. Execution never reads storage, so an uploaded but unrefreshed rule is "not found".
 - Rule ID typo (case-sensitive) → check `/admin/rules` for the exact name.
 - Trailing whitespace in your `rule_id` (validator silently trims, storage lookup fails — see CODE_FINDINGS F-032).
 
@@ -334,11 +343,15 @@ Validation failed. The `details` field tells you exactly what. Common: rule_id f
 
 ### What does `SERVICE_UNAVAILABLE` mean?
 
-A circuit breaker is OPEN. Check `/admin/health` for `s3_state` / `redis_state`. Auto-recovers after wait duration. See [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md).
+The rule-execution pool is saturated (all threads busy and the queue full): the request was shed. Retry with backoff, add capacity (`DROOLS_THREAD_POOL_MAX_SIZE`) or reduce load. An open S3 or Redis breaker does **not** cause 503 on `/execute-rule`. See [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md).
 
 ### What does `TIMEOUT_ERROR` mean?
 
-Rule execution exceeded `RULE_EXECUTION_TIMEOUT_SECONDS` (30s default). Likely an infinite loop in the rule. Check `no-loop true`, simplify the rule, or extend the timeout.
+Rule execution exceeded `DROOLS_RULE_EXECUTION_TIMEOUT` (30s default). Likely a slow or endless consequence. If `drools.rule.execution.stuck` rose too, the worker thread is still spinning: fix the rule and restart (see [30-runbooks-and-monitoring.md](30-runbooks-and-monitoring.md)).
+
+### What does `RULE_LIMIT_EXCEEDED` (422) mean?
+
+The rules fired more than `DROOLS_MAX_RULE_FIRINGS` (10,000 default) times for one request, almost always a rule loop. No result is returned. Add `no-loop true` or tighten the condition.
 
 ### Why am I getting 401 on admin endpoints?
 
@@ -399,11 +412,11 @@ Single-instance deployments with `REDIS_ENABLED=false` have no cache at all — 
 - Rate limiting at the gateway level (in addition to the service's per-instance limiter)
 - Restrict 8081 (Actuator) to internal-only
 
-The service's defense-in-depth (DRL sandbox, rate limiter, security headers) is supplementary, not primary.
+The service's defense-in-depth (DRL policy check, rate limiter, security headers) is supplementary, not primary.
 
 ### Are rules sandboxed?
 
-Yes. `DrlSanitizer` rejects DRL with dangerous imports/classes/methods/`eval()` BEFORE compilation. See [16-drl-sandboxing.md](16-drl-sandboxing.md).
+**No.** `DrlSanitizer` is a policy check, not a sandbox. It rejects DRL with dangerous imports, classes, methods, fully-qualified names and `eval()` before compilation, but DRL consequences are Java running inside the service, and a text check can't prove them safe. Treat write access to the rule store as code execution: only trusted, reviewed DRL is supported. See [`SECURITY.md`](../SECURITY.md) (threat model) and [16-drl-sandboxing.md](16-drl-sandboxing.md).
 
 ### What sensitive data does the service log?
 

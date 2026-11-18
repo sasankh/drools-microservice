@@ -3,7 +3,8 @@
 | Script | Purpose | Duration | When to use |
 |---|---|---|---|
 | [`e2e-load-test.sh`](#e2e-load-testsh) | One-command E2E + keep-alive load test with value checks | ~8–10 min | After any code change, before merging |
-| [`run-docker-test-plan.sh`](#run-docker-test-plansh) | Automated `full-docker-test-plan.md` (Steps 1–12 + value checks) | ~8–10 min | Before merging; after Docker/compose/security changes |
+| [`run-docker-test-plan.sh`](#run-docker-test-plansh) | Automated `full-docker-test-plan.md` (Steps 1–13 + value checks) | ~15–20 min | Before merging; after Docker/compose/security changes |
+| [`run-rule-benchmark.sh`](#run-rule-benchmarksh) | 1,000-rule benchmark: cold load, time to ready, paced 50 RPS + throughput, single-rule refresh under load, heap over 100 refreshes (value-checked) | ~15 min | After engine / refresh / storage changes; numbers in `39-load-test-findings.md` |
 | [`run-load-test.sh`](#run-load-testsh) | Full regression harness (JMeter, 1000 rules, soak) | ~5–6 hours | After Drools/Spring Boot bumps, production readiness gates — ⚠️ needs updating for the admin key (backlog) |
 | [`test-localstack.sh`](#helpers) | Validates LocalStack S3 bucket and uploaded rules | < 1 min | After `init-localstack.sh` to confirm S3 state |
 | [`docker-build-test.sh`](#helpers) | Builds Docker image and validates health checks | ~5 min | After Dockerfile or dependency changes |
@@ -98,6 +99,26 @@ Builds the Docker image and runs a series of health and smoke checks — confirm
 Run after Dockerfile changes, dependency updates, or a JVM/base-image bump to confirm the image still works end-to-end.
 
 ---
+
+## run-rule-benchmark.sh
+
+```bash
+./scripts/run-rule-benchmark.sh                 # 1,000 rules, builds the image
+./scripts/run-rule-benchmark.sh --rules 200 --skip-build --keep-stack
+```
+
+Generates a synthetic corpus with `scripts/lib/corpus.sh`, replaces the sample rules in LocalStack S3 with it, and runs [`scripts/lib/bench_rules.py`](lib/bench_rules.py) against the stack (rate limiting off).
+
+What it measures:
+- cold full load
+- unchanged full refresh (digest skip)
+- restart → readiness time
+- paced 50 RPS latency
+- closed-loop throughput
+- single-rule refresh under load (one rule changed in S3 + refreshed every 5 s)
+- heap after GC around 100 single-rule refreshes
+
+Every response is value-checked. It prints a JSON summary and exits 1 on any wrong or failed response. Results from 2026-11-18 are in [`39-load-test-findings.md`](../project-documentation/39-load-test-findings.md).
 
 ## run-load-test.sh
 

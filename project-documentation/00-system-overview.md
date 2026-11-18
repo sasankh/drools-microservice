@@ -49,7 +49,7 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 2. [27-development-setup.md](27-development-setup.md) — local Java + Maven setup, conventions
 3. [02-project-structure.md](02-project-structure.md) — annotated directory tree (clickable)
 4. [04-architecture.md](04-architecture.md) — system design
-5. [28-testing-guide.md](28-testing-guide.md) — test suite map (51 files, 591 tests + 20 Testcontainers ITs)
+5. [28-testing-guide.md](28-testing-guide.md) — test suite map (55 files, 766 tests + 22 Testcontainers ITs)
 
 ### 🏛️ Architect / design reviewer
 
@@ -78,7 +78,7 @@ Pick the path matching your role. Each path is 3-5 docs in dependency order.
 ### ✍️ Rule author
 
 1. [33-simple-start.md](33-simple-start.md) — write and deploy your first rule
-2. [16-drl-sandboxing.md](16-drl-sandboxing.md) — what the sandbox blocks (read this BEFORE authoring)
+2. [16-drl-sandboxing.md](16-drl-sandboxing.md) — what the DRL policy check blocks; it is not a sandbox (read this BEFORE authoring)
 3. [17-rule-development.md](17-rule-development.md) — rule patterns + best practices
 4. [18-rule-id-and-storage-layout.md](18-rule-id-and-storage-layout.md) — rule ID format + storage paths
 5. [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md) — 17 working examples with live curl tests
@@ -120,13 +120,13 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 | Stat | Value |
 |---|---|
 | Total documentation files | **40** (including this one) |
-| Total Java source files | 63 |
-| Total test files | 51 |
-| Total tests (`@Test` + `@ParameterizedTest`) | **591** in `mvn test` (unit + plain ITs) + 20 Testcontainers integration (surefire-excluded; CI-only) |
-| Test coverage (instruction / branch) | 90.7% / 80.1% (measured 2026-11-17, Java 25) |
+| Total Java source files | 70 |
+| Total test files | 55 |
+| Total tests (`@Test` + `@ParameterizedTest`) | **766** in `mvn test` (unit + plain ITs) + 22 Testcontainers integration (surefire-excluded; CI-only) |
+| Test coverage (instruction / branch) | 93.9% / 86.1% (measured 2026-11-18, Java 25) |
 | Sample rules in `sample-rules/` | 17 |
-| Environment variables actually read | 68 |
-| Distinct error codes | 10 |
+| Environment variables catalogued in doc 09 | 73 |
+| Distinct error codes | 11 (incl. `RULE_LIMIT_EXCEEDED` 422) |
 | Spring profiles | 4 (`local`, `dev`, `prod`, `docker`) |
 | Filter chain order | 5 filters (-2, -1, 0, 1, none) — see ADR-024 |
 | Security headers on every response | 7 |
@@ -134,6 +134,8 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 | Sustained throughput target / measured | 100-1000 RPS / 45+ RPS sustained |
 | P99 latency target / measured (cached) | < 100ms / 1-40ms |
 | Docker image size | ~347 MB (Corretto 25 Alpine multi-stage) |
+| Architecture decision records | 24 written (001–025; 015 reserved) |
+| Docker test plan (`run-docker-test-plan.sh`) | 72 PASS / 0 FAIL, Steps 1–13 (2026-11-18) |
 | Security posture | Most findings addressed; 2 tracked-open (B1 DRL-sandbox RCE — deferred; #28 Redis TLS/auth — enforced on prod) |
 
 ---
@@ -163,7 +165,7 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 ### Security (14-16)
 - [14-security-architecture.md](14-security-architecture.md) — 8-layer model
 - [15-admin-authentication.md](15-admin-authentication.md) — admin API key flow
-- [16-drl-sandboxing.md](16-drl-sandboxing.md) — DRL sandbox allowlist/blocklist
+- [16-drl-sandboxing.md](16-drl-sandboxing.md) — DRL policy checks (not a sandbox): allowlist/blocklist and their limits
 
 ### Rule authoring (17-23)
 - [17-rule-development.md](17-rule-development.md) — comprehensive rule-author guide
@@ -195,7 +197,7 @@ Full tech stack rationale: [03-tech-stack.md](03-tech-stack.md).
 - [35-faq.md](35-faq.md) — 65+ Q&A
 
 ### Advanced (36-39)
-- [36-architecture-decision-records.md](36-architecture-decision-records.md) — 23 ADRs (001–024) + extension points
+- [36-architecture-decision-records.md](36-architecture-decision-records.md) — 24 ADRs (001–025; 015 reserved) + extension points
 - [37-glossary.md](37-glossary.md) — every term defined
 - [38-for-ai-agents.md](38-for-ai-agents.md) — verification rules and pitfalls for AI sessions working on this repo
 - [39-load-test-findings.md](39-load-test-findings.md) — measured numbers, architectural trade-offs, production-planning guidance from the 2026-05-10 single-container load test (1,000 rules, mixed-workload soak) + 2026-05-24 Phase 9.4 addendum (3-replica + pub/sub convergence + Redis-kill failure mode)
@@ -218,8 +220,8 @@ This is the elevator-pitch version. Full detail in [04-architecture.md](04-archi
 5. RequestSizeValidationFilter (no Order) — 1 MiB body cap
 6. RuleExecutionController — @ValidRuleId / @ValidRuleData via Jakarta Validation
 7. DroolsEngineService.executeRule() — lock-free lookup of THIS rule_id's compiled KieBase (ADR-025)
-8. RuleExecutor — submits to thread pool; CompletableFuture.get(timeout=30s)
-   - Inside: new KieSession on that KieBase only, insert data Map, fireAllRules(maxRuleFirings=10000)
+8. RuleExecutor — submits a FutureTask to the thread pool; get(timeout=30s) → 408 on timeout (worker halted + interrupted)
+   - Inside: new KieSession on that KieBase only, insert data Map, fireAllRules(cap + 1); more than the cap (default 10000) → 422 RULE_LIMIT_EXCEEDED
 9. Metrics emitted (Micrometer); LogSanitizer scrubs response before logging
 10. Response: {rule_id, result: <modified data>, error: null, execution_time_ms}
 ```
@@ -238,7 +240,8 @@ If you take only one thing from this overview:
 4. **Redis is a real cache when `REDIS_ENABLED=true`** — `RedisCachedRuleStorage` decorates the base storage with read-through caching; `RuleRefreshPublisher`/`Subscriber` provide cross-task fan-out via `drools:rule:events` channel. Replaced the old dead `LocalLRUCache`/`RedisRuleCache` layer on 2026-05-20. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20).
 5. **Rate-limit buckets are keyed on source IP only**. `X-API-Key` / `Authorization` / `X-Client-Id` do **not** create separate buckets (keying on unauthenticated headers would let callers defeat the limiter). `X-Forwarded-For` is ignored by default; set `DROOLS_RATE_LIMITING_TRUST_PROXY=true` only behind a trusted proxy that overwrites it. See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md).
 6. **Rule refresh doesn't block readers** — refreshing one rule ID recompiles only that ID and swaps its immutable handle in the `CompiledRulesetRegistry`; execution takes no lock, and in-flight requests finish on the version they took. See [ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18).
-7. **JSON uses snake_case (`rule_id`)** — not camelCase. The Java field is `ruleId` but mapped via `@JsonProperty`. See [ADR-008](36-architecture-decision-records.md#adr-008-snake_case-json-via-jsonproperty).
+7. **A refresh never half-applies**. Every storage read is all-or-nothing: a failed S3/file read changes nothing, and an empty read never removes loaded rules (409 `rejected_empty`). An instance with no rules is **not ready** (`/actuator/health/readiness` and `/admin/health` return 503). See [10-api-reference.md](10-api-reference.md) and [30-runbooks-and-monitoring.md](30-runbooks-and-monitoring.md).
+8. **JSON uses snake_case (`rule_id`)** — not camelCase. The Java field is `ruleId` but mapped via `@JsonProperty`. See [ADR-008](36-architecture-decision-records.md#adr-008-snake_case-json-via-jsonproperty).
 
 ---
 
@@ -262,9 +265,11 @@ When you read this corpus and want to verify a claim against code, these are the
 | Concern | File |
 |---|---|
 | Rule execution orchestrator | [`DroolsEngineService.java`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java) |
-| Rule compiler + sandbox integration | [`RuleCompiler.java`](../src/main/java/com/company/drools/core/engine/RuleCompiler.java) |
-| Async execution + timeout cancellation | [`RuleExecutor.java`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java) |
-| **DRL sandbox** | [`DrlSanitizer.java`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java) |
+| Rule compiler (one KieBase per rule ID) + policy check | [`RuleCompiler.java`](../src/main/java/com/company/drools/core/engine/RuleCompiler.java) |
+| Async execution + timeout cancellation + firing cap | [`RuleExecutor.java`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java) |
+| Every refresh (startup, admin, pub/sub, reconcile) | [`RuleRefreshService.java`](../src/main/java/com/company/drools/core/engine/RuleRefreshService.java) |
+| Readiness (`rules` health indicator) | [`RulesHealthIndicator.java`](../src/main/java/com/company/drools/config/RulesHealthIndicator.java) |
+| **DRL policy check** (not a sandbox; see `SECURITY.md`) | [`DrlSanitizer.java`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java) |
 | Filter chain | [`api/filter/`](../src/main/java/com/company/drools/api/filter/) |
 | Storage abstraction | [`storage/`](../src/main/java/com/company/drools/storage/) |
 | Cache layer | [`cache/`](../src/main/java/com/company/drools/cache/) |

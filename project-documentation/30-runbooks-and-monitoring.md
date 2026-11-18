@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Operators, on-call engineers, SREs |
 | **Purpose** | Operational procedures (start/stop/refresh/scale/incident response) plus monitoring setup (metrics, dashboards, alerts) |
-| **Last verified against** | Running stack on 2026-08-20 |
+| **Last verified against** | Running stack on 2026-08-20; refresh, readiness, limits and audit sections checked against the code and the docker test plan (Steps 12.5b–13) on 2026-11-18 |
 | **Related docs** | [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md), [26-performance-tuning-runbook.md](26-performance-tuning-runbook.md), [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md), [31-troubleshooting.md](31-troubleshooting.md) |
 
 ---
@@ -72,8 +72,16 @@ curl -fsS http://localhost:8080/admin/health -H "X-Admin-API-Key: $ADMIN_API_KEY
 curl -fsS http://localhost:8080/admin/health -H "X-Admin-API-Key: $ADMIN_API_KEY" | jq
 
 # What components are checked: drools, storage, cache, redis (if enabled), circuit-breakers
-# Overall status is "UP" iff drools and storage are UP. Cache/redis/breaker DOWN does not flip overall status.
+# Overall status: UP; DEGRADED (rules serve, storage unreachable; HTTP 200);
+# DOWN (can't serve rules: startup load not succeeded or 0 rules; HTTP 503).
+# Cache/redis/breaker DOWN does not change the overall status.
+
+# Orchestrator probes (actuator port 8081, no admin key)
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8081/actuator/health/readiness   # 200 ready / 503 not
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8081/actuator/health/liveness    # 200 while the JVM is alive
 ```
+
+Use **readiness** for load-balancer / Kubernetes readiness, and **liveness** for restarts. Readiness includes the `rules` indicator, so an instance with no rules is taken out of rotation. Liveness ignores rule state, so such an instance is not restarted in a loop.
 
 ### Refresh rules
 
@@ -86,14 +94,18 @@ curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" \
 # Expected:
 # {
 #   "status": "completed",
-#   "rules_loaded": 17,
+#   "rules_loaded": 17,       # serving from this snapshot (recompiled + unchanged)
 #   "rules_failed": 0,
-#   "duration_ms": 1234,
+#   "rules_unchanged": 17,    # identical DRL, not recompiled
+#   "rules_removed": 0,       # gone from storage, removed
+#   "duration_ms": 41,
 #   "errors": []
 # }
+# 500 "failed"         → storage unreadable; nothing changed
+# 409 "rejected_empty" → storage returned 0 rules; nothing changed
 ```
 
-Each rule ID is compiled into its own KieBase and its handle is swapped atomically ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)); execution takes no lock. In-flight `/execute-rule` requests finish on the version they took. New requests for a rule ID use its new version as soon as that ID is swapped. A rule ID that fails to compile keeps its previous version. See [04-architecture.md](04-architecture.md).
+The read is all-or-nothing: a failed or incomplete storage read changes nothing. Each rule ID is compiled into its own KieBase and its handle is swapped atomically ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)); execution takes no lock. In-flight `/execute-rule` requests finish on the version they took. New requests for a rule ID use its new version as soon as that ID is swapped. A rule ID that fails to compile keeps its previous version. See [04-architecture.md](04-architecture.md).
 
 #### Single rule
 
@@ -106,7 +118,7 @@ Faster than full refresh when only one rule changed: only that rule ID is recomp
 
 #### After uploading a new rule to S3
 
-The service does not auto-detect S3 changes (unless `AUTO_REFRESH_ENABLED=true`, which polls every `AUTO_REFRESH_INTERVAL_MINUTES`). Call refresh after any S3 change.
+Call refresh after any S3 change; it invalidates the Redis cache, re-reads S3 and publishes to sibling instances. With `AUTO_REFRESH_ENABLED=true` (default on `prod`) the scheduled reconcile also picks the change up within `AUTO_REFRESH_INTERVAL_MINUTES` (default 5), reading S3 directly.
 
 ### Scale horizontally
 
@@ -127,7 +139,7 @@ kubectl scale deployment drools --replicas=5
 #### Considerations
 
 - Each replica has its own compiled per-rule-ID KieBases (the execution hot path) and per-instance rate-limit buckets. Horizontal scaling **shares the Redis cache** (when `REDIS_ENABLED=true`) via `RedisCachedRuleStorage`, but rate limits multiply across replicas.
-- Cross-instance refresh coherence is provided by `RuleRefreshPublisher`/`Subscriber` on channel `drools:rule:events` (requires `REDIS_PUBSUB_ENABLED=true`). When pub/sub is disabled, replicas must each be refreshed individually or via TTL expiry.
+- Cross-instance refresh coherence is provided by `RuleRefreshPublisher`/`Subscriber` on channel `drools:rule:events` (requires `REDIS_PUBSUB_ENABLED=true`). When pub/sub is disabled, replicas must each be refreshed individually, or rely on the scheduled reconcile (`AUTO_REFRESH_ENABLED=true`). Reconcile also repairs events a replica missed while pub/sub was on.
 - If you need cluster-wide rate limiting, you'd need to back the limiter with Redis — currently not implemented (see [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md)).
 - Cold-start time is ~30-45s per replica. Plan capacity accordingly.
 
@@ -140,6 +152,10 @@ curl -fsS http://localhost:8080/admin/health -H "X-Admin-API-Key: $ADMIN_API_KEY
 ```
 
 If `s3_state: "OPEN"` → S3 dependency is failing. See [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md).
+
+An open S3 breaker does **not** cause 503s on `/execute-rule`: requests run on the compiled rules, and only refreshes fail (500).
+
+If `/admin/health` itself returns 503, its `status` is `DOWN`: the instance has no rules to serve. See [Instance not ready](#instance-not-ready).
 
 If both states are `CLOSED` and you still see 503s, look elsewhere:
 - **Rule-execution pool saturation** — the rule-execution thread pool uses an `AbortPolicy`, so once the pool and its queue are full the executor rejects new work and the request is mapped to `ServiceUnavailableException` → HTTP 503 (a distinct 503 source from the circuit breakers and from graceful-shutdown refusal). Check `/admin/thread-pools` for active/queue/rejected counts and raise `DROOLS_THREAD_POOL_MAX_SIZE` (and/or the queue capacity) or reduce inbound load.
@@ -157,6 +173,79 @@ docker compose logs app | grep 'Rate limit exceeded' | tail -20
 Each warning includes the client identifier. If they're all `ip:1.2.3.4` (same IP), it's one client hammering. If they're `ip:*` (varied) or `client-id:*`, it's distributed.
 
 See [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md) for tuning.
+
+### Instance not ready
+
+Symptom: `/actuator/health/readiness` returns 503 and `/admin/health` returns 503 with `status: DOWN`.
+
+```bash
+curl -fsS http://localhost:8080/admin/health -H "X-Admin-API-Key: $ADMIN_API_KEY" \
+  | jq '.components.drools.details | {phase, loaded_rules, reason, last_refresh_result, last_error}'
+```
+
+- `phase: NOT_LOADED` → the startup load is still running. Wait (a cold load of many rules takes a while).
+- `phase: FAILED` → the startup load couldn't read storage (bucket, credentials, network, `RULE_SOURCE`, or an empty bucket). The instance stays up but not ready. Fix storage, then `POST /admin/refresh-rules` (or wait for the reconcile, if `AUTO_REFRESH_ENABLED=true`). Set `DROOLS_STARTUP_FAIL_ON_LOAD_ERROR=true` if you'd rather the process exit.
+- `phase: LOADED` but `loaded_rules: 0` → every rule failed to compile, or storage really is empty. Check `error_rule_ids` and the refresh response `errors`.
+- One bad rule file does **not** make an instance DOWN. Its ID is listed in `error_rule_ids`, and every other rule keeps serving.
+
+### Refresh returned 409 `rejected_empty`
+
+Storage returned a complete but **empty** set while rules are loaded. Nothing changed; every rule keeps serving, and no event was published.
+
+1. Check the source: `RULE_SOURCE`, `RULE_BUCKET_NAME` / `LOCAL_RULES_DIRECTORY`, and the bucket contents (`aws s3 ls s3://$RULE_BUCKET_NAME --recursive | grep -c .drl`).
+2. If the bucket really should be empty, set `DROOLS_REFRESH_ALLOW_EMPTY=true`, restart, and refresh again.
+
+### Refresh returned 500 `failed`
+
+Storage couldn't be read completely (an S3 listing or object error, an open S3 breaker, a missing rules directory). Nothing changed. The reason is in `errors[0].error` and in the ERROR log line `admin refresh: Storage read failed; nothing changed: …`. Fix the dependency and refresh again.
+
+### Clients get 422 `RULE_LIMIT_EXCEEDED`
+
+One request made the rules fire more than `DROOLS_MAX_RULE_FIRINGS` (10,000 default) times. This is almost always a rule loop: a consequence that calls `update` / `modify` on the fact it matched, without `no-loop`.
+
+```bash
+docker compose logs app | grep 'exceeded the firing limit' | tail -5   # names the rule_id
+```
+
+Fix the DRL (add `no-loop true` or tighten the condition), upload it, and refresh that rule ID. Raise the cap only if the rule really needs more firings. Count: `drools.api.errors{endpoint=/execute-rule,error_type=limit_exceeded}`.
+
+### `drools.rule.execution.stuck` > 0
+
+A rule timed out (408) and its worker thread ignored both `halt()` and the interrupt: usually a consequence that never yields (`while (true) {}`). The thread stays busy until the process restarts, so each one permanently shrinks the rule-execution pool.
+
+1. Find the rule: `docker compose logs app | grep 'worker did not stop'` → `Rule <rule_id> execution timed out after <n>s; worker did not stop (<k> stuck)`.
+2. Fix or remove that DRL, and refresh it so new requests stop hitting it.
+3. Restart the instance (rolling) to get the threads back. If a worker ends on its own, the log says `Worker for timed-out rule <rule_id> has finally finished` and the gauge drops.
+
+### Instances disagree / a pub/sub event was missed
+
+Pub/sub is fire-and-forget. An instance that was disconnected, restarting, or had a full listener queue can miss an event.
+
+- With `AUTO_REFRESH_ENABLED=true` each instance reconciles every interval: it reads storage directly (bypassing Redis) and applies only the differences. A repaired drift logs WARN `Reconcile found drift: <n> rule(s) updated, <m> removed (a refresh event was probably missed)` and increments `drools.reconcile.changed`.
+- A non-zero `drools.reconcile.changed` means events are being missed. Check Redis connectivity and `drools.refresh.failed{layer=listener,reason=queue_full}`.
+- To converge now, call `POST /admin/refresh-rules` on any instance. It always publishes a bulk event, and siblings skip unchanged rules by digest.
+- Compare instances with the `AUDIT` lines (digests per rule ID) or `GET /admin/rules`.
+
+### Audit log (who changed which rules)
+
+Every rule-changing action writes one line on the `AUDIT` logger, at INFO in every profile (including `prod`, where root is WARN). It never contains DRL text, request payloads or keys.
+
+```bash
+docker compose logs app | grep 'AUDIT action=' | tail -20
+```
+
+```
+AUDIT action=refresh_all source=admin actor=172.18.0.1 result=ok loaded=1 unchanged=16 failed=0 removed=0 loaded_ids=[pricing.discount.simple] failed_ids=[] removed_ids=[]
+AUDIT action=refresh_rule source=admin actor=172.18.0.1 rule_id=pricing.discount.vip result=installed old_digest=3f2a9c0d1e4b new_digest=7c81d2e0aa19
+AUDIT action=refresh_rule source=admin actor=172.18.0.1 rule_id=broken.rule result=failed old_digest=null new_digest=null error=compile_failed
+AUDIT action=remove_rule source=pubsub actor=- rule_id=pricing.discount.vip result=removed old_digest=7c81d2e0aa19
+AUDIT action=refresh_all source=admin actor=172.18.0.1 result=storage_failed error="Storage read failed; nothing changed: ..."
+```
+
+- `source`: `startup`, `admin`, `pubsub` or `reconcile` (`action=reconcile`; quiet when nothing changed).
+- `actor`: the admin caller's remote address (the shared admin key carries no user identity); `-` otherwise.
+- Digests are the first 12 hex chars of the DRL's SHA-256. ID lists are capped at 50 (`…+N`).
+- Single-refresh failures record `error=compile_failed` or `error=storage_read_failed`, never the compiler message (it can quote DRL). The message is in the normal application log.
 
 ### Memory diagnostics
 
@@ -250,14 +339,22 @@ Micrometer registry (in JVM)
 | `drools.api.requests` | Counter | `endpoint=/execute-rule` (etc.) | Per-endpoint request count |
 | `drools.api.errors` | Counter | `endpoint`, `error_type` | Per-endpoint error count by type |
 | `drools.api.response.time` | Timer | `endpoint`, `status` | Per-endpoint latency distribution |
-| `drools.rule.execution.time` | Timer | `rule_id` (or `unknown` for misses) | Per-rule latency. **Cardinality**: rules not loaded are tagged `unknown` to prevent metric explosion. |
-| `drools.rule.execution.error` | Counter | `rule_id`, `error_type` | Per-rule error rate |
-| `drools.cache.hit` | Counter | — | `RedisCachedRuleStorage` cache hit (Redis GET / MGET returned the rule) |
-| `drools.cache.miss` | Counter | — | Decorator fell through to base storage (S3/file/memory) for this rule |
-| `drools.refresh.published` | Counter | `type=single\|bulk\|delete` | `RuleRefreshPublisher` sent an event to `drools:rule:events` |
-| `drools.refresh.received` | Counter | `type=single\|bulk\|delete` | `RuleRefreshSubscriber` received an event |
+| `drools.rule.execution.time` | Timer | `rule_id` (or `unknown` for misses), `status` | Per-rule latency. **Cardinality**: rules not loaded are tagged `unknown` to prevent metric explosion. |
+| `drools.rule.execution.error` | Counter | `rule_id`, `error=rule_not_found\|rule_not_active\|execution_failed` | Per-rule error rate |
+| `drools.rule.execution.stuck` | Gauge | — | **New 2026-11-18.** Workers still running after their request timed out (a rule body that never yields). Should be 0; see the runbook above |
+| `drools.rules.loaded` | Gauge | `application`, `environment` | Rule IDs compiled and serving. Real since 2026-11-18 (it was always 0 before) |
+| `drools.rule.compile.time` | Timer | `result=success\|error` | **New.** Per-rule-ID compile time |
+| `drools.rule.compile.error` | Counter | `rule_id` | **New.** Compile failures per rule ID (the previous version, if any, keeps serving) |
+| `drools.refresh.runs` | Counter | `source=startup\|admin\|pubsub\|reconcile`, `result` | **New.** Every refresh. Bulk `result`: `ok`, `partial`, `storage_failed`, `rejected_empty`; single: `installed`, `unchanged`, `failed`, `removed`, `not_found`, `storage_failed` |
+| `drools.reconcile.changed` | Counter | — | **New.** Rule IDs a scheduled reconcile updated or removed, i.e. drift that pub/sub didn't deliver |
+| `drools.cache.hit` | Counter | `layer=redis` | `RedisCachedRuleStorage` cache hit (Redis GET / MGET returned the rule) |
+| `drools.cache.miss` | Counter | `layer=redis` | Decorator fell through to base storage (S3/file/memory) for this rule |
+| `drools.refresh.published` | Counter | `event=RULE_REFRESHED\|RULE_REFRESHED_BULK\|RULE_DELETED` | `RuleRefreshPublisher` sent an event to `drools:rule:events` |
+| `drools.refresh.received` | Counter | `event=…` (same values) | `RuleRefreshSubscriber` received an event from another instance |
 | `drools.refresh.skipped_self` | Counter | — | Subscriber skipped a self-emitted event (loop-back prevention) |
-| `drools.refresh.failed` | Counter | `layer=publisher\|subscriber\|storage\|engine` | Refresh failure by stage |
+| `drools.refresh.failed` | Counter | `layer=publisher\|subscriber\|listener`, `reason` | Refresh failure by stage. `publisher`: `circuit_breaker_open`, `exception`. `subscriber`: `deserialize`, `process_error` (the refresh failed), `compile` (per failed rule ID in a bulk event). `listener`: `queue_full` (event dropped; reconcile repairs it) |
+
+`drools.api.errors{endpoint=/execute-rule}` uses `error_type` values including `timeout` (408), `unavailable` (503) and, since 2026-11-18, `limit_exceeded` (422).
 
 #### JVM and system
 
@@ -388,6 +485,12 @@ fields @timestamp, message
 | Circuit breaker open | Any breaker state == OPEN > 30s | P1 (S3) / P3 (Redis) | Investigate dependency |
 | Cache hit rate low | `drools.cache.hit{layer=redis}` hit rate < 70% for 30 min (when `REDIS_ENABLED=true`) | P3 | Check if refresh storms are evicting Redis keys; tune `REDIS_DRL_RULES_TTL_MINUTES` |
 | Rule execution errors | Per-rule error rate > 5% for 10 min | P2 | Validate rule logic |
+| Instance not ready | `/actuator/health/readiness` 503 for > 5 min | P1 if all instances, else P2 | [Instance not ready](#instance-not-ready) |
+| Stuck workers | `drools.rule.execution.stuck` > 0 | P2 | [Stuck workers runbook](#droolsruleexecutionstuck--0); rolling restart |
+| Rule loop | `drools.api.errors{error_type=limit_exceeded}` > 0 | P3 | Fix the looping rule |
+| Refresh failing | `drools.refresh.runs{result=storage_failed}` or `{result=rejected_empty}` increasing | P2 | Check storage; nothing changed until it succeeds |
+| Compile errors | `drools.rule.compile.error` increasing | P3 | A bad DRL upload; the previous version keeps serving |
+| Missed pub/sub | `drools.reconcile.changed` > 0, or `drools.refresh.failed{layer=listener}` > 0 | P3 | Check Redis connectivity; reconcile already repaired it |
 | Rate limit "client map at capacity" | Log line `Rate limiter client map at capacity` | P2 | Possible spoofing |
 | Startup fails: admin key blank on prod/docker | App exits at startup — `prod`/`docker` profiles hard-fail when `ADMIN_API_KEY` is blank (fail-closed); a running-but-unauthenticated production state is no longer possible. Only `local`/`dev` start open, logging a WARN | P1 | Set `ADMIN_API_KEY` before deploy |
 | Unexpected exception | Log entry `Unexpected error occurred` ERROR | P3 | Check stack trace |
@@ -436,11 +539,11 @@ If either fails, page on-call.
 
 1. **Confirm**: hit `/admin/health` from outside. If 503 / no response, real outage.
 2. **Look at recent changes**: deploy in last hour? rule refresh? config change?
-3. **Check breakers**: `/admin/health` → circuit breaker components. Is S3 OPEN?
+3. **Check readiness and breakers**: `/admin/health` → `status` `DOWN` means no rules to serve (see [Instance not ready](#instance-not-ready)). Is the S3 breaker OPEN? (That blocks refreshes, not execution.)
 4. **Check resources**: memory > 90%? thread pool saturated? GC pauses?
 5. **Check logs**: `tail` recent ERROR lines. What's the most common stack trace?
 6. **Mitigate**:
-   - If breaker open: confirm dependency outage; nothing to do but wait for recovery.
+   - If breaker open: confirm dependency outage; compiled rules keep serving, so wait for recovery and refresh afterwards.
    - If memory full: restart the service.
    - If a bad rule: revert via S3 + refresh.
    - If a bad deploy: roll back.
@@ -480,7 +583,7 @@ If either fails, page on-call.
 
 | Item | Status |
 |---|---|
-| Health endpoint exposed | ✅ `/admin/health`, `/actuator/health` |
+| Health endpoint exposed | ✅ `/admin/health` (503 when DOWN), `/actuator/health`, readiness/liveness probes |
 | Metrics emitted to standard backend | ⚠️ CloudWatch in `prod`, no Prometheus pipeline currently |
 | Structured logging with correlation IDs | ✅ `logstash-logback-encoder` + MDC |
 | Graceful shutdown | ✅ `server.shutdown: graceful` |
@@ -490,7 +593,7 @@ If either fails, page on-call.
 | Documented incident playbooks | ✅ this doc |
 | Synthetic monitoring | ⚠️ recommended, not built-in |
 | Cluster-wide rate limiting | ❌ per-instance only |
-| Admin API audit log | ⚠️ logs exist, but not a dedicated audit channel |
+| Admin API audit log | ✅ `AUDIT` logger: one line per refresh / reconcile / remove (2026-11-18). Actor is a remote address only; no per-user identity |
 | Backup & restore for rule storage | ⚠️ relies on S3 versioning; explicit backup procedure not documented in repo |
 | Disaster recovery plan | ⚠️ not in repo |
 | Performance baseline tests | ✅ [`scripts/run-load-test.sh`](../scripts/run-load-test.sh) — Phases 0–8 (1000-rule baseline, JMeter mixed-workload, refresh storm) + Phase 9 (3-replica multi-instance convergence). See [39-load-test-findings.md](39-load-test-findings.md). |

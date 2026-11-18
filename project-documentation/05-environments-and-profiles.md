@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Developers, operators |
 | **Purpose** | The 4 Spring profiles (`local`, `dev`, `prod`, `docker`): what each one overrides, when to use which, and the full diff table |
-| **Last verified against** | [`application.yml`](../src/main/resources/application.yml), [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java), [`RedisSecurityValidator.java`](../src/main/java/com/company/drools/config/RedisSecurityValidator.java) on 2026-08-20 |
+| **Last verified against** | [`application.yml`](../src/main/resources/application.yml), [`AdminAuthFilter.java`](../src/main/java/com/company/drools/api/filter/AdminAuthFilter.java), [`RedisSecurityValidator.java`](../src/main/java/com/company/drools/config/RedisSecurityValidator.java), [`StorageFactory.java`](../src/main/java/com/company/drools/storage/StorageFactory.java), [`RuleReconcileScheduler.java`](../src/main/java/com/company/drools/config/RuleReconcileScheduler.java) on 2026-11-18 |
 | **Related docs** | [06-deployment.md](06-deployment.md), [09-environment-variables-reference.md](09-environment-variables-reference.md), [29-circuit-breakers-and-resilience.md](29-circuit-breakers-and-resilience.md) |
 
 ---
@@ -45,10 +45,10 @@ This table lists every value that **changes** between profiles. Values marked `�
 
 | Property | Base default | local | dev | prod | docker |
 |---|---|---|---|---|---|
-| `drools.rule-source` | `local` | — | `s3` | `s3` | `s3` |
+| `drools.rule-source` (env `RULE_SOURCE` wins in every profile) | `local` | `local` | `s3` | `s3` | `s3` |
 | `drools.cors.allowed-origins` | *(empty)* | `*` | `*` | *(empty — set explicitly)* | `*` |
 | `drools.s3.endpoint` | *(empty)* | — | `http://localhost:4566` | — *(real AWS)* | — *(uses `aws.endpoint` override)* |
-| `drools.refresh.auto-enabled` | `false` | — | — | **`true`** | — |
+| `drools.refresh.auto-enabled` (env `AUTO_REFRESH_ENABLED` wins) | `false` | — | — | **`true`** | — |
 | `drools.timeout.http.connection` | `10` | — | `5` | `10` | `8` |
 | `drools.timeout.http.read` | `30` | — | `15` | `30` | `25` |
 | `drools.timeout.rule-execution` | `30` | — | `15` | `30` | `25` |
@@ -80,6 +80,17 @@ This table lists every value that **changes** between profiles. Values marked `�
 | `logging.level.com.company.drools` | `INFO` | `DEBUG` | — | — | — |
 | `logging.level.root` | `INFO` | — | — | `WARN` | — |
 
+Every profile block reads the rule source as `${RULE_SOURCE:<profile default>}` and prod reads `${AUTO_REFRESH_ENABLED:true}`, so the env var always wins. Before 2026-11-18 the profile blocks hard-coded `rule-source`, and `RULE_SOURCE` was ignored on `dev`/`prod`/`docker`.
+
+These keys are the same in every profile (base defaults; see [09](09-environment-variables-reference.md#cache--rule-lifecycle)):
+
+| Property | Env var | Default | Effect |
+|---|---|---|---|
+| `drools.refresh.interval-minutes` | `AUTO_REFRESH_INTERVAL_MINUTES` | `5` | Reconcile interval, when `auto-enabled` is true |
+| `drools.refresh.allow-empty` | `DROOLS_REFRESH_ALLOW_EMPTY` | `false` | An empty storage read can't remove loaded rules |
+| `drools.startup.fail-on-load-error` | `DROOLS_STARTUP_FAIL_ON_LOAD_ERROR` | `false` | `false`: start but stay not ready; `true`: exit |
+| `drools.execution.max-rule-firings` | `DROOLS_MAX_RULE_FIRINGS` | `10000` | Over the cap → 422 `RULE_LIMIT_EXCEEDED` |
+
 ---
 
 ## Profile-by-profile details
@@ -88,7 +99,7 @@ This table lists every value that **changes** between profiles. Values marked `�
 
 ```yaml
 drools:
-  rule-source: local        # Uses InMemoryRuleStorageAdapter — built-in sample rules
+  rule-source: ${RULE_SOURCE:local}   # local = InMemoryRuleStorageAdapter — built-in sample rules
   cors:
     allowed-origins: "*"    # Wildcard — easy local browser testing
 redis:
@@ -116,7 +127,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 
 ```yaml
 drools:
-  rule-source: s3
+  rule-source: ${RULE_SOURCE:s3}
   cors:
     allowed-origins: "*"
   s3:
@@ -158,9 +169,9 @@ mvn spring-boot:run -Dspring-boot.run.profiles=dev
 
 ```yaml
 drools:
-  rule-source: s3                              # Real AWS S3
+  rule-source: ${RULE_SOURCE:s3}               # Real AWS S3
   refresh:
-    auto-enabled: true                         # Auto-refresh rules on schedule
+    auto-enabled: ${AUTO_REFRESH_ENABLED:true}  # Scheduled reconcile (every 5 min by default)
   timeout:
     http: { connection: 10, read: 30 }
     rule-execution: 30
@@ -194,7 +205,7 @@ logging:
 
 **Why CloudWatch enabled**: production observability. Metrics are exported to CloudWatch. Adjust namespace via `management.metrics.export.cloudwatch.namespace=DroolsEngine` (defaults are sane).
 
-**Auto-refresh enabled**: in prod, `AUTO_REFRESH_ENABLED=true` lets the service periodically reload rules from S3 without manual `/admin/refresh-rules` calls. Interval default 5 min (`AUTO_REFRESH_INTERVAL_MINUTES`).
+**Scheduled reconcile enabled**: in prod, every `AUTO_REFRESH_INTERVAL_MINUTES` (default 5) each instance reads S3 **directly** (bypassing Redis) and applies only what changed: changed rule IDs are recompiled, new ones added, deleted ones removed; unchanged ones are skipped by SHA-256 digest. This repairs a missed pub/sub event and picks up direct bucket edits without an admin call. Reconcile never publishes events. Drift it repairs is counted in `drools.reconcile.changed`. (Before 2026-11-18 this setting was documented but nothing read it.)
 
 **Fail-closed startup guards (prod only)** — the app refuses to start if either is violated:
 - **Admin key required**: `AdminAuthFilter` throws at startup if `ADMIN_API_KEY` is blank/unset under the `prod` (or `docker`) profile. Admin endpoints must never be served unprotected in a deployable profile.
@@ -206,7 +217,7 @@ logging:
 
 ```yaml
 drools:
-  rule-source: s3
+  rule-source: ${RULE_SOURCE:s3}
   cors:
     allowed-origins: "*"
   timeout:
@@ -259,7 +270,7 @@ aws:
 | **Which profile has the strictest circuit breakers?** | `prod` — S3 opens at 40% failure rate; sliding window 200 calls. |
 | **Which profile has the largest thread pools?** | `prod` — 20 core / 100 max for rule execution. |
 | **Which profile has the most permissive CORS?** | `local`/`dev`/`docker` (wildcard `*`). `prod` is empty by default — must be set explicitly. |
-| **Which profile auto-refreshes rules from S3?** | Only `prod` (`drools.refresh.auto-enabled: true`). |
+| **Which profile reconciles rules from S3 on a schedule?** | Only `prod` (`auto-enabled: ${AUTO_REFRESH_ENABLED:true}`). Set `AUTO_REFRESH_ENABLED=true` to turn it on elsewhere. |
 | **Which profile exports metrics to CloudWatch?** | Only `prod`. |
 | **Which profile uses `DEBUG` logging?** | Only `local`. |
 | **Which profile reduces `root` logging to `WARN`?** | Only `prod`. |
@@ -270,9 +281,9 @@ aws:
 
 You don't have to edit `application.yml`. Spring Boot's property override order (highest priority first):
 
-1. Command-line args: `--drools.rule-source=memory`
-2. JVM args: `-Ddrools.rule-source=memory`
-3. OS env vars: `DROOLS_RULE_SOURCE=memory` *(this is what production uses)*
+1. Command-line args: `--drools.rule-source=file`
+2. JVM args: `-Ddrools.rule-source=file`
+3. OS env vars: `RULE_SOURCE=file` *(this is what production uses; it feeds the `${RULE_SOURCE:…}` placeholder)*
 4. `.env` file (loaded via `DotenvConfig` with `addLast` — env vars take priority)
 5. Profile-specific YAML (`application-prod.yml` if you split, or in-line `on-profile: prod` block)
 6. Default YAML (`application.yml` base)
@@ -286,5 +297,6 @@ For the full env var catalog, see [09-environment-variables-reference.md](09-env
 | App says "Profile 'local' active" but I want dev | `SPRING_PROFILES_ACTIVE` not set | `export SPRING_PROFILES_ACTIVE=dev` or pass `-Dspring.profiles.active=dev` |
 | App can't reach LocalStack at `localhost:4566` | Wrong profile (host network vs container network) | If running in compose: profile should be `docker` (uses `localstack` hostname). If running on host: profile `dev` (uses `localhost`). |
 | Rate limits, timeouts feel wrong | Profile loaded different overrides than expected | `curl /admin/info` and inspect; or set `LOGGING_LEVEL_ROOT=DEBUG` at startup to see profile activation |
-| `RULE_SOURCE` not respected | A profile is overriding it | Profiles are *higher priority* than the base default. If you set `RULE_SOURCE=memory` but the active profile sets `rule-source: s3`, the env var still wins (env > profile). |
+| `RULE_SOURCE` not respected | Running a build from before 2026-11-18, where profile blocks hard-coded `rule-source` | Current profiles read `${RULE_SOURCE:<default>}`, so the env var wins. Check `/admin/health` → `components.storage.details.rule_source`. |
+| App fails to start: `Unknown drools.rule-source '…'` | `RULE_SOURCE` is not `local`, `file` or `s3` (for example `memory`) | Fix the value. Unknown values used to fall back to the 2 in-memory demo rules; now they fail startup. |
 | Two profiles' values are merging unexpectedly | Stacked profiles (`SPRING_PROFILES_ACTIVE=dev,prod`) | This project does not test stacked profiles — pick one. |

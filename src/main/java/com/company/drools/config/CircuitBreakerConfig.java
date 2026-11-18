@@ -70,8 +70,13 @@ public class CircuitBreakerConfig {
                 Duration.ofSeconds(5)) // Calls slower than 5s are considered slow
             .permittedNumberOfCallsInHalfOpenState(5)
             .automaticTransitionFromOpenToHalfOpenEnabled(true)
+            // RuleStorageException: S3RuleStorage wraps SDK errors while still inside the
+            // breaker (a failed per-object read aborts the full read), and Resilience4j checks
+            // the exception that leaves the call, not its cause — without this entry failed bulk
+            // reads would be recorded as successful calls and never open the breaker.
             .recordExceptions(
                 software.amazon.awssdk.core.exception.SdkException.class,
+                com.company.drools.api.exception.RuleStorageException.class,
                 java.util.concurrent.TimeoutException.class,
                 java.io.IOException.class)
             .ignoreExceptions(

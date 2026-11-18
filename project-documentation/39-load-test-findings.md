@@ -4,10 +4,37 @@
 |---|---|
 | **Audience** | Engineers, operators, capacity planners |
 | **Purpose** | What this rule engine actually does under load — measured numbers, architectural trade-offs, production-planning guidance, bugs surfaced during testing |
-| **When tested** | 2026-05-10 (Phases 0–7 single-instance 1000-rule baseline) + 2026-05-23 (Phase 9 sub-tests 9.1–9.4: multi-instance + Redis-fault) + 2026-07-14 (Phase 9.4 follow-up: harness restart-policy + CB exception-classification fixes) |
+| **When tested** | 2026-11-18 (per-rule-ID engine re-measure, ADR-025 — see the first section) + 2026-05-10 (Phases 0–7 single-instance 1000-rule baseline) + 2026-05-23 (Phase 9 sub-tests 9.1–9.4: multi-instance + Redis-fault) + 2026-07-14 (Phase 9.4 follow-up: harness restart-policy + CB exception-classification fixes) |
 | **Stack tested** | docker-compose (app + LocalStack S3 + Redis), Java 25 + Spring Boot 3.5.3 + Drools 10.2.0; Phase 9 also runs a 3-replica + nginx LB topology via [`scripts/docker-compose.loadtest-multi.yml`](../scripts/docker-compose.loadtest-multi.yml) |
 | **Verdict** | ✅ **PASS** — production-ready against documented acceptance criteria. Phase 9.4 failure-mode sub-test is **3/4** after the 2026-07-14 follow-up: (a)(c)(d) PASS; (b) CB-opens-within-30s is a documented quick-RPS test-environment limit, not a production defect (the two underlying code bugs are fixed and proven — see the Phase 9.4 addendum). |
 | **Related docs** | [26-performance-tuning-runbook.md](26-performance-tuning-runbook.md), [25-memory-monitoring-guide.md](25-memory-monitoring-guide.md), [36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal](36-architecture-decision-records.md#adr-003-kiecontainer-atomic-swap-with-disposal) (load-test sign-off note appended), [04-architecture.md](04-architecture.md) |
+
+---
+
+## 2026-11-18 re-measure: per-rule-ID engine (ADR-025)
+
+After rule-ID isolation (each `rule_id` compiles to its own KieBase; a request evaluates only its own rules) the 1,000-rule numbers were re-measured with [`scripts/run-rule-benchmark.sh`](../scripts/run-rule-benchmark.sh).
+- **Setup:** synthetic corpus from `scripts/lib/corpus.sh`, single docker-compose stack (app + LocalStack + Redis), rate limiting off, Linux, Docker Engine 29.10.
+- **Client:** stdlib Python, keep-alive. Every response was value-checked (each rule sets its own `fired_<key>` marker): **0 errors, 0 wrong results** in every run.
+
+| Measure | 2026-05-10 (one shared KieBase) | 2026-11-18 (per-rule-ID) |
+|---|---|---|
+| Paced 50 RPS, 120 s | P99 9 ms (JMeter) | p50 2.7 ms, p95 9.3 ms, **p99 11.0 ms** (Python client) |
+| Closed loop, 20 workers, 60 s | — | **5,744 RPS**, p50 3.1 ms, p99 9.0 ms |
+| Single-rule refresh (one rule changed in S3, then refreshed) | ~510 ms median, max 984 ms; full recompile under a write lock; ~1% of requests saw a spike | **51 ms median, 158 ms max** wall time incl. the S3 read; only that rule recompiles |
+| Request latency *during* single-rule refreshes (every 5 s at 50 RPS) | P99 spikes in each refresh window | p50 1.9 ms, **p99 4.6 ms**, max 39 ms — no lock, no spike |
+| Heap after GC, 100 single-rule refreshes | drift 1 MB (15-min soak) | 106 → 95 MB (no growth) |
+| App restart → readiness 200, 1,000 rules in S3 | — | **14 s** (JVM start + startup load via the Redis DRL cache) |
+| Admin full refresh, first load of 1,000 rules | first compile ~46–50 s | 60 s |
+| Admin full refresh, nothing changed | full recompile | 49 s, **0 recompiles** (digest skip) |
+
+**What the full-refresh numbers mean.** Nearly all of the 49–60 s is reading 1,000 objects **one at a time** from S3 (LocalStack), not compiling:
+- An admin refresh clears the Redis DRL cache first, so every rule is read again from S3.
+- The startup load reads through Redis, which is why a restart is ready in 14 s.
+- Execution is never blocked meanwhile. Other refreshes wait for the refresh lock.
+- Follow-up (not done): read S3 objects in parallel, or compare by `ETag` in the listing and fetch only changed objects.
+
+**Isolation also removed work.** Before, every request evaluated the conditions of all 1,000 rules; now it evaluates one file's. The 2026-11-18 spike (ADR-025) measured in-JVM execution p50 99 µs → 14 µs for this reason. End-to-end HTTP latency is dominated by the network and JSON layers, so it changes little.
 
 ---
 

@@ -367,17 +367,17 @@ Record the results (numbers) in Part B §B7 and in the PR description.
 ## A11. Out of scope — backlog (logged so nothing is lost)
 Found during the 2026-11-17 review and E2E. To be planned after the merge:
 
-- **Design:** `rule_id` doesn't select a rule — every loaded rule fires on every request (stacking, output-key collisions, cross-rule NPE on `items` without `price`).
+- **Design:** `rule_id` doesn't select a rule — every loaded rule fires on every request (stacking, output-key collisions, cross-rule NPE on `items` without `price`). ✅ closed 2026-11-18 (engine-isolation plan)
 - **Security:** B1 — the DRL sandbox is bypassable (fully-qualified names, string concatenation + reflection). `RedisSecurityValidator` accepts `rediss://:@host`. The S3 endpoint allowlist only warns. Admin auth fails closed only for `prod`/`docker`.
 - **Rule-loading robustness:**
-  - A partial or empty S3 read silently drops rules from the engine.
-  - One bad DRL means 0 rules at startup.
-  - An invalid `RULE_SOURCE` falls back to the demo rules.
-  - A KieModule leaks if `updateToVersion` fails.
+  - A partial or empty S3 read silently drops rules from the engine. ✅ closed 2026-11-18 (engine-isolation plan)
+  - One bad DRL means 0 rules at startup. ✅ closed 2026-11-18 (engine-isolation plan)
+  - An invalid `RULE_SOURCE` falls back to the demo rules. ✅ closed 2026-11-18 (engine-isolation plan)
+  - A KieModule leaks if `updateToVersion` fails. ✅ closed 2026-11-18 (engine-isolation plan) — no KieModule / `updateToVersion` any more (ADR-025)
 - **Execution:**
-  - An infinite loop inside one consequence leaks a worker thread forever.
+  - An infinite loop inside one consequence leaks a worker thread forever. ⚠️ partially closed 2026-11-18 (engine-isolation plan): now visible via the `drools.rule.execution.stuck` gauge and interruptible work stops; a non-yielding loop still holds its thread until restart (needs process isolation)
   - Timeouts and 503s are missing from the execution metrics.
-  - Hitting the firing cap is silent.
+  - Hitting the firing cap is silent. ✅ closed 2026-11-18 (engine-isolation plan) — 422 `RULE_LIMIT_EXCEEDED`
 - **Resilience:**
   - The S3 circuit breaker doesn't count `RuleStorageException`.
   - S3 writes and listings aren't wrapped by the breaker.
@@ -385,16 +385,16 @@ Found during the 2026-11-17 review and E2E. To be planned after the merge:
 - **API status codes:**
   - 405 / 415 / 406 / invalid path variable → 500.
   - Unexpected errors → 400.
-  - `/admin/health` is always 200.
-  - Bulk refresh is always 200.
-  - Single-rule refresh 404 has an empty body and leaves the rule loaded.
+  - `/admin/health` is always 200. ✅ closed 2026-11-18 (engine-isolation plan)
+  - Bulk refresh is always 200. ✅ closed 2026-11-18 (engine-isolation plan)
+  - Single-rule refresh 404 has an empty body and leaves the rule loaded. ✅ closed 2026-11-18 (engine-isolation plan)
   - F-032 trim.
 - **Config:**
-  - Profile literals shadow most env vars.
+  - Profile literals shadow most env vars. ⚠️ partially closed 2026-11-18 (engine-isolation plan): `RULE_SOURCE` and `AUTO_REFRESH_ENABLED` are now honoured; the other profile literals (timeouts, breakers, thread pools, connection pools) still shadow their env vars
   - `RULE_EXECUTION_TIMEOUT_SECONDS` is dead.
-  - Auto-refresh isn't implemented.
+  - Auto-refresh isn't implemented. ✅ closed 2026-11-18 (engine-isolation plan) — scheduled reconcile
   - `burst-size` is unused.
-- **Pub/sub:** engine failures are ignored; coalescing can drop events; there's no catch-up; `publishDelete` is unused.
+- **Pub/sub:** engine failures are ignored; coalescing can drop events; there's no catch-up; `publishDelete` is unused. ✅ closed 2026-11-18 (engine-isolation plan) — all four (subscriber acts on outcomes, coalescing removed, scheduled reconcile, `RULE_DELETED` on single-refresh `removed`)
 - **Logging:**
   - logback rolling-policy misconfiguration and duplicate output in prod/docker.
   - `LogSanitizer` NPE on null values.

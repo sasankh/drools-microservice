@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Architects, senior developers, future contributors trying to understand "why was this done this way?" |
 | **Purpose** | Capture the load-bearing design decisions and their rationale, so future changes don't re-litigate the same choices unaware |
-| **Last updated** | 2026-08-20 (re-review hardening — added ADR-017…023: admin fail-closed, rate-limiter IP-keying, exec timeout/load-shed, refreshLock split, Redis prod TLS + Jackson-typing removal, delegate AtomicReference, CI + verify-bound quality gates; ADR-006 and ADR-010 updated in place) |
+| **Last updated** | 2026-11-18 (engine isolation — added ADR-025 per-rule-ID KieBase; addenda to ADR-003, ADR-016, ADR-019, ADR-020). Earlier: 2026-11-17 ADR-024; 2026-08-20 ADR-017…023 |
 | **Related docs** | All — ADRs reference specific implementation files |
 
 ---
@@ -23,7 +23,7 @@ Format used here: each ADR has Status, Context, Decision, Alternatives Considere
 |---:|---|---|
 | [001](#adr-001-traditional-drl-syntax-only-not-rule-units--oopath) | Traditional DRL syntax only (not rule units / OOPath) | Accepted |
 | [002](#adr-002-map-based-facts-not-typed-pojos) | Map-based facts (not typed POJOs) | Accepted |
-| [003](#adr-003-kiecontainer-atomic-swap-with-disposal) | KieContainer atomic-swap with explicit disposal | Accepted (2026-02-19 fix) |
+| [003](#adr-003-kiecontainer-atomic-swap-with-disposal) | KieContainer atomic-swap with explicit disposal | Superseded by ADR-025 (2026-11-18) |
 | [004](#adr-004-locallrucache-uses-write-lock-on-get) | LocalLRUCache uses WRITE lock on `get()` | Superseded by ADR-016 (2026-05-20) |
 | [005](#adr-005-redis-bean-exists-but-is-dormant-by-default) | Redis bean exists but is dormant by default | Superseded by ADR-016 (2026-05-20) |
 | [006](#adr-006-adminauthfilter-instead-of-spring-security) | AdminAuthFilter (lightweight) instead of Spring Security | Accepted (fail-closed + constant-time addendum 2026-08-20) |
@@ -35,11 +35,11 @@ Format used here: each ADR has Status, Context, Decision, Alternatives Considere
 | [012](#adr-012-drools-8440-not-latest-8x-or-9x) | Drools 8.44.0.Final (not latest 8.x or 9.x) | Superseded by ADR-014 |
 | [013](#adr-013-java-17--25--spring-boot-modernization-2026-05-09) | Java 17 → 25 + Spring Boot modernization | Accepted (2026-05-09) |
 | [014](#adr-014-drools-8--10-migration-2026-05-09) | Drools 8 → 10 migration | Accepted (2026-05-09) |
-| [016](#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20) | Redis decorator + pub/sub for multi-instance DRL cache | Accepted (2026-05-20) |
+| [016](#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20) | Redis decorator + pub/sub for multi-instance DRL cache | Accepted (2026-05-20; outcomes + reconcile addendum 2026-11-18) |
 | [017](#adr-017-admin-auth-fail-closed-on-proddocker-profiles-2026-08-20) | Admin auth fail-closed on prod/docker profiles | Accepted (2026-08-20) |
 | [018](#adr-018-rate-limiter-keys-on-ip-only-optional-trust-proxy-2026-08-20) | Rate limiter keys on IP only; optional trust-proxy | Accepted (2026-08-20) |
 | [019](#adr-019-rule-execution-timeout-halt--thread-pool-load-shed-503-2026-08-20) | Rule-execution timeout halt + thread-pool load-shed 503 | Accepted (2026-08-20; firing-cap 422 + interrupt addendum 2026-11-18) |
-| [020](#adr-020-refreshlock-separated-from-the-rule-read-write-lock-2026-08-20) | refreshLock separated from the rule read-write lock | Accepted (2026-08-20) |
+| [020](#adr-020-refreshlock-separated-from-the-rule-read-write-lock-2026-08-20) | refreshLock separated from the rule read-write lock | Accepted (2026-08-20; `rulesLock` removed 2026-11-18) |
 | [021](#adr-021-redis-prod-tlsauth-enforcement--removal-of-jackson-default-typing-2026-08-20) | Redis prod TLS/auth enforcement + removal of Jackson default typing | Accepted (2026-08-20) |
 | [022](#adr-022-storage-delegate-held-in-an-atomicreference-2026-08-20) | Storage delegate held in an `AtomicReference` | Accepted (2026-08-20) |
 | [023](#adr-023-ci-workflow--verify-bound-quality-gates-2026-08-20) | CI workflow + verify-bound quality gates | Accepted (2026-08-20) |
@@ -223,6 +223,13 @@ Headline numbers (full report: [`scripts/load-test-results/2026-05-10T073852Z/su
 **KieRepository cleanup verified**: 1 MB heap drift over 98 refresh operations confirms `kieRepository.removeKieModule(oldReleaseId)` (the Phase 0 patch) is doing its job. Without it, each refresh would leak one `ProjectClassLoader` + every compiled rule class — hundreds of MB across the soak.
 
 **Architectural note** (not a bug): single-rule refresh holds the write lock through a full ~510 ms warm-JIT compile of the entire rule set; a per-rule incremental KieBase rebuild is technically possible but currently not implemented. See the load-test summary for production-planning mitigations.
+
+### Addendum (2026-11-18): superseded by ADR-025
+
+- There is no shared `KieContainer` any more. Each rule ID compiles to its own KieBase (`KnowledgeBuilder`), held in an immutable `CompiledRuleset` in `CompiledRulesetRegistry`.
+- `updateToVersion`, the synthetic `ReleaseId`s and `KieRepository.removeKieModule` are gone. A refresh swaps one rule ID's handle; the JVM frees the old one when no request uses it.
+- Execution takes no lock. A single-rule refresh recompiles only that rule ID, so the "~510 ms full recompile" note above no longer applies.
+- See [ADR-025](#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18).
 
 ---
 
@@ -800,6 +807,14 @@ Phase 9.4 of the load-test harness (Redis kill mid-load) surfaced three gaps in 
 
 Phase 9.4 results (`--quick`): graceful-degradation acceptance PASS (0% JMeter errors across kill+restart). CB-engagement timing and recovery-convergence race remain as **deferred follow-ups** documented in [`39-load-test-findings.md`](39-load-test-findings.md) Phase 9.4 addendum + [`.ai-workspace/project-plans/redis-cb-hardening-plan.md`](../.ai-workspace/project-plans/redis-cb-hardening-plan.md).
 
+### Addendum (2026-11-18): outcomes, no coalescing, reconcile
+
+- **The subscriber acts on outcomes.** It calls `RuleRefreshService`, which reads storage and applies under one lock. A failed refresh is logged at ERROR and counted in `drools.refresh.failed{layer=subscriber}` (`reason=process_error`, or `reason=compile` per failed rule ID in a bulk event). A `RULE_REFRESHED` for a rule that is gone from storage removes it. `RULE_DELETED` removes the rule (no longer log-only).
+- **Bulk coalescing removed.** The 500 ms window could drop a real change. Unchanged rules are skipped by SHA-256 digest, so a repeated bulk event costs only a storage read.
+- **Scheduled reconcile repairs missed events.** `drools.refresh.auto-enabled` (env `AUTO_REFRESH_ENABLED`; default false, true on `prod`) runs every `interval-minutes` (default 5). It reads the source directly, bypassing Redis, applies only differences, counts them in `drools.reconcile.changed`, and never publishes. This replaces "the 15-min TTL is the consistency ceiling" above.
+- **Listener overflow is dropped and counted.** The single-thread listener queue (50) no longer uses caller-runs. An overflowing event is logged and counted in `drools.refresh.failed{layer=listener,reason=queue_full}`; reconcile repairs it.
+- **Admin refreshes always publish.** A bulk refresh that read storage completely publishes `RULE_REFRESHED_BULK`, even if nothing changed locally. A single refresh publishes `RULE_REFRESHED` (also when `unchanged`) or `RULE_DELETED` (when `removed`). A failed or refused refresh publishes nothing.
+
 ---
 
 ## ADR-017: Admin auth fail-closed on prod/docker profiles (2026-08-20)
@@ -930,8 +945,17 @@ Introduce a dedicated `ReentrantLock refreshLock` in `DroolsEngineService`, sepa
 - **Positive**: the single-thread listener executor decouples sibling-refresh compilation from the Redis transport.
 - **Negative**: two lock primitives to keep straight — `refreshLock` (serialize refreshes) vs `rulesLock` (guard the swap). Documented in the engine's Javadoc.
 
+### Addendum (2026-11-18): `rulesLock` removed
+
+- With per-rule-ID compiled handles (ADR-025), execution takes an immutable `CompiledRuleset` reference and holds **no lock**. The `rulesLock` read-write lock is gone.
+  - It used to be held for each whole execution (up to the 30 s timeout), so a refresh's write lock could stall behind slow requests.
+- Serialization now has two layers:
+  - `RuleRefreshService` holds one lock across the storage read and the apply, so the newest read wins.
+  - `DroolsEngineService.refreshLock` serializes the engine mutations.
+- `ruleRefreshListenerExecutor` is unchanged, except that a full queue now drops and counts the event instead of running it on the Redis dispatch thread.
+
 ### References
-- [`DroolsEngineService.java`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java) — `refreshLock`, `rulesLock`, `ruleRefreshListenerExecutor`
+- [`DroolsEngineService.java`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java) — `refreshLock` (the `rulesLock` was removed 2026-11-18), `ruleRefreshListenerExecutor`
 - [ADR-003](#adr-003-kiecontainer-atomic-swap-with-disposal)
 
 ---

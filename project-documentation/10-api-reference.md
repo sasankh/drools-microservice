@@ -4,7 +4,7 @@
 |---|---|
 | **Audience** | Partners, developers, AI agents |
 | **Purpose** | Complete prose reference for every HTTP endpoint, with request/response shapes and live curl examples |
-| **Last verified against** | Controller files in [`src/main/java/com/company/drools/api/controller/`](../src/main/java/com/company/drools/api/controller/), [`api-reference/openapi.yml`](api-reference/openapi.yml) on 2026-08-20 |
+| **Last verified against** | Controller files in [`src/main/java/com/company/drools/api/controller/`](../src/main/java/com/company/drools/api/controller/), [`api-reference/openapi.yml`](api-reference/openapi.yml) on 2026-11-18 |
 | **Related docs** | [11-integration-guide.md](11-integration-guide.md), [12-error-code-catalog.md](12-error-code-catalog.md), [13-rate-limiting-and-throttling.md](13-rate-limiting-and-throttling.md), [15-admin-authentication.md](15-admin-authentication.md), [api-reference/openapi.yml](api-reference/openapi.yml) |
 
 ---
@@ -137,10 +137,11 @@ Content-Type: application/json
 | Status | Code | Cause |
 |---:|---|---|
 | 400 | `INVALID_INPUT` | `rule_id` or `data` failed validation |
-| 400 | `RULE_EXECUTION_ERROR` | Rule threw at runtime |
-| 404 | `RULE_NOT_FOUND` | `rule_id` not in cache/storage |
-| 408 | `TIMEOUT_ERROR` | Rule fired longer than `RULE_EXECUTION_TIMEOUT_SECONDS` (30s default) |
+| 400 | `RULE_EXECUTION_ERROR` | Rule threw at runtime, or the rule ID is known but has no compiled version (`ERROR`: its first compile failed) |
+| 404 | `RULE_NOT_FOUND` | `rule_id` is not loaded on this instance |
+| 408 | `TIMEOUT_ERROR` | Execution took longer than `DROOLS_RULE_EXECUTION_TIMEOUT` (30s default; 25s on `docker`) |
 | 413 | `REQUEST_TOO_LARGE` | Body exceeded `DROOLS_VALIDATION_REQUEST_MAX_SIZE_BYTES` (1 MiB default) |
+| 422 | `RULE_LIMIT_EXCEEDED` | The rules fired more than `DROOLS_MAX_RULE_FIRINGS` (10,000 default) times for this request, usually a rule loop. No result is returned (`result: null`). |
 | 429 | `RATE_LIMIT_EXCEEDED` | Per-source-IP rate limit hit |
 | 503 | `SERVICE_UNAVAILABLE` | Circuit breaker open (S3 or Redis), OR rule-execution thread pool saturated |
 
@@ -186,12 +187,17 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/health
 ```json
 {
   "status": "UP",
-  "timestamp": "2026-05-10T08:57:10.549046921Z",
+  "timestamp": "2026-11-18T08:57:10.549046921Z",
   "components": {
     "drools": {
       "status": "UP",
       "details": {
+        "phase": "LOADED",
         "loaded_rules": 17,
+        "rules_with_errors": 0,
+        "last_refresh_at": "2026-11-18T08:56:40.112Z",
+        "last_refresh_source": "startup",
+        "last_refresh_result": "ok",
         "active_rules": 17,
         "cache_hit_rate": 0.0
       }
@@ -199,7 +205,7 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/health
     "storage": {
       "status": "UP",
       "details": {
-        "type": "S3RuleStorage",
+        "type": "RedisCachedRuleStorage",
         "rule_source": "s3",
         "s3_bucket": "local-rules",
         "s3_accessible": true,
@@ -220,7 +226,7 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/health
     },
     "redis": {
       "status": "UP",
-      "details": { "connected": true }
+      "details": { "connected": true, "cache_decorator": "RedisCachedRuleStorage" }
     },
     "circuit-breakers": {
       "status": "UP",
@@ -241,8 +247,19 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/health
 }
 ```
 
-**Status semantics**:
-- Overall `status` is `"UP"` if `drools` and `storage` are UP. `cache`, `redis`, `circuit-breakers` going DOWN does not flip the overall status (they are protection / acceleration mechanisms).
+**Status semantics** (2026-11-18):
+
+| Overall `status` | HTTP | When |
+|---|---:|---|
+| `UP` | 200 | Rules serve and storage is reachable |
+| `DEGRADED` | 200 | Rules serve, but storage is unreachable. Compiled rules keep serving; refreshes fail until storage is back. |
+| `DOWN` | **503** | This instance can't serve rules: the startup load hasn't succeeded yet (still loading, or storage was unreadable), or 0 rules are compiled (unless `DROOLS_REFRESH_ALLOW_EMPTY=true`) |
+
+- `drools` uses the same logic as the actuator `rules` readiness indicator ([`RulesHealthIndicator`](../src/main/java/com/company/drools/config/RulesHealthIndicator.java)). When DOWN, its details include `reason` and `error`.
+- `drools.details.phase`: `NOT_LOADED` (startup load not finished), `LOADED` (a full load has succeeded), `FAILED` (the startup load failed and no full load has succeeded since).
+- Rule IDs that failed to compile do **not** make the instance DOWN. They are counted in `rules_with_errors` and listed (first 20) in `error_rule_ids`. `last_error` holds the last refresh error, if any.
+- `cache`, `redis` and `circuit-breakers` going DOWN never change the overall status.
+- The Docker `HEALTHCHECK` and the compose healthcheck call this endpoint, so a container with no rules is reported unhealthy.
 - `cache.statistics.hit_rate` is a string (formatted percentage); `drools.cache_hit_rate` is a float.
 
 **Source**: [`AdminController.java:113-184`](../src/main/java/com/company/drools/api/controller/AdminController.java#L113-L184).
@@ -302,10 +319,10 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/rules | jq
 |---|---|
 | `status` | Enum: `ACTIVE`, `INACTIVE`, `ERROR`. |
 | `loaded_at` | ISO-8601 timestamp when this rule was last compiled and installed (its own KieBase). |
-| `last_modified` | ISO-8601 timestamp from the storage layer (S3 LastModified). **`null` if the rule has never been refetched** — it's set by storage operations, not on initial load. |
+| `last_modified` | ISO-8601 timestamp of the DRL in storage (S3 `LastModified` or file mtime), recorded when the rule compiles. `null` when the storage doesn't provide one (the in-memory `local` source). |
 | `execution_count` | Increments per `/execute-rule` call. Starts at 0 for unused rules. |
 | `avg_execution_time_ms` | Tracked in [`RuleMetadata`](../src/main/java/com/company/drools/core/model/RuleMetadata.java) using **incremental averaging** (Welford's method) to avoid numeric overflow. `0.0` for unused rules. |
-| `version` | Source-defined version. Currently always `"1.0"` — versioning is roadmap. |
+| `version` | Currently always `"1.0"`. A rule's content identity is its SHA-256 digest, shown (first 12 hex chars) in `AUDIT` log lines. |
 
 > The `cached` boolean was removed on 2026-05-20 when the dead `LocalLRUCache` layer was deleted. Cache state now lives in Redis (when `REDIS_ENABLED=true`) and is observable via `drools.cache.hit` / `drools.cache.miss` counters in `/admin/health` and `/actuator/metrics`. See [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20).
 
@@ -315,50 +332,99 @@ curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/rules | jq
 
 ### `POST /admin/refresh-rules` — Reload all rules
 
-Pipeline: (1) `RedisCachedRuleStorage.refreshCache()` clears Redis keys matching the prefix and re-populates them from base storage (S3/file/memory) via write-through — no-op when `REDIS_ENABLED=false`; (2) rule IDs no longer in storage are removed, and each remaining rule ID is compiled into its own `KieBase` ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)); (3) each compiled rule ID's handle is swapped atomically in the `CompiledRulesetRegistry` — an ID that fails to compile keeps its previous version (or is recorded as `ERROR`), and other IDs are unaffected; (4) when `REDIS_PUBSUB_ENABLED=true`, `RuleRefreshPublisher.publishBulkRefresh()` emits `{event_type: RULE_REFRESHED_BULK, source_instance_id}` to channel `drools:rule:events` so other instances reload + swap. In-flight `/execute-rule` requests finish on the handle they took. See [04-architecture.md](04-architecture.md), [ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18), [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20), and [39-load-test-findings.md](39-load-test-findings.md) for measured behavior at 1000 rules.
+Pipeline ([`RuleRefreshService`](../src/main/java/com/company/drools/core/engine/RuleRefreshService.java)). The storage read and the apply run under one lock, so the newest read is always the last one installed.
+
+1. When `REDIS_ENABLED=true`, invalidate the Redis DRL cache.
+2. Read the **complete** rule set from storage. A failed or incomplete read (an S3 object or listing error, a missing rules directory, an open circuit breaker) changes nothing → **500 `failed`**.
+3. An empty read while rules are loaded is refused → **409 `rejected_empty`** (set `DROOLS_REFRESH_ALLOW_EMPTY=true` to allow it).
+4. Otherwise, rule IDs no longer in storage are removed, and each other rule ID compiles into its own `KieBase` ([ADR-025](36-architecture-decision-records.md#adr-025-per-rule-id-compiled-kiebase-isolation-2026-11-18)). A rule whose DRL is byte-identical to the serving version (same SHA-256) is not recompiled. A rule ID that fails to compile keeps its previous version (or is recorded as `ERROR`); other IDs are unaffected.
+5. When `REDIS_PUBSUB_ENABLED=true`, publish `RULE_REFRESHED_BULK` on `drools:rule:events` so sibling instances refresh too. This happens after every complete read, even if nothing changed here. Nothing is published after a 500 or 409.
+
+In-flight `/execute-rule` requests finish on the handle they took. See [04-architecture.md](04-architecture.md), [ADR-016](36-architecture-decision-records.md#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20), and [39-load-test-findings.md](39-load-test-findings.md).
 
 ```bash
 curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8080/admin/refresh-rules | jq
 ```
 
-**Response (success)**:
+| HTTP | `status` | Meaning |
+|---:|---|---|
+| 200 | `completed` | Every rule ID compiled (or was unchanged) |
+| 200 | `completed_with_errors` | Some rule IDs failed to compile; they are listed in `errors` and keep their previous version, if any |
+| 500 | `failed` | Storage couldn't be read completely; nothing changed |
+| 409 | `rejected_empty` | Storage returned 0 rules while rules are loaded; nothing changed |
+
+| Field | Meaning |
+|---|---|
+| `rules_loaded` | Rule IDs serving from this snapshot: newly compiled **plus** unchanged |
+| `rules_unchanged` | Of `rules_loaded`, how many had identical DRL and were not recompiled |
+| `rules_removed` | Rule IDs no longer in storage, removed from the engine |
+| `rules_failed` | Rule IDs that failed to compile |
+| `errors` | One entry per failed rule ID; for 500/409, a single `SYSTEM` entry with the reason |
+
+**Response (200, nothing changed in storage)**:
 ```json
 {
   "status": "completed",
   "rules_loaded": 17,
   "rules_failed": 0,
-  "duration_ms": 1234,
+  "rules_unchanged": 17,
+  "rules_removed": 0,
+  "duration_ms": 41,
   "errors": [],
-  "cache_updated_at": "2026-05-10T08:57:10Z"
+  "cache_updated_at": "2026-11-18T08:57:10Z",
+  "timestamp": "2026-11-18T08:57:10Z"
 }
 ```
 
-**Response (partial failure — sandbox rejection)**:
+**Response (200, one rule edited, one deleted and one rejected in storage)**:
 ```json
 {
   "status": "completed_with_errors",
-  "rules_loaded": 16,
+  "rules_loaded": 15,
   "rules_failed": 1,
+  "rules_unchanged": 14,
+  "rules_removed": 1,
+  "duration_ms": 63,
   "errors": [
     {
       "rule_id": "dangerous.rule",
-      "error": "DRL content contains blocked import: java.io.File"
+      "error": "DRL security violations: [Blocked import: 'java.io.File']"
     }
-  ]
+  ],
+  "cache_updated_at": "2026-11-18T08:57:10Z",
+  "timestamp": "2026-11-18T08:57:10Z"
 }
 ```
 
-**Response (full failure)**: HTTP 500 with `INTERNAL_ERROR` envelope.
+**Response (500, storage unreadable)**:
+```json
+{
+  "status": "failed",
+  "rules_loaded": 0,
+  "rules_failed": 0,
+  "rules_unchanged": 0,
+  "rules_removed": 0,
+  "duration_ms": 2003,
+  "errors": [
+    { "rule_id": "SYSTEM", "error": "Storage read failed; nothing changed: ..." }
+  ],
+  "cache_updated_at": "...",
+  "timestamp": "..."
+}
+```
+In a 500 or 409 response the counts are `0`: they describe this refresh, which changed nothing. Every previously loaded rule keeps serving.
 
-> When this returns, the new rule set is live for subsequent requests. In-flight requests use whichever `KieBase` their rule ID had when the request took it; execution takes no lock, so a refresh never blocks them.
+**Response (409, empty storage)**: same shape with `"status": "rejected_empty"` and the error `Storage returned 0 rules while 17 are loaded; refusing to remove them all (set drools.refresh.allow-empty=true if this is intended)`.
 
-**Source**: [`AdminController.java:415-461`](../src/main/java/com/company/drools/api/controller/AdminController.java#L415-L461).
+> When this returns 200, the new rule set is live for subsequent requests. Execution takes no lock, so a refresh never blocks requests.
+
+**Source**: [`AdminController.refreshAllRules`](../src/main/java/com/company/drools/api/controller/AdminController.java).
 
 ---
 
 ### `POST /admin/refresh-rules/{ruleId}` — Reload one rule
 
-Targeted refresh for a single rule.
+Re-reads one rule from storage (invalidating its Redis entry first) and recompiles only that rule ID.
 
 ```bash
 curl -X POST \
@@ -368,36 +434,59 @@ curl -X POST \
 
 **Path parameter**: `ruleId` — must match `^[a-zA-Z0-9._-]+$`, max 255 chars.
 
+| HTTP | `status` | Meaning | Published to siblings |
+|---:|---|---|---|
+| 200 | `success` | A new version compiled and is serving | `RULE_REFRESHED` |
+| 200 | `unchanged` | Same DRL as the serving version; not recompiled | `RULE_REFRESHED` (a sibling may still be stale) |
+| 200 | `removed` | Gone from storage but was loaded: removed from the engine | `RULE_DELETED` |
+| 404 | `not_found` | Not in storage and not loaded | — |
+| 500 | `error` | Compile failed (the previous version, if any, keeps serving), or storage couldn't be read | — |
+
 **Response (200 OK)**:
 ```json
 {
   "rule_id": "pricing.discount.simple",
   "status": "success",
-  "previous_version": "1.0",
-  "current_version": "1.0",
-  "compilation_time_ms": 87
+  "previous_version": "2026-11-18T08:40:02Z",
+  "current_version": "2026-11-18T08:55:31Z",
+  "compilation_time_ms": 12,
+  "error": null,
+  "timestamp": "2026-11-18T08:55:33Z"
+}
+```
+`previous_version` / `current_version` are the storage `last_modified` timestamps before and after (see `GET /admin/rules`); `null` when the storage has none. `compilation_time_ms` is the whole refresh time, including the storage read.
+
+**Response (200, deleted in storage)**:
+```json
+{
+  "rule_id": "pricing.discount.vip",
+  "status": "removed",
+  "error": "Rule no longer exists in storage; removed from the engine",
+  ...
 }
 ```
 
-**Response (404 Not Found)** if the rule isn't in storage:
+**Response (404 Not Found)**:
 ```json
 {
   "rule_id": "doesnt.exist",
   "status": "not_found",
-  "error": "Rule not found in storage"
+  "error": "Rule not found in storage",
+  ...
 }
 ```
 
-**Response (500)** on compilation/sandbox failure:
+**Response (500)** on a compile or policy-check failure:
 ```json
 {
   "rule_id": "broken.rule",
   "status": "error",
-  "error": "DRL content contains blocked class reference: ProcessBuilder"
+  "error": "Failed to compile rule (previous version, if any, keeps serving): DRL security violations: [Blocked class reference: 'ProcessBuilder']",
+  ...
 }
 ```
 
-**Source**: [`AdminController.java:464-527`](../src/main/java/com/company/drools/api/controller/AdminController.java#L464-L527).
+**Source**: [`AdminController.refreshRule`](../src/main/java/com/company/drools/api/controller/AdminController.java).
 
 ---
 
@@ -543,7 +632,9 @@ These are managed by Spring Boot, not by us. Documented here for completeness.
 
 | Endpoint | Purpose | Notes |
 |---|---|---|
-| `GET /actuator/health` | Spring's view of overall health | Less detail than `/admin/health`. Used by load balancers as a simple liveness probe. |
+| `GET /actuator/health` | Spring's view of overall health | Less detail than `/admin/health`. Includes the `rules` indicator. |
+| `GET /actuator/health/readiness` | Readiness probe: `readinessState` + `rules` | 200 `UP` once the startup load has succeeded and rules are compiled. **503** while starting, after a failed startup load, or with 0 rules. Use it to take instances out of rotation. |
+| `GET /actuator/health/liveness` | Liveness probe: `livenessState` only | 200 while the process is alive. Rule state does **not** affect it, so an instance with no rules isn't restarted in a loop. |
 | `GET /actuator/info` | App identity (matches Spring's metadata) | Plain. |
 | `GET /actuator/metrics` | List metric names | Browse with `/actuator/metrics/{name}`. |
 | `GET /actuator/metrics/{name}` | Metric values | E.g., `/actuator/metrics/jvm.memory.used`. |
@@ -561,7 +652,18 @@ management:
       exposure:
         include: health,metrics,info
       base-path: /actuator
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,rules
+        liveness:
+          include: livenessState
 ```
+
+Details are shown only to authorized callers (`show-details: when-authorized`); anonymous callers see just `status`.
 
 ---
 

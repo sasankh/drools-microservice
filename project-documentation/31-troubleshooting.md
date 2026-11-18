@@ -100,6 +100,24 @@ free -h
 export JAVA_OPTS="-Xms1g -Xmx2g"
 ```
 
+##### 6. Unknown `RULE_SOURCE`
+`IllegalStateException: Unknown drools.rule-source '…' (RULE_SOURCE). Expected one of: local, file, s3`. Since 2026-11-18 an unknown value fails startup instead of silently serving the 2 in-memory demo rules. Fix the value.
+
+##### 7. `Startup rule load failed (drools.startup.fail-on-load-error=true)`
+The startup load couldn't read storage (or found it empty), and `DROOLS_STARTUP_FAIL_ON_LOAD_ERROR=true` makes that fatal. Fix storage access, or leave the flag `false` to start not-ready and recover on the next refresh or reconcile.
+
+### Application Starts but Isn't Ready
+
+#### Symptom
+`/actuator/health/readiness` and `/admin/health` return **503**; `/admin/health` shows `status: "DOWN"` and `components.drools.details.reason`.
+
+#### Cause and fix
+- `phase: NOT_LOADED` — the startup load is still running. Wait.
+- `phase: FAILED` — storage couldn't be read at startup (log: `Startup load failed; instance is NOT ready`). Fix storage, then `POST /admin/refresh-rules`, or wait for the reconcile if `AUTO_REFRESH_ENABLED=true`.
+- `phase: LOADED`, `loaded_rules: 0` — nothing compiled. Check `error_rule_ids` and the logs for `failed to compile`.
+
+A single bad rule file never makes the instance DOWN: that ID is listed in `error_rule_ids`, and the other rules serve. See [30-runbooks-and-monitoring.md](30-runbooks-and-monitoring.md#instance-not-ready).
+
 #### Logs to Check
 ```bash
 # Application startup logs
@@ -130,6 +148,8 @@ grep -i "error\|exception\|failed" /var/log/drools-rule-engine/application.log
 }
 ```
 
+`RULE_NOT_FOUND` means the rule ID is not loaded **on this instance**. Execution never reads storage, so a file that exists in S3 but hasn't been refreshed is still "not found". A rule whose first compile failed is known but has no compiled version, and returns 400 `RULE_EXECUTION_ERROR` ("Rule is not active") instead.
+
 #### Diagnosis Steps
 ```bash
 # 1. Check if rule exists in storage
@@ -157,6 +177,24 @@ curl -X POST -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/refresh-rul
 # 3. Check rule file syntax
 # Ensure .drl file has proper Drools syntax
 ```
+
+### Rule Limit Exceeded (422)
+
+#### Symptom
+```json
+{
+  "rule_id": "pricing.discount.loop",
+  "result": null,
+  "error": { "code": "RULE_LIMIT_EXCEEDED", "message": "The rule fired more than 10000 times for this request (likely a rule loop); no result returned" }
+}
+```
+
+#### Cause and fix
+The rules fired more than `DROOLS_MAX_RULE_FIRINGS` (10,000 default) times for one request. Usually a consequence calls `update`/`modify` on the fact it matched without `no-loop`. Add `no-loop true` or tighten the condition, upload, and refresh that rule ID. See [12-error-code-catalog.md](12-error-code-catalog.md#rule_limit_exceeded-422).
+
+### Results Changed After Upgrading (No More Stacking)
+
+Since 2026-11-18 a request runs **only** the rules in its own `rule_id`'s DRL file (ADR-025). Before, every loaded rule could fire, so discounts stacked: VIP $100 returned 72; it now returns 80. If a client relied on the combined result, it must call each `rule_id` it needs.
 
 ### Rule Compilation Errors
 
@@ -350,6 +388,13 @@ aws s3api get-bucket-location --bucket your-bucket
 # Set correct region
 export AWS_REGION=us-west-2
 ```
+
+### Refresh Returns 500 `failed` or 409 `rejected_empty`
+
+- **500 `failed`**: storage couldn't be read completely (S3 listing or object error, open S3 breaker, missing rules directory). Nothing changed; every rule keeps serving. The reason is in `errors[0].error`.
+- **409 `rejected_empty`**: storage returned 0 rules while rules are loaded. Nothing changed. Check the bucket / directory and `RULE_SOURCE`. If emptying the engine is intended, set `DROOLS_REFRESH_ALLOW_EMPTY=true`.
+
+See [10-api-reference.md](10-api-reference.md#post-adminrefresh-rules--reload-all-rules).
 
 ### Redis Connection Issues
 
@@ -553,11 +598,11 @@ systemctl restart drools-rule-engine
 #### Common Problems
 ```bash
 # Missing variables
-echo $RULE_SOURCE          # Should show: s3, local, or memory
+echo $RULE_SOURCE          # Should show: local, file, or s3
 echo $RULE_BUCKET_NAME     # Should show your bucket name
 
 # Invalid values
-export RULE_SOURCE=invalid  # Should be s3|local|memory
+export RULE_SOURCE=invalid  # Should be local|file|s3; anything else fails startup
 export REDIS_DRL_RULES_TTL_MINUTES=invalid  # Should be positive integer (default: 15)
 ```
 
@@ -575,8 +620,8 @@ for var in "${required_vars[@]}"; do
 done
 
 # Validate RULE_SOURCE
-if [[ ! "$RULE_SOURCE" =~ ^(s3|local|memory)$ ]]; then
-  echo "ERROR: RULE_SOURCE must be 's3', 'local', or 'memory'"
+if [[ ! "$RULE_SOURCE" =~ ^(local|file|s3)$ ]]; then
+  echo "ERROR: RULE_SOURCE must be 'local', 'file', or 's3'"
   exit 1
 fi
 
@@ -623,9 +668,11 @@ curl -s -H "X-Admin-API-Key: <key>" http://localhost:8080/admin/health | jq '.co
 ```
 
 #### Health Status Meanings
-- **UP**: Component is healthy and operational
-- **DOWN**: Component has failed or is unavailable
-- **UNKNOWN**: Component status cannot be determined
+- **UP**: healthy (HTTP 200)
+- **DEGRADED** (overall only): rules serve, but storage is unreachable, so refreshes fail (HTTP 200)
+- **DOWN**: overall: the instance can't serve rules (HTTP **503**); per component: that component failed
+
+The orchestrator probes are `/actuator/health/readiness` (includes the `rules` indicator) and `/actuator/health/liveness` (process only), on port 8081.
 
 ### Log Analysis
 
@@ -691,6 +738,7 @@ curl http://localhost:8081/actuator/metrics/http.server.requests
 | `REQUEST_TOO_LARGE` | Payload exceeds limit | Large request body | Reduce request size or increase limit |
 | `RATE_LIMIT_EXCEEDED` | Too many requests | Client exceeded rate limit | Slow down requests or increase limit |
 | `TIMEOUT_ERROR` | Operation timed out | Slow rule execution or network | Optimize rules or increase timeout |
+| `RULE_LIMIT_EXCEEDED` | Too many rule firings (422) | A rule loop | Add `no-loop` / fix the condition |
 | `SERVICE_UNAVAILABLE` | Circuit breaker open | External service failures | Wait for service recovery |
 | `STORAGE_ERROR` | S3/storage issue | S3 connectivity problem | Check AWS credentials and connectivity |
 | `CACHE_ERROR` | Redis/cache issue | Redis connectivity problem | Check Redis status and connectivity |
@@ -704,10 +752,12 @@ curl http://localhost:8081/actuator/metrics/http.server.requests
 | 400 | Bad Request | Invalid input or rule error |
 | 404 | Not Found | Rule doesn't exist |
 | 408 | Request Timeout | Rule execution timeout |
+| 409 | Conflict | Admin bulk refresh refused an empty storage read (`rejected_empty`) |
+| 422 | Unprocessable Entity | `RULE_LIMIT_EXCEEDED` (rule loop) |
 | 413 | Payload Too Large | Request size exceeds limit |
 | 429 | Too Many Requests | Rate limit exceeded |
 | 500 | Internal Server Error | System error |
-| 503 | Service Unavailable | Circuit breaker open |
+| 503 | Service Unavailable | Rule-execution pool saturated; or `/admin/health` / readiness DOWN (no rules loaded) |
 
 ---
 
