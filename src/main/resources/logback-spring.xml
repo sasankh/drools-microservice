@@ -87,6 +87,9 @@
     <logger name="org.apache" level="WARN"/>
     <logger name="software.amazon.awssdk" level="WARN"/>
     <logger name="io.lettuce" level="WARN"/>
+    <!-- Rule-change audit trail (RuleRefreshService). INFO in every profile, including prod where
+         root is WARN; goes to the active profile's root appenders. Never contains DRL or keys. -->
+    <logger name="AUDIT" level="INFO"/>
     
     <!-- Profile-specific configurations -->
     <springProfile name="local,dev">

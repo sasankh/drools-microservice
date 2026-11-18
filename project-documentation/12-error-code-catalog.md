@@ -43,6 +43,7 @@ The exact field set depends on which layer emits the error:
 | 404 | `NOT_FOUND` | Path doesn't match any handler (404 fallback) |
 | 408 | `TIMEOUT_ERROR` | Operation exceeded its timeout |
 | 413 | `REQUEST_TOO_LARGE` | Request body exceeds size cap |
+| 422 | `RULE_LIMIT_EXCEEDED` | The rule fired more than `drools.execution.max-rule-firings` times (usually a rule loop) |
 | 429 | `RATE_LIMIT_EXCEEDED` | Per-client rate limit hit |
 | 500 | `INTERNAL_ERROR` | Anything not caught by a more specific handler |
 | 503 | `SERVICE_UNAVAILABLE` | Circuit breaker open (S3 or Redis), OR rule-execution thread pool saturated |
@@ -111,7 +112,7 @@ curl -X POST http://localhost:8080/execute-rule \
 - Rule's `then` block threw a `NullPointerException` because input data is missing a key the rule reads. Always null-check in DRL: `eval($data.get("amount") != null)`.
 - `ClassCastException` because the rule assumes a type that doesn't match the input. Use `((Number) $data.get("x")).doubleValue()` instead of `(Double) $data.get("x")`.
 - `ArithmeticException` (division by zero, etc.).
-- Rule modified data in a way that triggered an infinite loop and was capped — but this surfaces as `TIMEOUT_ERROR`, not `RULE_EXECUTION_ERROR`.
+- A rule that loops (re-triggers itself) surfaces as `RULE_LIMIT_EXCEEDED` (422) once it passes the firing cap, or as `TIMEOUT_ERROR` (408) if a single consequence never returns — not as `RULE_EXECUTION_ERROR`.
 
 **Fix**:
 1. Tail the server log for the actual stack trace:
@@ -252,7 +253,7 @@ curl -X POST http://localhost:8080/execute-rule \
 
 **Code path**: [`GlobalExceptionHandler.java:67-80`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java#L67-L80). Triggered by [`TimeoutException`](../src/main/java/com/company/drools/api/exception/TimeoutException.java) which carries the operation name and timeout value.
 
-In rule execution, the timeout is enforced via `CompletableFuture.get(timeoutSeconds, SECONDS)` in [`RuleExecutor`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java). On timeout, `future.cancel(true)` is called to interrupt the rule-firing thread. The `maxRuleFirings = 10000` cap also prevents infinite-loop rules from running forever even within the timeout window.
+In rule execution, the timeout is enforced with a `FutureTask` in [`RuleExecutor`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java). On timeout the session is halted (stops between rule firings) and the worker is interrupted (stops sleep/wait/blocking IO). A consequence that never yields (`while (true) {}`) ignores both and keeps its worker thread until restart; the request still gets 408 and the `drools.rule.execution.stuck` gauge counts the thread. Alert on that gauge. A loop of rule *firings* is stopped earlier by the firing cap (`RULE_LIMIT_EXCEEDED`, 422).
 
 **Common causes**:
 - Rule has expensive operations (large list iteration, heavy math).
@@ -268,6 +269,29 @@ In rule execution, the timeout is enforced via `CompletableFuture.get(timeoutSec
    ```bash
    RULE_EXECUTION_TIMEOUT_SECONDS=60   # or DROOLS_RULE_EXECUTION_TIMEOUT=60
    ```
+
+---
+
+## RULE_LIMIT_EXCEEDED (422)
+
+**When**: the rules for one request would fire more than `drools.execution.max-rule-firings` times (default 10,000; env `DROOLS_MAX_RULE_FIRINGS`). Almost always a rule loop: a consequence calls `update`/`modify` on the fact it matched without `no-loop`. Added 2026-11-18. Before, the request returned 200 with whatever partial result existed.
+
+**Response**:
+```json
+{
+  "rule_id": "pricing.discount.loop",
+  "result": null,
+  "error": {
+    "code": "RULE_LIMIT_EXCEEDED",
+    "message": "The rule fired more than 10000 times for this request (likely a rule loop); no result returned",
+    "timestamp": "..."
+  }
+}
+```
+
+**Code path**: [`RuleExecutor`](../src/main/java/com/company/drools/core/engine/RuleExecutor.java) runs `fireAllRules(cap + 1)`. Reaching `cap + 1` proves more activations were pending than allowed, so a rule set that legitimately fires exactly `cap` times is not rejected. That throws [`RuleLimitExceededException`](../src/main/java/com/company/drools/api/exception/RuleLimitExceededException.java), which `GlobalExceptionHandler` maps to 422. Metric: `drools.api.errors{error_type=limit_exceeded}`.
+
+**Fix**: add `no-loop true` (or guard the condition) on the rule that re-triggers itself. Raise the cap only if the rule genuinely needs more firings.
 
 ---
 

@@ -757,9 +757,9 @@ tail -f /var/log/drools-rule-engine/application.log | grep "rule_id"
 
 ---
 
-## 🔒 Security Restrictions (DRL Sandboxing)
+## 🔒 Security Restrictions (DRL policy checks)
 
-All DRL rule files are scanned by `DrlSanitizer` before compilation. Rules that reference dangerous classes, methods, or imports will be rejected.
+All DRL rule files are checked by `DrlSanitizer` before compilation. Rules that reference dangerous classes, methods, imports or fully-qualified names are rejected. This is a policy check for trusted authors, **not** a sandbox: a DRL consequence is Java running inside the service (see `SECURITY.md`, threat model). Details: [16-drl-sandboxing.md](16-drl-sandboxing.md).
 
 ### Allowed Imports
 

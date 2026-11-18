@@ -130,7 +130,7 @@ Refers to the deleted `RedisRuleCache` class. Was the `@ConditionalOnProperty("r
 The text-level scanner that rejects DRL content with dangerous imports/classes/methods/`eval()`. Defined in [`DrlSanitizer.java`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java). See [16-drl-sandboxing.md](16-drl-sandboxing.md).
 
 ### Sandbox (DRL)
-The set of restrictions enforced by `DrlSanitizer`. Specifically: import allowlist (20 prefixes) + import blocklist + 12 blocked class references + 19 blocked method calls + `eval()` ban + static-import ban.
+Historical name for the `DrlSanitizer` policy checks — **not** a real sandbox (DRL consequences are Java running in-process; see `SECURITY.md`). The checks: source normalization (comments, string contents, whitespace around `.`), import allowlist + blocklist, blocked fully-qualified names anywhere in the rule, blocked class references, blocked method calls, `eval()` ban, static-import ban.
 
 ### Admin API key
 The secret value that protects `/admin/*` endpoints when `ADMIN_API_KEY` env var is set. Sent via `X-Admin-API-Key` header. See [15-admin-authentication.md](15-admin-authentication.md).

@@ -213,7 +213,7 @@ Multiple independent layers of path-traversal defense, all sharing the `RuleIds`
 
 ---
 
-## Layer 6 — DRL sandboxing
+## Layer 6 — DRL policy checks (not a sandbox)
 
 **File**: [`DrlSanitizer.java`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java). See **[16-drl-sandboxing.md](16-drl-sandboxing.md)** for the full guide.
 
@@ -228,7 +228,7 @@ Summary:
 
 Verified by [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) — 8 test methods (4 `@Test` + 4 `@ParameterizedTest` over `@MethodSource` streams that expand to ~40+ effective cases covering every blocked import, class, and method).
 
-> **Not a sound boundary (finding B1, tracked-open, deferred)**: the sandbox is a text-scan blocklist, not a real security boundary. A **fully-qualified class name needs no `import`**, so a malicious rule can reference any dangerous class that is not in the finite 12-name blocklist and bypass the scan entirely. JEP 486 removed the `SecurityManager`, so an in-JVM permission sandbox is no longer available to backstop it. This is documented and accepted in [`SECURITY.md`](../SECURITY.md); do not treat the `DrlSanitizer` text scan as a real code-execution boundary. Sound isolation would require running rule compilation/execution in a separate constrained process or JVM.
+> **Not a sound boundary (finding B1, tracked-open, deferred)**: the checks are a text-scan blocklist, not a real security boundary. Since 2026-11-18 they normalize the source and also block dangerous **fully-qualified names** anywhere in the rule (a fully-qualified name needs no `import`), but Java offers too many indirect routes for any finite blocklist to be complete. JEP 486 removed the `SecurityManager`, so an in-JVM permission sandbox is no longer available to backstop it. This is documented and accepted in [`SECURITY.md`](../SECURITY.md); do not treat the `DrlSanitizer` text scan as a real code-execution boundary. Sound isolation would require running rule compilation/execution in a separate constrained process or JVM.
 
 Because of B1, DRL remains a Turing-complete code-execution surface inside the JVM. The sandbox raises the bar against casual/accidental misuse and known dangerous patterns, but the operational control that matters is trusting who can publish rules to the S3 bucket.
 

@@ -304,7 +304,9 @@ class AdminControllerTest {
 
   private void givenBulk(RuleRefreshService.BulkResult result) {
     when(refreshService.refreshAll(
-            RuleRefreshService.Source.ADMIN, RuleRefreshService.ReadMode.INVALIDATE_THEN_READ))
+            eq(RuleRefreshService.Source.ADMIN),
+            eq(RuleRefreshService.ReadMode.INVALIDATE_THEN_READ),
+            any()))
         .thenReturn(result);
   }
 
@@ -326,7 +328,9 @@ class AdminControllerTest {
 
     verify(refreshService)
         .refreshAll(
-            RuleRefreshService.Source.ADMIN, RuleRefreshService.ReadMode.INVALIDATE_THEN_READ);
+            eq(RuleRefreshService.Source.ADMIN),
+            eq(RuleRefreshService.ReadMode.INVALIDATE_THEN_READ),
+            any());
     verify(refreshPublisher, times(1)).publishBulkRefresh();
   }
 
@@ -442,8 +446,51 @@ class AdminControllerTest {
   // ===== Refresh-one Tests =====
 
   private void givenSingle(String ruleId, RuleRefreshService.SingleStatus status, String error) {
-    when(refreshService.refreshOne(ruleId, RuleRefreshService.Source.ADMIN, true))
+    when(refreshService.refreshOne(
+            eq(ruleId), eq(RuleRefreshService.Source.ADMIN), eq(true), any()))
         .thenReturn(new RuleRefreshService.SingleResult(status, "olddigest", error));
+  }
+
+  @Test
+  @DisplayName("Refresh: the caller's remote address is passed to the refresh service as actor")
+  void testRefresh_PassesCallerAddressAsActor() throws Exception {
+    String ruleId = "pricing.discount.simple";
+    when(refreshService.refreshOne(
+            eq(ruleId), eq(RuleRefreshService.Source.ADMIN), eq(true), eq("10.1.2.3")))
+        .thenReturn(
+            new RuleRefreshService.SingleResult(
+                RuleRefreshService.SingleStatus.UNCHANGED, "olddigest", null));
+    when(refreshService.refreshAll(
+            eq(RuleRefreshService.Source.ADMIN),
+            eq(RuleRefreshService.ReadMode.INVALIDATE_THEN_READ),
+            eq("10.1.2.3")))
+        .thenReturn(bulkLoaded(List.of(), List.of("a"), Map.of(), List.of()));
+
+    mockMvc
+        .perform(
+            post("/admin/refresh-rules/{ruleId}", ruleId)
+                .with(
+                    req -> {
+                      req.setRemoteAddr("10.1.2.3");
+                      return req;
+                    }))
+        .andExpect(status().isOk());
+    mockMvc
+        .perform(
+            post("/admin/refresh-rules")
+                .with(
+                    req -> {
+                      req.setRemoteAddr("10.1.2.3");
+                      return req;
+                    }))
+        .andExpect(status().isOk());
+
+    verify(refreshService).refreshOne(ruleId, RuleRefreshService.Source.ADMIN, true, "10.1.2.3");
+    verify(refreshService)
+        .refreshAll(
+            RuleRefreshService.Source.ADMIN,
+            RuleRefreshService.ReadMode.INVALIDATE_THEN_READ,
+            "10.1.2.3");
   }
 
   private static RuleMetadata metadataModifiedAt(LocalDateTime modified) {
@@ -470,7 +517,8 @@ class AdminControllerTest {
         .andExpect(jsonPath("$.current_version", closeTo(1769904000.0, 0.001), Double.class));
 
     // invalidateCache=true: an operator refresh must bypass the shared Redis entry
-    verify(refreshService).refreshOne(ruleId, RuleRefreshService.Source.ADMIN, true);
+    verify(refreshService)
+        .refreshOne(eq(ruleId), eq(RuleRefreshService.Source.ADMIN), eq(true), any());
     verify(refreshPublisher).publishRefresh(ruleId);
   }
 

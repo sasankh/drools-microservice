@@ -38,7 +38,7 @@ Format used here: each ADR has Status, Context, Decision, Alternatives Considere
 | [016](#adr-016-redis-decorator--pubsub-for-multi-instance-drl-cache-2026-05-20) | Redis decorator + pub/sub for multi-instance DRL cache | Accepted (2026-05-20) |
 | [017](#adr-017-admin-auth-fail-closed-on-proddocker-profiles-2026-08-20) | Admin auth fail-closed on prod/docker profiles | Accepted (2026-08-20) |
 | [018](#adr-018-rate-limiter-keys-on-ip-only-optional-trust-proxy-2026-08-20) | Rate limiter keys on IP only; optional trust-proxy | Accepted (2026-08-20) |
-| [019](#adr-019-rule-execution-timeout-halt--thread-pool-load-shed-503-2026-08-20) | Rule-execution timeout halt + thread-pool load-shed 503 | Accepted (2026-08-20) |
+| [019](#adr-019-rule-execution-timeout-halt--thread-pool-load-shed-503-2026-08-20) | Rule-execution timeout halt + thread-pool load-shed 503 | Accepted (2026-08-20; firing-cap 422 + interrupt addendum 2026-11-18) |
 | [020](#adr-020-refreshlock-separated-from-the-rule-read-write-lock-2026-08-20) | refreshLock separated from the rule read-write lock | Accepted (2026-08-20) |
 | [021](#adr-021-redis-prod-tlsauth-enforcement--removal-of-jackson-default-typing-2026-08-20) | Redis prod TLS/auth enforcement + removal of Jackson default typing | Accepted (2026-08-20) |
 | [022](#adr-022-storage-delegate-held-in-an-atomicreference-2026-08-20) | Storage delegate held in an `AtomicReference` | Accepted (2026-08-20) |
@@ -896,6 +896,12 @@ Two failure modes needed bounded, well-defined behavior: (1) a rule (or fact set
 - [`DroolsEngineService.java`](../src/main/java/com/company/drools/core/engine/DroolsEngineService.java) — timeout + `KieSession.halt()`
 - [`ServiceUnavailableException.java`](../src/main/java/com/company/drools/api/exception/ServiceUnavailableException.java), [`GlobalExceptionHandler.java`](../src/main/java/com/company/drools/api/exception/GlobalExceptionHandler.java)
 - [30-runbooks-and-monitoring.md](30-runbooks-and-monitoring.md) — "Diagnose 503 errors"
+
+### Addendum (2026-11-18): firing cap is an error; the timeout really interrupts
+
+- **Firing cap → 422.** `drools.execution.max-rule-firings` (default 10,000; env `DROOLS_MAX_RULE_FIRINGS`) is now configurable. Exceeding it fails the request with **422 `RULE_LIMIT_EXCEEDED`** and no result. Before, the cap was hard-coded and a capped run returned **200 with a partial result**. Detection is exact: the executor fires up to `cap + 1`, so a rule set that legitimately fires exactly `cap` times still succeeds.
+- **Interrupt works now.** Execution runs as a `FutureTask`, so `cancel(true)` on timeout really interrupts the worker. The old `CompletableFuture.cancel(true)` ignores the interrupt flag. Interruptible work (sleep, wait, blocking IO) now stops after a timeout.
+- **Known limit, now visible.** A consequence that never yields (`while (true) {}`) ignores both `halt()` and the interrupt and keeps its thread until the process restarts. The request still returns 408, and the new gauge **`drools.rule.execution.stuck`** counts such threads; alert on it. Only process isolation can kill such a rule — a prerequisite for untrusted DRL (`SECURITY.md`, threat model).
 
 ---
 

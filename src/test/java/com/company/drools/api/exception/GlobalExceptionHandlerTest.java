@@ -64,6 +64,20 @@ class GlobalExceptionHandlerTest {
   }
 
   @Test
+  @DisplayName("handles RuleLimitExceededException with 422 RULE_LIMIT_EXCEEDED")
+  void testHandleRuleLimitExceeded() {
+    RuleLimitExceededException ex = new RuleLimitExceededException("loop.rule", 5);
+
+    ResponseEntity<RuleExecutionResponse> response = handler.handleRuleLimitExceeded(ex);
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+    assertThat(response.getBody().getRuleId()).isEqualTo("loop.rule");
+    assertThat(response.getBody().getResult()).isNull();
+    assertThat(response.getBody().getError().getCode()).isEqualTo("RULE_LIMIT_EXCEEDED");
+    assertThat(response.getBody().getError().getMessage()).contains("5");
+  }
+
+  @Test
   @DisplayName("handles CircuitBreakerException with 503")
   void testHandleCircuitBreakerException() {
     CircuitBreakerException ex = new CircuitBreakerException("s3", "OPEN");

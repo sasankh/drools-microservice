@@ -1,12 +1,17 @@
 package com.company.drools.core.engine;
 
+import com.company.drools.api.exception.RuleLimitExceededException;
 import com.company.drools.api.exception.ServiceUnavailableException;
 import com.company.drools.api.exception.TimeoutException;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.kie.api.KieBase;
 import org.kie.api.runtime.KieSession;
@@ -14,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -24,15 +30,40 @@ public class RuleExecutor {
   private static final long DEFAULT_TIMEOUT_SECONDS = 30;
   private static final int DEFAULT_MAX_RULE_FIRINGS = 10000;
 
+  /** Worker states for stuck-worker accounting. */
+  private static final int RUNNING = 0;
+
+  private static final int DONE = 1;
+  private static final int ABANDONED = 2;
+
   private final Executor ruleExecutionExecutor;
   private final int maxRuleFirings;
 
+  /** Workers still running after their request timed out (a rule body that never yields). */
+  private final AtomicInteger stuckWorkers = new AtomicInteger();
+
   @Autowired
-  public RuleExecutor(@Qualifier("ruleExecutionExecutor") Executor ruleExecutionExecutor) {
+  public RuleExecutor(
+      @Qualifier("ruleExecutionExecutor") Executor ruleExecutionExecutor,
+      @Value("${drools.execution.max-rule-firings:10000}") int maxRuleFirings,
+      MeterRegistry meterRegistry) {
+    this(ruleExecutionExecutor, maxRuleFirings);
+    Gauge.builder("drools.rule.execution.stuck", stuckWorkers, AtomicInteger::get)
+        .description(
+            "Rule-execution workers still running after their request timed out (a rule body that"
+                + " never yields holds its thread until restart)")
+        .register(meterRegistry);
+  }
+
+  public RuleExecutor(Executor ruleExecutionExecutor) {
     this(ruleExecutionExecutor, DEFAULT_MAX_RULE_FIRINGS);
   }
 
   public RuleExecutor(Executor ruleExecutionExecutor, int maxRuleFirings) {
+    if (maxRuleFirings < 1 || maxRuleFirings == Integer.MAX_VALUE) {
+      throw new IllegalArgumentException(
+          "drools.execution.max-rule-firings must be between 1 and " + (Integer.MAX_VALUE - 1));
+    }
     this.ruleExecutionExecutor = ruleExecutionExecutor;
     this.maxRuleFirings = maxRuleFirings;
     log.info("RuleExecutor initialized with custom thread pool, maxRuleFirings={}", maxRuleFirings);
@@ -46,27 +77,39 @@ public class RuleExecutor {
   /**
    * Execute {@code inputData} against ONE rule ID's own compiled base (ADR-025): a fresh session on
    * {@code kieBase}, which contains only that rule ID's DRL rules, so unrelated rules cannot fire.
+   *
+   * @throws RuleLimitExceededException if the rules would fire more than {@code
+   *     drools.execution.max-rule-firings} times (usually a rule loop); no partial result
+   * @throws TimeoutException if execution exceeds {@code timeoutSeconds}
+   * @throws ServiceUnavailableException if the execution pool is saturated
    */
   public ExecutionResult executeRule(
       KieBase kieBase, String ruleId, Map<String, Object> inputData, long timeoutSeconds) {
     log.debug("Executing rule {} with timeout {}s", ruleId, timeoutSeconds);
 
     long startTime = System.currentTimeMillis();
-    CompletableFuture<Map<String, Object>> future = null;
-    // Shared handle to the running session so the timeout path can halt() fireAllRules
-    // cooperatively.
+    // Shared handle to the running session so the timeout path can halt() fireAllRules.
     AtomicReference<KieSession> sessionRef = new AtomicReference<>();
+    AtomicInteger state = new AtomicInteger(RUNNING);
+    // A FutureTask (not CompletableFuture) so cancel(true) really interrupts the worker thread:
+    // CompletableFuture.cancel ignores mayInterruptIfRunning.
+    FutureTask<Map<String, Object>> task =
+        new FutureTask<>(
+            () -> {
+              try {
+                return executeRuleInternal(kieBase, ruleId, inputData, sessionRef);
+              } finally {
+                if (state.getAndSet(DONE) == ABANDONED) {
+                  stuckWorkers.decrementAndGet();
+                  log.warn("Worker for timed-out rule {} has finally finished", ruleId);
+                }
+              }
+            });
 
     try {
-      // Execute rule in custom thread pool to handle timeout and provide better concurrency control
-      future =
-          CompletableFuture.supplyAsync(
-              () -> executeRuleInternal(kieBase, ruleId, inputData, sessionRef),
-              ruleExecutionExecutor);
-
-      Map<String, Object> result = future.get(timeoutSeconds, TimeUnit.SECONDS);
+      ruleExecutionExecutor.execute(task);
+      Map<String, Object> result = task.get(timeoutSeconds, TimeUnit.SECONDS);
       long executionTime = System.currentTimeMillis() - startTime;
-
       log.debug("Rule {} executed successfully in {}ms", ruleId, executionTime);
       return ExecutionResult.success(result, executionTime);
 
@@ -78,23 +121,53 @@ public class RuleExecutor {
           "Rule execution capacity exceeded; please retry shortly", e);
 
     } catch (java.util.concurrent.TimeoutException e) {
-      // Cooperatively stop the running rule firing so its worker thread is not leaked, then cancel.
+      // Stop the agenda at the next rule boundary and interrupt the worker. A rule body that
+      // never yields (e.g. while(true){}) ignores both and keeps its thread: counted as stuck.
       haltQuietly(sessionRef);
-      future.cancel(true);
-      log.error("Rule {} execution timed out after {}s", ruleId, timeoutSeconds);
+      task.cancel(true);
+      awaitBriefly(state);
+      if (state.compareAndSet(RUNNING, ABANDONED)) {
+        int stuck = stuckWorkers.incrementAndGet();
+        log.error(
+            "Rule {} execution timed out after {}s; worker did not stop ({} stuck)",
+            ruleId,
+            timeoutSeconds,
+            stuck);
+      } else {
+        log.error("Rule {} execution timed out after {}s", ruleId, timeoutSeconds);
+      }
       throw new TimeoutException("Rule execution: " + ruleId, timeoutSeconds, e);
 
     } catch (InterruptedException _) {
       Thread.currentThread().interrupt();
       haltQuietly(sessionRef);
-      future.cancel(true);
+      task.cancel(true);
       log.warn("Rule {} execution interrupted", ruleId);
       return ExecutionResult.failure("Rule execution interrupted: " + ruleId);
 
-    } catch (Exception e) {
+    } catch (ExecutionException e) {
+      if (e.getCause() instanceof RuleLimitExceededException limit) {
+        throw limit;
+      }
       long executionTime = System.currentTimeMillis() - startTime;
-      log.error("Rule {} execution failed after {}ms", ruleId, executionTime, e);
-      return ExecutionResult.failure("Rule execution failed: " + e.getMessage());
+      Throwable cause = e.getCause() != null ? e.getCause() : e;
+      log.error("Rule {} execution failed after {}ms", ruleId, executionTime, cause);
+      return ExecutionResult.failure("Rule execution failed: " + cause.getMessage());
+    }
+  }
+
+  /**
+   * Give an interrupted worker a moment (up to ~200 ms) to finish, so only workers that really
+   * ignore the interrupt are counted as stuck.
+   */
+  private static void awaitBriefly(AtomicInteger state) {
+    for (int i = 0; i < 20 && state.get() == RUNNING; i++) {
+      try {
+        Thread.sleep(10);
+      } catch (InterruptedException _) {
+        Thread.currentThread().interrupt();
+        return;
+      }
     }
   }
 
@@ -103,10 +176,11 @@ public class RuleExecutor {
    * another thread and stops {@code fireAllRules} at the next rule boundary. Swallows any error —
    * the session may already have completed and closed by the time we get here.
    *
-   * <p>Limitation: this stops the agenda between rule firings, so it CANNOT interrupt a single
-   * consequence that never yields (e.g. {@code then while(true){} end}). Such a thread stays busy
-   * until it is recycled; the request still returns 408 promptly. Fully sandboxing rule bodies is
-   * tracked with the DRL-sandbox hardening (finding B1, deferred).
+   * <p>Limitation: this stops the agenda between rule firings, and the interrupt only stops code
+   * that checks for it (sleep, wait, blocking IO). A consequence that never yields (e.g. {@code
+   * then while(true){} end}) keeps its thread until restart; the request still returns 408 and the
+   * {@code drools.rule.execution.stuck} gauge counts it. Only process isolation can kill it (see
+   * SECURITY.md, threat model).
    */
   private static void haltQuietly(AtomicReference<KieSession> sessionRef) {
     KieSession session = sessionRef.get();
@@ -127,13 +201,29 @@ public class RuleExecutor {
     try (KieSession kieSession = kieBase.newKieSession()) {
       sessionRef.set(kieSession);
       kieSession.insert(inputData);
-      int rulesFired = kieSession.fireAllRules(maxRuleFirings);
+      // Allow one firing beyond the cap: reaching cap + 1 proves more activations were pending
+      // than allowed, so the limit is detected exactly (no false positive at exactly the cap).
+      int rulesFired = kieSession.fireAllRules(maxRuleFirings + 1);
+      if (rulesFired > maxRuleFirings) {
+        log.warn(
+            "Rule {} exceeded the firing limit of {} (likely a rule loop)", ruleId, maxRuleFirings);
+        throw new RuleLimitExceededException(ruleId, maxRuleFirings);
+      }
       log.debug("Fired {} rules for rule ID {} (limit: {})", rulesFired, ruleId, maxRuleFirings);
       return inputData;
     } finally {
       // Clear the handle so a late timeout can't halt a session that's already closed.
       sessionRef.set(null);
     }
+  }
+
+  /** Number of workers still running after their request timed out. */
+  public int getStuckWorkers() {
+    return stuckWorkers.get();
+  }
+
+  public int getMaxRuleFirings() {
+    return maxRuleFirings;
   }
 
   public static class ExecutionResult {

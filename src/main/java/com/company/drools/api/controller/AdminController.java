@@ -442,7 +442,9 @@ public class AdminController {
     // Invalidate the shared Redis cache (no-op when disabled) and re-read from storage.
     RuleRefreshService.BulkResult result =
         refreshService.refreshAll(
-            RuleRefreshService.Source.ADMIN, RuleRefreshService.ReadMode.INVALIDATE_THEN_READ);
+            RuleRefreshService.Source.ADMIN,
+            RuleRefreshService.ReadMode.INVALIDATE_THEN_READ,
+            callerAddress());
     long duration = System.currentTimeMillis() - startTime;
 
     List<RefreshRulesResponse.RuleError> errors = new ArrayList<>();
@@ -514,7 +516,7 @@ public class AdminController {
     Instant previousVersion = toInstant(before != null ? before.getLastModified() : null);
 
     RuleRefreshService.SingleResult result =
-        refreshService.refreshOne(ruleId, RuleRefreshService.Source.ADMIN, true);
+        refreshService.refreshOne(ruleId, RuleRefreshService.Source.ADMIN, true, callerAddress());
     long elapsed = System.currentTimeMillis() - startTime;
 
     return switch (result.status()) {
@@ -560,6 +562,18 @@ public class AdminController {
         yield ResponseEntity.internalServerError().body(response);
       }
     };
+  }
+
+  /**
+   * The admin caller's remote address for the audit log (the shared admin key carries no user
+   * identity). {@code null} outside a request.
+   */
+  private static String callerAddress() {
+    var attrs = org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+    if (attrs instanceof org.springframework.web.context.request.ServletRequestAttributes sra) {
+      return sra.getRequest().getRemoteAddr();
+    }
+    return null;
   }
 
   private static Instant toInstant(java.time.LocalDateTime ldt) {

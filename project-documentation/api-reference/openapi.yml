@@ -238,6 +238,22 @@ paths:
                       message: "Operation timed out after 30 seconds"
                       details: "Rule execution exceeded configured timeout"
                       timestamp: "2025-07-22T12:00:00Z"
+        '422':
+          description: Rule fired more than drools.execution.max-rule-firings times (rule loop); no result returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                rule_limit_exceeded:
+                  summary: Firing cap exceeded
+                  value:
+                    rule_id: "pricing.discount.loop"
+                    result: null
+                    error:
+                      code: "RULE_LIMIT_EXCEEDED"
+                      message: "The rule fired more than 10000 times for this request (likely a rule loop); no result returned"
+                      timestamp: "2026-11-18T12:00:00Z"
         '413':
           description: Request payload too large
           content:
@@ -875,6 +891,7 @@ components:
             - "REQUEST_TOO_LARGE"
             - "RATE_LIMIT_EXCEEDED"
             - "TIMEOUT_ERROR"
+            - "RULE_LIMIT_EXCEEDED"
             - "SERVICE_UNAVAILABLE"
             - "STORAGE_ERROR"
             - "CACHE_ERROR"

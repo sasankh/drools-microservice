@@ -205,6 +205,8 @@ pre=$(code -X POST "$A/execute-rule" -H 'Content-Type: application/json' -d '{"r
 t0=$(date +%s); rc=$(code -m 60 -X POST "$A/execute-rule" -H 'Content-Type: application/json' -d '{"rule_id":"test.runaway.loop","data":{"__runaway__":true}}'); dt=$(( $(date +%s) - t0 ))
 post=$(code -X POST "$A/execute-rule" -H 'Content-Type: application/json' -d '{"rule_id":"pricing.discount.simple","data":{"amount":100}}')
 rec 12.5 "Runaway rule -> 408; service stays responsive" "$([ "$rc" = 408 ] && [ "$pre" = 200 ] && [ "$post" = 200 ] && echo 1 || echo 0)" "refresh=$rr pre=$pre runaway=$rc (${dt}s) post=$post"
+stuck=$(curl -s "$ACT/actuator/metrics/drools.rule.execution.stuck" | jq '.measurements[0].value|floor')
+rec 12.5b "Stuck-worker gauge counts the runaway thread" "$([ "${stuck:-0}" -ge 1 ] 2>/dev/null && echo 1 || echo 0)" "drools.rule.execution.stuck=$stuck"
 "${DC[@]}" exec -T localstack awslocal s3 rm s3://local-rules/test/runaway/loop.drl >/dev/null
 curl -s -X POST "$A/admin/refresh-rules" "${K[@]}" >/dev/null
 redis PUBLISH drools:rule:events '{"event":"RULE_DELETED","rule_id":"pricing.discount.simple","source_instance_id":"foreign","timestamp":"2026-11-17T00:00:00Z"}' >/dev/null; sleep 3
@@ -215,10 +217,23 @@ for spec in "GET /admin;x/health" "GET /%61dmin/health" "GET /admin/health;x" "P
   set -- $spec; c=$(code -X "$1" "$A$2" -H 'Content-Type: application/json' -d '{}'); out="$out $2=$c"; [ "$c" = 400 ] || bad=1
 done
 rec 12.7 "Path bypass variants -> 400 (ADR-024)" "$([ $bad = 0 ] && echo 1 || echo 0)" "$out"
+# 12.8 firing cap: a rule that re-triggers itself (update without no-loop) -> 422, no partial result
+"${DC[@]}" exec -T localstack sh -c 'mkdir -p /tmp/rl && printf "%s\n" "package com.company.rules.test.capped" "import java.util.Map" "rule \"Self retrigger\"" "when" "    \$d : Map(this[\"__loop__\"] != null)" "then" "    \$d.put(\"__loop__\", ((Number) \$d.get(\"__loop__\")).intValue() + 1);" "    update(\$d);" "end" > /tmp/rl/loop.drl && awslocal s3 cp /tmp/rl/loop.drl s3://local-rules/test/capped/loop.drl >/dev/null'
+curl -s -X POST "$A/admin/refresh-rules/test.capped.loop" "${K[@]}" >/dev/null
+j=$(curl -s -m 60 -w '\n%{http_code}' -X POST "$A/execute-rule" -H 'Content-Type: application/json' -d '{"rule_id":"test.capped.loop","data":{"__loop__":0}}')
+hc=$(tail -1 <<<"$j"); cd8=$(head -1 <<<"$j" | jq -r .error.code); res=$(head -1 <<<"$j" | jq -c .result)
+post=$(code -X POST "$A/execute-rule" -H 'Content-Type: application/json' -d '{"rule_id":"pricing.discount.simple","data":{"amount":100}}')
+rec 12.8 "Rule loop -> 422 RULE_LIMIT_EXCEEDED, no result" "$([ "$hc" = 422 ] && [ "$cd8" = RULE_LIMIT_EXCEEDED ] && [ "$res" = null ] && [ "$post" = 200 ] && echo 1 || echo 0)" "http=$hc code=$cd8 result=$res post=$post"
+"${DC[@]}" exec -T localstack awslocal s3 rm s3://local-rules/test/capped/loop.drl >/dev/null
+curl -s -X POST "$A/admin/refresh-rules/test.capped.loop" "${K[@]}" >/dev/null
+# 12.9 audit trail: refreshes are logged with actor + rule IDs, never DRL text
+"${DC[@]}" logs --no-log-prefix app 2>&1 | grep 'AUDIT action=' > "$TMP/audit.txt"
+na=$(grep -c 'action=refresh_all' "$TMP/audit.txt"); nr=$(grep -c 'action=refresh_rule' "$TMP/audit.txt"); leak=$(grep -c -E 'rule "|\$data|then ' "$TMP/audit.txt")
+rec 12.9 "AUDIT lines for refreshes, no DRL content" "$([ "$na" -ge 1 ] && [ "$nr" -ge 1 ] && [ "$leak" = 0 ] && grep -q 'actor=[0-9]' "$TMP/audit.txt" && echo 1 || echo 0)" "refresh_all=$na refresh_rule=$nr drl_leaks=$leak"
 
 # ── Step 10: logs (ignore errors this plan provokes on purpose) ───────────────
 echo "=== Step 10: app log errors"
-"${DC[@]}" logs --no-log-prefix app 2>&1 | grep -E '"level":"ERROR"| ERROR ' | grep -v stack_trace | grep -v 'test.runaway.loop' > "$TMP/errors.txt"
+"${DC[@]}" logs --no-log-prefix app 2>&1 | grep -E '"level":"ERROR"| ERROR ' | grep -v stack_trace | grep -v -E 'test\.runaway\.loop|test\.capped\.loop' > "$TMP/errors.txt"
 n=$(grep -c . "$TMP/errors.txt"); rec 10 "No unexpected ERROR lines in app log" "$([ "$n" = 0 ] && echo 1 || echo 0)" "$n lines"
 [ "$n" = 0 ] || head -5 "$TMP/errors.txt" | cut -c1-200
 

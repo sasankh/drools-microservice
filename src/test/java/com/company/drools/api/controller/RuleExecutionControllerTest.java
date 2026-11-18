@@ -12,9 +12,12 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.company.drools.api.exception.GlobalExceptionHandler;
+import com.company.drools.api.exception.RuleLimitExceededException;
 import com.company.drools.config.ValidationConfig;
 import com.company.drools.core.engine.DroolsEngineService;
 import com.company.drools.core.engine.RuleExecutor;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -42,6 +45,8 @@ class RuleExecutionControllerTest {
   @Autowired private MockMvc mockMvc;
 
   @MockitoBean private DroolsEngineService droolsEngineService;
+
+  @Autowired private MeterRegistry meterRegistry;
 
   // --- Happy Path Tests (3) ---
 
@@ -248,6 +253,38 @@ class RuleExecutionControllerTest {
                 .content("{\"rule_id\":\"busy.rule\",\"data\":{\"amount\":100}}"))
         .andExpect(status().isServiceUnavailable())
         .andExpect(jsonPath("$.error.code").value("SERVICE_UNAVAILABLE"));
+  }
+
+  @Test
+  void testExecuteRule_FiringLimitExceeded_Returns422() throws Exception {
+    // A rule loop that exceeds max-rule-firings must surface as 422 RULE_LIMIT_EXCEEDED with no
+    // partial result, and be counted as error_type=limit_exceeded.
+    when(droolsEngineService.hasRule("loop.rule")).thenReturn(true);
+    when(droolsEngineService.executeRule(eq("loop.rule"), anyMap()))
+        .thenThrow(new RuleLimitExceededException("loop.rule", 10000));
+    double before = limitExceededCount();
+
+    mockMvc
+        .perform(
+            post("/execute-rule")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"rule_id\":\"loop.rule\",\"data\":{\"amount\":100}}"))
+        .andExpect(status().isUnprocessableEntity())
+        .andExpect(jsonPath("$.rule_id").value("loop.rule"))
+        .andExpect(jsonPath("$.error.code").value("RULE_LIMIT_EXCEEDED"))
+        .andExpect(jsonPath("$.result").doesNotExist());
+
+    assertThat(limitExceededCount()).isEqualTo(before + 1.0);
+  }
+
+  private double limitExceededCount() {
+    Counter c =
+        meterRegistry
+            .find("drools.api.errors")
+            .tag("endpoint", "/execute-rule")
+            .tag("error_type", "limit_exceeded")
+            .counter();
+    return c == null ? 0.0 : c.count();
   }
 
   // --- Log Sanitization Tests (2) ---

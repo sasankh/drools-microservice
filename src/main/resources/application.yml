@@ -95,6 +95,10 @@ drools:
     # Allow a complete storage read with 0 rules to remove every loaded rule. Off by default so a
     # wrong bucket/path can't wipe the engine (and fan the wipe out to sibling instances).
     allow-empty: ${DROOLS_REFRESH_ALLOW_EMPTY:false}
+  execution:
+    # Max rule firings per request. Exceeding it (usually a rule loop) fails the request with
+    # HTTP 422 RULE_LIMIT_EXCEEDED instead of returning a partial result.
+    max-rule-firings: ${DROOLS_MAX_RULE_FIRINGS:10000}
   startup:
     # true: exit if the startup load can't read storage. false (default): start, report NOT ready
     # (readiness DOWN, /admin/health 503) and keep retrying via reconcile / admin refresh.

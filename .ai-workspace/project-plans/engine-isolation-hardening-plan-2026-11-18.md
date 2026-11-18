@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Created** | 2026-11-18 |
-| **Status** | 🟡 Phases 1–3 complete; Phase 4 (execution limits & security) in progress |
+| **Status** | 🟡 Phases 1–4 complete; Phase 5 (docs) and Phase 6 (full verification + benchmark) in progress |
 | **Work branch** | `engine-isolation` (git worktree `.claude/worktrees/engine-isolation`, based on `improvements-1-11-18-2026` @ `e1dd059` = `develop` after PR #10) |
 | **Delivered to** | `improvements-1-11-18-2026`, then one PR to `develop` (opened when the user asks) |
 | **Release target** | Next minor after v3.3.0. This contains a **breaking semantic change**: rule stacking is removed. |
@@ -313,6 +313,7 @@ The spike tests pass (except the documented red test), ADR-025 is written, and `
 - **Reconcile reads the source directly** (`RuleStorage.getAllRulesFromSource()`, bypassing Redis). Startup and pub/sub reads may still be answered by the Redis DRL cache (15-min TTL, ADR-016). Direct S3 edits are picked up by reconcile, or by an admin refresh (which invalidates Redis first).
 - **No `RuleMetadata` digest field.** `RuleMetadata` is part of the Redis JSON, so the digest lives on `CompiledRuleset` (`getServingDigest`); this avoids mixed-version JSON issues during a rolling deploy.
 - `StorageFactory` builds the storage once; the health check no longer re-wires it per call.
+- **Admin refreshes always publish** (bulk and single, even when nothing changed locally): an operator refresh should bring every instance current, and siblings skip unchanged rules by digest.
 
 ### A5.10 Gate
 Same as A4.8, plus live: kill LocalStack during a refresh → all rules still loaded; start with an empty bucket → readiness DOWN and `/admin/health` 503.
@@ -359,6 +360,14 @@ Same as A4.8, plus live: kill LocalStack during a refresh → all rules still lo
 - `README.md:673`: replace "DRL Sandboxing … prevents arbitrary code execution" with "DRL policy checks (not a sandbox)".
 - `16-drl-sandboxing.md`: retitle to "DRL policy checks (not a sandbox)"; fix `:40` ("stops all of that"); fix the `:189` `MyThreadPool` error; document the new checks and their limits.
 - `37-glossary.md:132`, `17-rule-development.md:760`, `14-security-architecture.md` and `00` / `38` consistency.
+
+### A6.7 Implementation notes / review fixes (2026-11-18)
+- Firing cap: `fireAllRules(cap + 1)`; `RuleLimitExceededException` → 422 `RULE_LIMIT_EXCEEDED`, no partial result. Cap range 1..Integer.MAX_VALUE-1.
+- Timeout: a `FutureTask` replaces `CompletableFuture` (whose `cancel(true)` never interrupts). After `cancel(true)` the executor waits up to ~200 ms before counting a worker as stuck, so interrupted workers aren't over-counted. Gauge `drools.rule.execution.stuck`.
+- Sanitizer: normalization (comments, string contents, whitespace around `.`); fully-qualified blocked names anywhere; narrowed `java.util.`.
+- **Review found a bypass introduced by the string blanking:** a `\uXXXX` escape can close a string literal, because Java decodes escapes before tokenizing. A probe rule set a system property. Fixed by rejecting unicode escapes on the raw text, with a regression test. Also fixed: an unterminated quote swallowed the newline, letting an import line slip past the import check.
+- Audit: `AUDIT` logger, one line per refresh / reconcile (quiet when nothing changed) / single refresh / remove. Actor = admin caller's remote address. Failed single refreshes record `error=compile_failed|storage_read_failed`, never the compiler message (it can quote DRL). Logged at INFO in every profile, including prod, where root is WARN.
+- `SECURITY.md` threat model; doc 16 retitled "DRL policy checks (not a sandbox)"; README/glossary/rule-dev/14 wording; doc 12 + openapi `RULE_LIMIT_EXCEEDED`; ADR-019 addendum.
 
 ### A6.6 Gate
 Same as A4.8, plus live: a runaway rule → 408 and the stuck gauge = 1; a cap-loop rule (a self-retriggering `modify` loop) → 422; the audit lines appear in `docker compose logs`.
@@ -489,15 +498,15 @@ Same as A4.8, plus live: a runaway rule → 408 and the stuck gauge = 1; a cap-l
 - [x] Commit
 
 ### B4. Phase 4 — Limits / security
-- [ ] `drools.execution.max-rule-firings`; `fireAllRules(cap+1)`; `RuleLimitExceededException` → 422 `RULE_LIMIT_EXCEEDED`; metric
-- [ ] `FutureTask` submit (`cancel(true)` interrupts); stuck-worker gauge
-- [ ] Sanitizer: normalization, import-comment fix, FQN blocks, narrowed `java.util.`; Javadoc "not a boundary"
-- [ ] `AUDIT` log for every refresh/reconcile/delete (no payloads/keys)
-- [ ] `SECURITY.md` threat model (trusted vs untrusted; prerequisites)
-- [ ] Docs honesty: README:673, doc 16 retitle + fixes, glossary, rule-dev, 14
-- [ ] Tests (cap 422, interruptible timeout + gauge, each bypass, audit fields)
-- [ ] Gate: A4.8 + live runaway 408/gauge, cap 422, audit lines
-- [ ] Commit
+- [x] `drools.execution.max-rule-firings`; `fireAllRules(cap+1)`; `RuleLimitExceededException` → 422 `RULE_LIMIT_EXCEEDED`; metric
+- [x] `FutureTask` submit (`cancel(true)` interrupts); stuck-worker gauge
+- [x] Sanitizer: normalization, import-comment fix, FQN blocks, narrowed `java.util.`; Javadoc "not a boundary"
+- [x] `AUDIT` log for every refresh/reconcile/delete (no payloads/keys)
+- [x] `SECURITY.md` threat model (trusted vs untrusted; prerequisites)
+- [x] Docs honesty: README:673, doc 16 retitle + fixes, glossary, rule-dev, 14
+- [x] Tests (cap 422, interruptible timeout + gauge, each bypass, audit fields)
+- [x] Gate: `mvn verify` 766 tests / 0 failures, coverage 93.9 % / 86.1 %; docker test plan **72 PASS / 0 FAIL** (12.5 runaway 408 + 12.5b stuck gauge = 1; 12.8 rule loop → 422 RULE_LIMIT_EXCEEDED, no result, service responsive; 12.9 14 AUDIT lines, 0 DRL leaks; Step 13 all pass)
+- [x] Commit
 
 ### B5. Phase 5 — Docs & bookkeeping
 - [ ] `CLAUDE.md` entry: breaking change + migration, new config, counts/coverage
@@ -521,4 +530,4 @@ Same as A4.8, plus live: a runaway rule → 408 and the stuck gauge = 1; a cap-l
 
 ---
 
-_Plan created: 2026-11-18 · Last updated: 2026-11-18 (Phase 3 complete — refresh/storage/startup; Phase 4 in progress)_
+_Plan created: 2026-11-18 · Last updated: 2026-11-18 (Phase 4 complete — limits/security; Phases 5–6 in progress)_

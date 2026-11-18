@@ -3,6 +3,7 @@ package com.company.drools.api.controller;
 import com.company.drools.api.dto.RuleExecutionRequest;
 import com.company.drools.api.dto.RuleExecutionResponse;
 import com.company.drools.api.exception.RuleExecutionException;
+import com.company.drools.api.exception.RuleLimitExceededException;
 import com.company.drools.api.exception.RuleNotFoundException;
 import com.company.drools.api.exception.ServiceUnavailableException;
 import com.company.drools.api.exception.TimeoutException;
@@ -128,7 +129,7 @@ public class RuleExecutionController {
               .tag(TAG_STATUS, STATUS_ERROR)
               .register(meterRegistry));
       throw e;
-    } catch (TimeoutException | ServiceUnavailableException e) {
+    } catch (TimeoutException | ServiceUnavailableException | RuleLimitExceededException e) {
       // Let execution timeout (→408) and load-shedding (→503) surface with their correct HTTP
       // status
       // via GlobalExceptionHandler, instead of being wrapped as a generic 400 RULE_EXECUTION_ERROR
@@ -139,7 +140,11 @@ public class RuleExecutionController {
               TAG_ENDPOINT,
               ENDPOINT_EXECUTE_RULE,
               TAG_ERROR_TYPE,
-              e instanceof TimeoutException ? "timeout" : "unavailable")
+              switch (e) {
+                case TimeoutException _ -> "timeout";
+                case RuleLimitExceededException _ -> "limit_exceeded";
+                default -> "unavailable";
+              })
           .increment();
       sample.stop(
           Timer.builder(METRIC_API_RESPONSE_TIME)

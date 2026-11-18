@@ -1,23 +1,31 @@
-# 16 · DRL Sandboxing
+# 16 · DRL policy checks (not a sandbox)
 
 | | |
 |---|---|
 | **Audience** | Rule authors (humans), AI rule-generation tools, security reviewers |
 | **Purpose** | Definitive reference for what `DrlSanitizer` blocks and what's allowed. The doc AI rule-generation tools must consume to produce sandbox-passing rules. |
-| **Last verified against** | [`DrlSanitizer.java`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java), [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) on 2026-08-20 |
+| **Last verified against** | [`DrlSanitizer.java`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java), [`DrlSanitizerTest.java`](../src/test/java/com/company/drools/core/engine/DrlSanitizerTest.java) on 2026-11-18 |
 | **Related docs** | [17-rule-development.md](17-rule-development.md), [19-sample-rules-cookbook.md](19-sample-rules-cookbook.md), [14-security-architecture.md](14-security-architecture.md) |
 
 ---
 
 ## TL;DR
 
-Every `.drl` file is scanned by [`DrlSanitizer`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java) **before** it reaches the Drools compiler. Rules that fail the scan are rejected with a violation message and never compiled.
+> **This is a policy check for trusted rule authors, not a security sandbox.** A DRL consequence is
+> Java code running inside the service. A text check over Java can't be complete, and Java 25 has no
+> `SecurityManager`. Treat write access to the rule store as code execution; untrusted DRL needs a
+> separate worker process first. See [`SECURITY.md`](../SECURITY.md) (threat model). The doc title
+> and file name used to say "sandboxing"; the name is kept for existing links.
 
-The sandbox enforces **four checks**:
-1. **Imports must be in the allowlist** (20 specific prefixes) — and not in the blocklist.
-2. **Blocked class names cannot appear anywhere** in the rule text (Runtime, Thread, ClassLoader, etc.).
-3. **Blocked method calls cannot appear** (System.exit, Class.forName, etc.).
-4. **`eval()` is forbidden.** Use Drools pattern matching instead.
+Every `.drl` file is checked by [`DrlSanitizer`](../src/main/java/com/company/drools/core/engine/DrlSanitizer.java) **before** it reaches the Drools compiler. A rule that fails is rejected with a violation message and never compiled; only that rule ID is affected (ADR-025).
+
+The checks run on a **normalized** copy of the source: comments removed, string-literal contents blanked, and whitespace around `.` collapsed (so `import java.io.File // x`, `System .exit` or a call split across lines can't slip past). Then:
+1. **Imports must be in the allowlist** (20 prefixes) and not in the blocklist. `java.util.` is allowed, except `java.util.concurrent.`, `ServiceLoader`, `logging`, `prefs`, `jar`, `zip`.
+2. **Blocked fully-qualified names can't appear anywhere** in the rule (a fully-qualified name needs no import): `java.io.`, `java.nio.`, `java.net.`, `java.lang.reflect.`, `java.lang.invoke.`, `java.lang.System`, `java.lang.Thread`, `java.util.concurrent.`, … (same list as the import blocklist).
+3. **Blocked class names can't appear anywhere** (Runtime, Thread, ClassLoader, MethodHandles, ServiceLoader, …).
+4. **Blocked method calls can't appear** (System.exit, System.getenv, Class.forName, `.getClassLoader`, …).
+5. **`eval()` is forbidden.** Use Drools pattern matching instead.
+6. **Unicode escapes (`\uXXXX`) are rejected.** Java decodes them before compiling, anywhere in the source, so an escape could hide a quote and smuggle code out of a string past the checks.
 
 Static imports are also rejected unconditionally.
 
@@ -25,9 +33,9 @@ If you're an AI generating rules, follow the [sandbox-passing template](#sandbox
 
 ---
 
-## Why the sandbox exists
+## Why these checks exist
 
-DRL files are user-supplied content. Drools is a Java compiler at runtime — it can compile arbitrary Java in `then` blocks. Without a sandbox, a malicious or buggy rule could:
+DRL files are code from rule authors. Drools compiles arbitrary Java in `then` blocks. A buggy or careless rule could:
 - Read environment variables, system properties (`System.getenv`, `System.getProperty`)
 - Execute arbitrary processes (`Runtime.getRuntime().exec(...)`)
 - Read or write files (`java.io.File`, `java.nio.*`)
@@ -37,7 +45,7 @@ DRL files are user-supplied content. Drools is a Java compiler at runtime — it
 - Reset the security manager (`System.setSecurityManager`)
 - Crash the JVM (`System.exit`)
 
-The sandbox stops all of that **before compilation** — text-level scan, not runtime. This means:
+The checks catch the obvious forms of all of that **before compilation** — a text-level scan, not a runtime guard. They can't prove a rule safe: Java offers too many indirect routes for a finite blocklist. This means:
 - The DRL never reaches Drools' `KieBuilder` if it violates the sandbox.
 - The error is reported at refresh time (`POST /admin/refresh-rules`), not at first-execution time.
 - The blocked rule has zero opportunity to run.
@@ -186,7 +194,7 @@ Verbatim from [`DrlSanitizer.java:40-53`](../src/main/java/com/company/drools/co
 
 You can't. Even local variables clash with the blocklist. Pick a different name (`Threadpool`, `MyThread`, `WorkerThread` are all... wait, `WorkerThread` contains `Thread`. Use something like `WorkerExecutor` or `Pool`.)
 
-Word-boundary regex is `\bClassName\b`, so `MyThreadPool` matches `Thread`. Substring-style matches.
+The check is a word-boundary regex, `\bClassName\b`, so `MyThreadPool` does **not** match `Thread`, but a variable named exactly `Thread` (or `thread.Thread`) does.
 
 ### What about Java identifiers that share a name?
 

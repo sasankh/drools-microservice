@@ -100,6 +100,20 @@ public class GlobalExceptionHandler {
     return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
   }
 
+  @ExceptionHandler(RuleLimitExceededException.class)
+  public ResponseEntity<RuleExecutionResponse> handleRuleLimitExceeded(
+      RuleLimitExceededException ex) {
+    log.warn("Rule firing limit exceeded: {}", LogSanitizer.sanitizeMessage(ex.getMessage()));
+    RuleExecutionResponse response =
+        RuleExecutionResponse.failure(
+            ex.getRuleId(),
+            "RULE_LIMIT_EXCEEDED",
+            "The rule fired more than "
+                + ex.getLimit()
+                + " times for this request (likely a rule loop); no result returned");
+    return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(response);
+  }
+
   @ExceptionHandler(ServiceUnavailableException.class)
   public ResponseEntity<RuleExecutionResponse> handleServiceUnavailableException(
       ServiceUnavailableException ex) {

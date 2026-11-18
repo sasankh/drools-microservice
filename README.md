@@ -670,7 +670,7 @@ execution — see [`SECURITY.md`](SECURITY.md)) and Redis auth/TLS is enforced o
 profile. Key controls:
 
 - **Admin Authentication**: API key protection for `/admin/*` endpoints via `X-Admin-API-Key` header
-- **DRL Sandboxing**: Blocklist-based rule content scanning prevents arbitrary code execution
+- **DRL policy checks (not a sandbox)**: rule content is checked before compiling (imports, fully-qualified names, dangerous calls, `eval`). This catches mistakes and obvious misuse from trusted authors; it does **not** make untrusted DRL safe (see the threat model in [`SECURITY.md`](SECURITY.md))
 - **Security Headers**: 7 security headers on all responses (CSP, HSTS, X-Frame-Options, etc.)
 - **Input Validation**: All requests are validated for proper format, size limits, and security patterns
 - **Rate Limiting**: Configurable rate limits keyed on the caller's network address (`getRemoteAddr()`). `X-Forwarded-For` is ignored by default (spoofable); it is trusted (left-most entry) only when `drools.rate-limiting.trust-proxy=true`, which you should enable only behind a trusted proxy/load balancer that overwrites the header. Standard `X-RateLimit-*` response headers are returned

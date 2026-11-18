@@ -29,6 +29,14 @@ public class RuleRefreshService {
 
   private static final Logger log = LoggerFactory.getLogger(RuleRefreshService.class);
 
+  /**
+   * One line per rule-changing action (who, what, outcome, rule IDs, digests). Never logs DRL
+   * content, request payloads or keys. Route logger {@code AUDIT} separately if needed.
+   */
+  private static final Logger audit = LoggerFactory.getLogger("AUDIT");
+
+  private static final int AUDIT_MAX_IDS = 50;
+
   /** Who triggered a refresh; used for logs, metrics and the load state. */
   public enum Source {
     STARTUP,
@@ -73,6 +81,20 @@ public class RuleRefreshService {
 
   /** Read the full rule set and load it. Never throws; the outcome says what happened. */
   public BulkResult refreshAll(Source source, ReadMode mode) {
+    return refreshAll(source, mode, null);
+  }
+
+  /**
+   * As {@link #refreshAll(Source, ReadMode)}, recording {@code actor} (e.g. the admin caller's
+   * address) in the audit line.
+   */
+  public BulkResult refreshAll(Source source, ReadMode mode, String actor) {
+    BulkResult result = doRefreshAll(source, mode);
+    auditBulk(source, actor, result);
+    return result;
+  }
+
+  private BulkResult doRefreshAll(Source source, ReadMode mode) {
     lock.lock();
     try {
       List<Rule> rules;
@@ -132,6 +154,46 @@ public class RuleRefreshService {
    * is removed (it was deleted).
    */
   public SingleResult refreshOne(String ruleId, Source source, boolean invalidateCache) {
+    return refreshOne(ruleId, source, invalidateCache, null);
+  }
+
+  /** As {@link #refreshOne(String, Source, boolean)}, recording {@code actor} in the audit line. */
+  public SingleResult refreshOne(
+      String ruleId, Source source, boolean invalidateCache, String actor) {
+    // The lock is reentrant: hold it across the refresh AND the digest read, so the audit line
+    // can't show a concurrent refresh's digest.
+    lock.lock();
+    try {
+      return refreshOneAudited(ruleId, source, invalidateCache, actor);
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  private SingleResult refreshOneAudited(
+      String ruleId, Source source, boolean invalidateCache, String actor) {
+    SingleResult result = doRefreshOne(ruleId, source, invalidateCache);
+    String newDigest = engine.getServingDigest(ruleId).orElse(null);
+    audit.info(
+        "AUDIT action=refresh_rule source={} actor={} rule_id={} result={} old_digest={}"
+            + " new_digest={}{}",
+        source.tag(),
+        actor != null ? actor : "-",
+        ruleId,
+        result.status().name().toLowerCase(),
+        com.company.drools.common.ContentDigest.shortForm(result.previousDigest()),
+        com.company.drools.common.ContentDigest.shortForm(newDigest),
+        // Never the compiler message here: Drools errors can quote DRL source. It is in the
+        // regular application log instead.
+        result.error() != null
+            ? (result.status() == SingleStatus.STORAGE_FAILED
+                ? " error=storage_read_failed"
+                : " error=compile_failed")
+            : "");
+    return result;
+  }
+
+  private SingleResult doRefreshOne(String ruleId, Source source, boolean invalidateCache) {
     lock.lock();
     try {
       Optional<Rule> rule;
@@ -181,12 +243,65 @@ public class RuleRefreshService {
   public void removeOne(String ruleId, Source source) {
     lock.lock();
     try {
+      String digest = engine.getServingDigest(ruleId).orElse(null);
       engine.removeRule(ruleId);
       loadState.recordRefresh(source.tag(), "removed", null);
       count(source, "removed");
+      audit.info(
+          "AUDIT action=remove_rule source={} actor=- rule_id={} result=removed old_digest={}",
+          source.tag(),
+          ruleId,
+          com.company.drools.common.ContentDigest.shortForm(digest));
     } finally {
       lock.unlock();
     }
+  }
+
+  private void auditBulk(Source source, String actor, BulkResult result) {
+    String action = source == Source.RECONCILE ? "reconcile" : "refresh_all";
+    if (result.status() != BulkStatus.LOADED) {
+      audit.info(
+          "AUDIT action={} source={} actor={} result={} error=\"{}\"",
+          action,
+          source.tag(),
+          actor != null ? actor : "-",
+          result.status().name().toLowerCase(),
+          oneLine(result.error()));
+      return;
+    }
+    DroolsEngineService.LoadReport r = result.report();
+    if (source == Source.RECONCILE && !r.changedAnything() && r.allSucceeded()) {
+      return; // quiet when a periodic reconcile finds nothing to do
+    }
+    audit.info(
+        "AUDIT action={} source={} actor={} result={} loaded={} unchanged={} failed={} removed={}"
+            + " loaded_ids={} failed_ids={} removed_ids={}",
+        action,
+        source.tag(),
+        actor != null ? actor : "-",
+        r.allSucceeded() ? "ok" : "partial",
+        r.loaded().size(),
+        r.unchanged().size(),
+        r.failed().size(),
+        r.removed().size(),
+        capped(r.loaded()),
+        capped(r.failed().keySet()),
+        capped(r.removed()));
+  }
+
+  private static String capped(java.util.Collection<String> ids) {
+    List<String> sorted = ids.stream().sorted().toList();
+    return sorted.size() > AUDIT_MAX_IDS
+        ? sorted.subList(0, AUDIT_MAX_IDS) + "+" + (sorted.size() - AUDIT_MAX_IDS)
+        : sorted.toString();
+  }
+
+  private static String oneLine(String s) {
+    if (s == null) {
+      return "";
+    }
+    String flat = s.replaceAll("[\\r\\n\\t]+", " ").replace('"', '\'');
+    return flat.length() > 300 ? flat.substring(0, 300) + "…" : flat;
   }
 
   /**

@@ -4,17 +4,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
+import com.company.drools.api.exception.RuleLimitExceededException;
 import com.company.drools.api.exception.ServiceUnavailableException;
 import com.company.drools.api.exception.TimeoutException;
 import com.company.drools.core.model.Rule;
+import com.company.drools.core.model.RuleMetadata;
 import com.company.drools.testutil.RuleTestUtils;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.kie.api.KieBase;
 import org.kie.api.runtime.KieSession;
 
@@ -279,6 +286,219 @@ class RuleExecutorTest {
       verify(mockSession, timeout(3000)).halt();
 
       executor.shutdownNow();
+    }
+  }
+
+  /** Compile one DRL body into its own KieBase under {@code ruleId}. */
+  private KieBase compileDrl(String ruleId, String drl) {
+    return compileRule(new Rule(ruleId, drl, RuleMetadata.createNew()));
+  }
+
+  /** Counter loop: increments "n" and re-fires itself via update(); {@code guard} bounds it. */
+  private static String counterLoop(String guard) {
+    return """
+        package com.company.rules.loop
+
+        import java.util.Map
+
+        rule "loop"
+        when
+            $d : Map(this["n"] != null%s)
+        then
+            $d.put("n", ((Number) $d.get("n")).intValue() + 1);
+            update($d);
+        end
+        """
+        .formatted(guard);
+  }
+
+  /** A rule that runs a {@link Runnable} supplied in the input map under key "hook". */
+  private static final String HOOK_DRL =
+      """
+      package com.company.rules.hook
+
+      import java.util.Map
+
+      rule "hook"
+      when
+          $d : Map(this["hook"] != null)
+      then
+          ((Runnable) $d.get("hook")).run();
+          $d.put("done", true);
+      end
+      """;
+
+  private static void awaitStuck(RuleExecutor executor, int expected) {
+    org.awaitility.Awaitility.await()
+        .atMost(java.time.Duration.ofSeconds(10))
+        .untilAsserted(() -> assertThat(executor.getStuckWorkers()).isEqualTo(expected));
+  }
+
+  @Nested
+  @DisplayName("Rule Firing Limit")
+  class RuleFiringLimit {
+
+    @Test
+    @DisplayName("the loop rule really re-fires (sanity: bounded loop reaches its bound)")
+    void loopRuleReFires() {
+      KieBase kieBase =
+          compileDrl("loop.bounded", counterLoop(", ((Number) this[\"n\"]).intValue() < 50"));
+      ExecutorService executor = Executors.newSingleThreadExecutor();
+      RuleExecutor ruleExecutor = new RuleExecutor(executor, 1000);
+
+      Map<String, Object> input = new HashMap<>(Map.of("n", 0));
+      RuleExecutor.ExecutionResult result =
+          ruleExecutor.executeRule(kieBase, "loop.bounded", input);
+
+      assertThat(result.isSuccess()).isTrue();
+      assertThat(result.getResult()).containsEntry("n", 50);
+      executor.shutdown();
+    }
+
+    @Test
+    @DisplayName("an unbounded loop exceeds the cap → RuleLimitExceededException, no result")
+    void loopExceedsCap() {
+      KieBase kieBase = compileDrl("loop.forever", counterLoop(""));
+      ExecutorService executor = Executors.newSingleThreadExecutor();
+      RuleExecutor ruleExecutor = new RuleExecutor(executor, 5);
+      assertThat(ruleExecutor.getMaxRuleFirings()).isEqualTo(5);
+
+      Map<String, Object> input = new HashMap<>(Map.of("n", 0));
+      assertThatThrownBy(() -> ruleExecutor.executeRule(kieBase, "loop.forever", input, 10))
+          .isInstanceOfSatisfying(
+              RuleLimitExceededException.class,
+              e -> {
+                assertThat(e.getLimit()).isEqualTo(5);
+                assertThat(e.getRuleId()).isEqualTo("loop.forever");
+              });
+      // The cap stopped the agenda just past the limit (cap + 1 firings), not at timeout.
+      assertThat(input).containsEntry("n", 6);
+      executor.shutdown();
+    }
+
+    @Test
+    @DisplayName("firing exactly the cap is not a false positive")
+    void exactlyCapSucceeds() {
+      KieBase kieBase =
+          compileDrl("loop.five", counterLoop(", ((Number) this[\"n\"]).intValue() < 5"));
+      ExecutorService executor = Executors.newSingleThreadExecutor();
+      RuleExecutor ruleExecutor = new RuleExecutor(executor, 5);
+
+      Map<String, Object> input = new HashMap<>(Map.of("n", 0));
+      RuleExecutor.ExecutionResult result = ruleExecutor.executeRule(kieBase, "loop.five", input);
+
+      assertThat(result.isSuccess()).isTrue();
+      assertThat(result.getResult()).containsEntry("n", 5);
+      executor.shutdown();
+    }
+
+    @Test
+    @DisplayName("default constructor uses the 10000 cap")
+    void defaultCap() {
+      assertThat(new RuleExecutor(Runnable::run).getMaxRuleFirings()).isEqualTo(10000);
+    }
+
+    @ParameterizedTest(name = "rejects cap {0}")
+    @ValueSource(ints = {0, -1, Integer.MAX_VALUE})
+    @DisplayName("constructor rejects a cap outside 1..Integer.MAX_VALUE-1")
+    void rejectsInvalidCap(int cap) {
+      Executor direct = Runnable::run;
+      assertThatThrownBy(() -> new RuleExecutor(direct, cap))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("max-rule-firings");
+    }
+
+    @Test
+    @DisplayName("accepts the extreme valid caps 1 and Integer.MAX_VALUE - 1")
+    void acceptsBoundaryCaps() {
+      assertThat(new RuleExecutor(Runnable::run, 1).getMaxRuleFirings()).isEqualTo(1);
+      assertThat(new RuleExecutor(Runnable::run, Integer.MAX_VALUE - 1).getMaxRuleFirings())
+          .isEqualTo(Integer.MAX_VALUE - 1);
+    }
+  }
+
+  @Nested
+  @DisplayName("Timeout Interruption and Stuck Workers")
+  class TimeoutInterruption {
+
+    @Test
+    @SuppressWarnings("java:S2925")
+    @DisplayName("timeout interrupts interruptible rule work; stuck count returns to 0")
+    void timeoutInterruptsWorker() throws Exception {
+      KieBase kieBase = compileDrl("hook.sleep", HOOK_DRL);
+      ExecutorService executor = Executors.newSingleThreadExecutor();
+      RuleExecutor ruleExecutor = new RuleExecutor(executor, 100);
+      CountDownLatch started = new CountDownLatch(1);
+      CompletableFuture<Boolean> interrupted = new CompletableFuture<>();
+      Runnable hook =
+          () -> {
+            started.countDown();
+            try {
+              Thread.sleep(30_000);
+              interrupted.complete(false);
+            } catch (InterruptedException _) {
+              interrupted.complete(true);
+              Thread.currentThread().interrupt();
+            }
+          };
+
+      Map<String, Object> input = new HashMap<>(Map.of("hook", hook));
+      long start = System.nanoTime();
+      assertThatThrownBy(() -> ruleExecutor.executeRule(kieBase, "hook.sleep", input, 1))
+          .isInstanceOf(TimeoutException.class);
+
+      assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+      assertThat(interrupted.get(5, TimeUnit.SECONDS)).as("hook saw InterruptedException").isTrue();
+      assertThat(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - start)).isLessThan(10);
+      awaitStuck(ruleExecutor, 0);
+      executor.shutdownNow();
+    }
+
+    @Test
+    @SuppressWarnings("java:S2925")
+    @DisplayName("work that ignores interrupts is counted as stuck until it finally ends")
+    void nonInterruptibleWorkCountedAsStuck() throws Exception {
+      KieBase kieBase = compileDrl("hook.spin", HOOK_DRL);
+      ExecutorService executor = Executors.newSingleThreadExecutor();
+      RuleExecutor ruleExecutor = new RuleExecutor(executor, 100);
+      AtomicBoolean release = new AtomicBoolean(false);
+      CountDownLatch finished = new CountDownLatch(1);
+      Runnable hook =
+          () -> {
+            while (!release.get()) {
+              Thread.onSpinWait(); // ignores interrupts, like a CPU-bound rule body
+            }
+            finished.countDown();
+          };
+
+      Map<String, Object> input = new HashMap<>(Map.of("hook", hook));
+      try {
+        assertThatThrownBy(() -> ruleExecutor.executeRule(kieBase, "hook.spin", input, 1))
+            .isInstanceOf(TimeoutException.class);
+
+        // Still spinning well after the timeout fired → counted as stuck.
+        Thread.sleep(300);
+        assertThat(finished.getCount()).isEqualTo(1);
+        assertThat(ruleExecutor.getStuckWorkers()).isEqualTo(1);
+      } finally {
+        release.set(true);
+      }
+
+      assertThat(finished.await(5, TimeUnit.SECONDS)).isTrue();
+      awaitStuck(ruleExecutor, 0);
+      executor.shutdownNow();
+    }
+
+    @Test
+    @DisplayName("the Spring constructor registers the drools.rule.execution.stuck gauge")
+    void registersStuckGauge() {
+      SimpleMeterRegistry registry = new SimpleMeterRegistry();
+      RuleExecutor ruleExecutor = new RuleExecutor(Runnable::run, 7, registry);
+
+      Gauge gauge = registry.find("drools.rule.execution.stuck").gauge();
+      assertThat(gauge).isNotNull();
+      assertThat(gauge.value()).isZero();
+      assertThat(ruleExecutor.getMaxRuleFirings()).isEqualTo(7);
     }
   }
 

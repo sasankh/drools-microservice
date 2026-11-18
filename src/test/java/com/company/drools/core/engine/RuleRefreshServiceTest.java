@@ -8,6 +8,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.company.drools.api.exception.RuleStorageException;
 import com.company.drools.config.TimeoutConfig;
 import com.company.drools.core.engine.RuleRefreshService.BulkResult;
@@ -30,11 +32,15 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.slf4j.LoggerFactory;
 import org.springframework.test.util.ReflectionTestUtils;
 
 /**
@@ -613,6 +619,261 @@ class RuleRefreshServiceTest {
       assertThat(engine.hasRule("su.a")).isTrue();
       assertThat(runs("reconcile", "storage_failed")).isEqualTo(1.0);
       assertThat(drift()).isZero();
+    }
+  }
+
+  // ─── audit log ──────────────────────────────────────────────────────────────
+
+  @Nested
+  @DisplayName("audit log")
+  class AuditLog {
+
+    private static final String SECRET_TOKEN = "zebraSecretToken42";
+    private static final Pattern HEX12 = Pattern.compile("[0-9a-f]{12}");
+
+    private ch.qos.logback.classic.Logger auditLogger;
+    private ch.qos.logback.classic.Level previousLevel;
+    private ListAppender<ILoggingEvent> appender;
+
+    @BeforeEach
+    void attach() {
+      auditLogger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger("AUDIT");
+      previousLevel = auditLogger.getLevel();
+      auditLogger.setLevel(ch.qos.logback.classic.Level.INFO);
+      appender = new ListAppender<>();
+      appender.start();
+      auditLogger.addAppender(appender);
+    }
+
+    @AfterEach
+    void detach() {
+      auditLogger.detachAppender(appender);
+      auditLogger.setLevel(previousLevel);
+    }
+
+    private List<String> lines() {
+      return appender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+    }
+
+    private String onlyLine() {
+      assertThat(lines()).hasSize(1);
+      return lines().get(0);
+    }
+
+    /** A valid rule whose DRL body carries a distinctive token that must never be audited. */
+    private Rule secretRule(String id) {
+      String drl =
+          """
+          package com.company.rules.audit
+
+          import java.util.Map
+
+          rule "%s"
+          when
+              $data : Map()
+          then
+              $data.put("%s", true);
+          end
+          """
+              .formatted(id, SECRET_TOKEN);
+      return new Rule(id, drl, RuleMetadata.createNew());
+    }
+
+    private String digestField(String line, String field) {
+      Matcher m = Pattern.compile(field + "=(\\S+)").matcher(line);
+      assertThat(m.find()).as(field + " present in: " + line).isTrue();
+      return m.group(1);
+    }
+
+    @Test
+    @DisplayName("admin bulk refresh: action, source, actor, result, counts and IDs; no DRL")
+    void bulkAdminRefresh() {
+      preload(secretRule("au.keep"), secretRule("au.gone"));
+      appender.list.clear();
+      when(storage.getAllRules()).thenReturn(List.of(secretRule("au.keep"), secretRule("au.new")));
+
+      service.refreshAll(Source.ADMIN, ReadMode.INVALIDATE_THEN_READ, "10.9.8.7");
+
+      String line = onlyLine();
+      assertThat(line)
+          .startsWith("AUDIT ")
+          .contains("action=refresh_all")
+          .contains("source=admin")
+          .contains("actor=10.9.8.7")
+          .contains("result=ok")
+          .contains("loaded=1")
+          .contains("unchanged=1")
+          .contains("failed=0")
+          .contains("removed=1")
+          .contains("loaded_ids=[au.new]")
+          .contains("failed_ids=[]")
+          .contains("removed_ids=[au.gone]")
+          .doesNotContain(SECRET_TOKEN)
+          .doesNotContain("$data")
+          .doesNotContain("package ");
+    }
+
+    @Test
+    @DisplayName("partial bulk refresh lists failed IDs only, never the compiler message")
+    void bulkPartial() {
+      when(storage.getAllRules()).thenReturn(List.of(secretRule("pa.ok"), broken("pa.bad")));
+
+      BulkResult result = service.refreshAll(Source.ADMIN, ReadMode.CACHED, "1.1.1.1");
+
+      String line = onlyLine();
+      assertThat(line)
+          .contains("result=partial")
+          .contains("failed=1")
+          .contains("failed_ids=[pa.bad]")
+          .doesNotContain(SECRET_TOKEN)
+          .doesNotContain(result.failures().get("pa.bad"));
+    }
+
+    @Test
+    @DisplayName("ID lists are sorted and capped at 50 with a +N suffix")
+    void idListsCapped() {
+      Rule[] rules = new Rule[53];
+      for (int i = 0; i < rules.length; i++) {
+        rules[i] = rule("cap.r%02d".formatted(52 - i)); // reverse order in, sorted out
+      }
+      when(storage.getAllRules()).thenReturn(List.of(rules));
+
+      service.refreshAll(Source.ADMIN, ReadMode.CACHED, null);
+
+      String line = onlyLine();
+      assertThat(line)
+          .contains("actor=-")
+          .contains("loaded=53")
+          .contains("loaded_ids=[cap.r00, cap.r01,");
+      assertThat(line).contains("cap.r49]+3").doesNotContain("cap.r50");
+    }
+
+    @Test
+    @DisplayName("bulk storage failure → result=storage_failed")
+    void bulkStorageFailure() {
+      when(storage.getAllRules()).thenThrow(new RuleStorageException("S3 timeout", null));
+
+      service.refreshAll(Source.ADMIN, ReadMode.CACHED, "10.0.0.1");
+
+      assertThat(onlyLine())
+          .contains("action=refresh_all")
+          .contains("actor=10.0.0.1")
+          .contains("result=storage_failed")
+          .contains("error=");
+    }
+
+    @Test
+    @DisplayName("refresh_rule: rule_id, result and 12-hex old/new digests")
+    void refreshRuleInstalled() {
+      Rule v1 = secretRule("au.one");
+      preload(v1);
+      appender.list.clear();
+      Rule v2 = changed(v1, "v2");
+      when(storage.getRule("au.one")).thenReturn(Optional.of(v2));
+
+      service.refreshOne("au.one", Source.ADMIN, true, "10.1.2.3");
+
+      String line = onlyLine();
+      assertThat(line)
+          .contains("action=refresh_rule")
+          .contains("source=admin")
+          .contains("actor=10.1.2.3")
+          .contains("rule_id=au.one")
+          .contains("result=installed")
+          .doesNotContain("error=")
+          .doesNotContain(SECRET_TOKEN);
+      String oldDigest = digestField(line, "old_digest");
+      String newDigest = digestField(line, "new_digest");
+      assertThat(oldDigest).matches(HEX12).isEqualTo(v1.contentDigest().substring(0, 12));
+      assertThat(newDigest).matches(HEX12).isEqualTo(v2.contentDigest().substring(0, 12));
+    }
+
+    @Test
+    @DisplayName("refresh_rule compile failure → error=compile_failed, no compiler message")
+    void refreshRuleCompileFailed() {
+      Rule v1 = secretRule("au.brk");
+      preload(v1);
+      appender.list.clear();
+      when(storage.getRule("au.brk")).thenReturn(Optional.of(broken("au.brk")));
+
+      SingleResult result = service.refreshOne("au.brk", Source.ADMIN, false, "10.1.2.3");
+
+      assertThat(result.error()).isNotBlank();
+      String line = onlyLine();
+      assertThat(line)
+          .contains("rule_id=au.brk")
+          .contains("result=failed")
+          .endsWith(" error=compile_failed")
+          .doesNotContain(result.error())
+          .doesNotContain("Unable to resolve")
+          .doesNotContain(SECRET_TOKEN);
+      // The previous version keeps serving, so old and new digest are the same.
+      assertThat(digestField(line, "old_digest")).isEqualTo(digestField(line, "new_digest"));
+    }
+
+    @Test
+    @DisplayName("refresh_rule storage failure → result=storage_failed error=storage_read_failed")
+    void refreshRuleStorageFailed() {
+      when(storage.getRule("au.sf")).thenThrow(new RuleStorageException("S3 down at key", null));
+
+      service.refreshOne("au.sf", Source.PUBSUB, false);
+
+      assertThat(onlyLine())
+          .contains("source=pubsub")
+          .contains("actor=-")
+          .contains("rule_id=au.sf")
+          .contains("result=storage_failed")
+          .endsWith(" error=storage_read_failed")
+          .doesNotContain("S3 down");
+    }
+
+    @Test
+    @DisplayName("a reconcile that changes nothing emits no audit line")
+    void quietReconcile() {
+      preload(rule("q.a"), rule("q.b"));
+      appender.list.clear();
+      when(storage.getAllRulesFromSource()).thenReturn(List.of(rule("q.a"), rule("q.b")));
+
+      service.reconcile();
+
+      assertThat(lines()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a reconcile that finds drift is audited as action=reconcile")
+    void driftReconcile() {
+      preload(rule("d.a"), rule("d.b"));
+      appender.list.clear();
+      when(storage.getAllRulesFromSource()).thenReturn(List.of(rule("d.a")));
+
+      service.reconcile();
+
+      assertThat(onlyLine())
+          .contains("action=reconcile")
+          .contains("source=reconcile")
+          .contains("actor=-")
+          .contains("removed_ids=[d.b]");
+    }
+
+    @Test
+    @DisplayName("remove_rule line carries rule_id and the removed digest")
+    void removeRule() {
+      Rule r = secretRule("au.rm");
+      preload(r);
+      appender.list.clear();
+
+      service.removeOne("au.rm", Source.PUBSUB);
+
+      String line = onlyLine();
+      assertThat(line)
+          .contains("action=remove_rule")
+          .contains("source=pubsub")
+          .contains("rule_id=au.rm")
+          .contains("result=removed")
+          .doesNotContain(SECRET_TOKEN);
+      assertThat(digestField(line, "old_digest"))
+          .matches(HEX12)
+          .isEqualTo(r.contentDigest().substring(0, 12));
     }
   }
 }
